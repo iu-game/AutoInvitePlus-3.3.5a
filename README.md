@@ -1,1 +1,1 @@
-./README.md
+/workspaces/AutoInvitePlus-3.3.5a/AutoInvitePlus/README.md
