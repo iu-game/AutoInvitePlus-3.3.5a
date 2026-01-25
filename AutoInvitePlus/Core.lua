@@ -3,7 +3,7 @@
 -- Original authors: Martag of Greymane, Matthias Fechner
 
 local ADDON_NAME = "AutoInvitePlus"
-local VERSION = "4.3.9"
+local VERSION = "4.3.10"
 
 -- Create main addon namespace
 AutoInvitePlus = {}

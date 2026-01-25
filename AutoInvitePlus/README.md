@@ -1,4 +1,4 @@
-# AutoInvite Plus v4.3.2
+# AutoInvite Plus v4.3.10
 
 A comprehensive raid organization suite for World of Warcraft 3.3.5a (WotLK) with LFM/LFG browser, auto-invite system, and inspection engine.
 
@@ -172,6 +172,88 @@ Customize automatic whisper responses:
 - If still occurring, try `/reload`
 
 ## Changelog
+
+### v4.3.10
+- **Improved Achievement Lookup for Request Invite:**
+  - Added `NormalizeRaidKey` function to handle different raid key formats
+  - Achievement lookup now tries multiple variations (e.g., "ICC" finds ICC25H achievements)
+  - Strips spaces and normalizes case for consistent matching
+  - Falls back to checking all size/mode combinations for the base raid
+  - Request Invite whisper now reliably includes best achievement at the end
+
+### v4.3.9
+- **Fixed Add Group Popup Edit Boxes:**
+  - Replaced bare InputBoxTemplate with styled edit boxes for Tank/Healer/DPS inputs
+  - Replaced bare InputBoxTemplate with styled edit boxes for GS/iLvl inputs
+  - Edit boxes now have proper dark backgrounds and borders matching the addon style
+- **Fixed Enroll Popup Achievement List:**
+  - Changed from SimpleHTML to ScrollingMessageFrame for proper hyperlink support
+  - Achievement links now show tooltips on hover (OnHyperlinkEnter/OnHyperlinkLeave)
+  - Achievement links are clickable (OnHyperlinkClick)
+  - Removed visual overlap issues with color codes
+  - Added mouse wheel scrolling support
+- **GearScore Consistency:**
+  - All GS displays now use the same calculation function (GUI.CalculatePlayerGS)
+  - Footer, Enroll popup, and Request Invite whisper all show consistent values
+  - Prioritizes GearScore_GetScore from GearScoreLite when available
+
+### v4.3.8
+- Increased Add Group popup size for better element fitting
+- Fixed class checkbox spacing in Add Group popup
+- Increased Enroll popup size for achievement links
+- Added achievement links with proper formatting in Enroll popup
+
+### v4.3.7
+- **GearScore Calculation:**
+  - Implemented exact GearScoreLite formula for cases when addon is not available
+  - Proper slot modifiers (2H weapon = 2.0x, ranged = 0.3164x, etc.)
+  - Hunter special handling (melee weapons = 0.3164x, ranged = 5.3224x)
+  - Titan's Grip dual 2H weapon handling (0.5x each)
+  - Quality scaling based on item rarity
+- **GS/iLvl Footer Display:**
+  - Added GearScore and item level display to main window footer
+  - Color-coded GS based on score tier
+  - Auto-updates when equipment changes
+- **Blizzard Raid Browser Integration:**
+  - Hooks into WoW's SearchLFGGetResults API
+  - Imports listings from Blizzard's raid browser into LFM Browser
+  - Shows [LFG Tool] indicator for Blizzard-sourced listings
+- **Waitlist Whisper Fix:**
+  - Fixed waitlist notification whispers not being sent
+  - Added pcall wrapper for SendChatMessage error handling
+  - Removed duplicate message sending in Queue.lua
+
+### v4.3.6
+- Fixed Composition tab raid lockout detection
+- Added waitlist whisper notifications when players are added to waitlist
+- Improved error handling for chat message sending
+
+### v4.3.5
+- Fixed LFM tab tree browser refresh preserving scroll position
+- Fixed Composition tab role bar calculations
+- Added "Refresh" button inline with "Hide Locked" checkbox
+- Cleaned up unused code paths
+
+### v4.3.4
+- **Auto-Broadcast System:**
+  - Add Group and Enroll now auto-broadcast messages at configurable intervals
+  - "Stop BC" button appears when broadcasting is active
+  - Broadcast status shows countdown to next message
+  - LFG broadcasts automatically stop when you join a group
+- **Request Invite Button:**
+  - Replaced Whisper/Invite buttons with "Request Invite" in details panel
+  - Sends detailed whisper with class, spec, role, GS, iLvl, and achievement
+  - "Quick Req" button for sending just the invite keyword
+- **Enhanced LFG Messages:**
+  - LFG enrollment messages now include class, spec, and iLvl
+  - Format: "LFG ICC25H - Warrior (Arms) DPS, GS: 5200, iLvl: 245"
+
+### v4.3.3
+- **Spam Fix:** Broadcast now sends to ALL selected channels simultaneously
+- **Response Messages:** Added configurable auto-responses for invite/reject/waitlist
+- **Blacklist Mode:** Choose between "Flag" (highlight) or "Reject" (auto-decline)
+- Fixed tree browser state preservation (scroll position, expand/collapse)
+- Filter dropdown auto-populates with detected raid types
 
 ### v4.3.2
 - **Spec-Aware Buff/Debuff Detection:**

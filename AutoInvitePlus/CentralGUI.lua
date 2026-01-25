@@ -5020,15 +5020,84 @@ function GUI.CalculatePlayerIlvl()
     return 200 -- Default fallback
 end
 
+-- Normalize raid key to match RaidAchievements keys
+function GUI.NormalizeRaidKey(raidKey)
+    if not raidKey then return nil end
+
+    -- Remove spaces and convert to uppercase
+    local normalized = raidKey:upper():gsub("%s+", "")
+
+    -- Direct match first
+    if GUI.RaidAchievements[normalized] then
+        return normalized
+    end
+
+    -- Try common variations
+    local variations = {
+        normalized,
+        normalized .. "H",  -- Add heroic suffix
+        normalized .. "N",  -- Add normal suffix
+        normalized .. "25H",
+        normalized .. "25N",
+        normalized .. "10H",
+        normalized .. "10N",
+    }
+
+    -- Also try stripping size/mode suffixes to get base raid
+    local baseRaid = normalized:match("^(%a+)") or normalized
+    if baseRaid ~= normalized then
+        table.insert(variations, baseRaid .. "25H")
+        table.insert(variations, baseRaid .. "25N")
+        table.insert(variations, baseRaid .. "10H")
+        table.insert(variations, baseRaid .. "10N")
+    end
+
+    for _, variant in ipairs(variations) do
+        if GUI.RaidAchievements[variant] then
+            return variant
+        end
+    end
+
+    return normalized
+end
+
 -- Get player's achievements for a raid
 function GUI.GetPlayerAchievementsForRaid(raidKey)
-    local achievements = GUI.RaidAchievements[raidKey] or {}
+    local normalizedKey = GUI.NormalizeRaidKey(raidKey)
+    local achievements = GUI.RaidAchievements[normalizedKey] or {}
     local playerHas = {}
 
     for _, achieve in ipairs(achievements) do
         local _, name, _, completed = GetAchievementInfo(achieve.id)
         if completed then
             table.insert(playerHas, {id = achieve.id, name = name or achieve.name})
+        end
+    end
+
+    -- If no achievements found with normalized key, try all variations
+    if #playerHas == 0 and raidKey then
+        local baseRaid = raidKey:upper():gsub("%s+", ""):match("^(%a+)")
+        if baseRaid then
+            -- Try all size/mode combinations for this base raid
+            local tryKeys = {
+                baseRaid .. "25H", baseRaid .. "25N",
+                baseRaid .. "10H", baseRaid .. "10N",
+                baseRaid .. "25", baseRaid .. "10",
+            }
+            for _, tryKey in ipairs(tryKeys) do
+                local tryAchievements = GUI.RaidAchievements[tryKey]
+                if tryAchievements then
+                    for _, achieve in ipairs(tryAchievements) do
+                        local _, name, _, completed = GetAchievementInfo(achieve.id)
+                        if completed then
+                            table.insert(playerHas, {id = achieve.id, name = name or achieve.name})
+                        end
+                    end
+                    if #playerHas > 0 then
+                        break  -- Found achievements, stop searching
+                    end
+                end
+            end
         end
     end
 
