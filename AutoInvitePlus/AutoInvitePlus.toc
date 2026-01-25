@@ -1,0 +1,40 @@
+## Interface: 30300
+## Title: AutoInvite Plus
+## Notes: Complete raid organization suite with LFM/LFG browser and inspection engine
+## Author: iuGames
+## Version: 4.3.9
+## SavedVariables: AutoInvitePlusDB
+## OptionalDeps: GearScore, GearScoreLite, PlayerScore
+
+# Core functionality
+Core.lua
+Blacklist.lua
+Queue.lua
+Waitlist.lua
+Promote.lua
+MessageComposer.lua
+
+# Raid organization (existing)
+RaidComposition.lua
+LFMBrowser.lua
+RosterManager.lua
+Integrations.lua
+
+# New: Data layer (must load before GUI)
+GroupTracker.lua
+InspectionEngine.lua
+
+# New: Tree browser
+TreeBrowser.lua
+
+# Embedded panels
+panels\BlacklistPanel.lua
+panels\SettingsPanel.lua
+
+# New: Central GUI controller
+CentralGUI.lua
+
+# UI definitions (XML loads last)
+UI.xml
+CompositionUI.xml
+CentralGUI.xml
