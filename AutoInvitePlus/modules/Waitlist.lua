@@ -481,7 +481,11 @@ local function CreateWaitlistUI()
     notePlaceholder:SetTextColor(0.5, 0.5, 0.5)
     noteInput.placeholder = notePlaceholder
     noteInput:SetScript("OnTextChanged", function(self)
-        self.placeholder:SetShown(self:GetText() == "")
+        if self:GetText() == "" then
+            self.placeholder:Show()
+        else
+            self.placeholder:Hide()
+        end
     end)
 
     local addBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")

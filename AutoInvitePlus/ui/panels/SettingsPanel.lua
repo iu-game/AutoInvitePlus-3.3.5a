@@ -785,8 +785,8 @@ function SP.Create(parent)
     frame.checks.chatScan = scanCheck
 
     local scanNote = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    scanNote:SetPoint("LEFT", scanCheck, "RIGHT", 150, 0)
-    scanNote:SetText("|cFF888888(Uses Listen Channels from section 4)|r")
+    scanNote:SetPoint("LEFT", scanCheck, "RIGHT", 290, 0)
+    scanNote:SetText("|cFF888888(Uses channels from section 4)|r")
     y = y - 26
 
     -- Cache duration

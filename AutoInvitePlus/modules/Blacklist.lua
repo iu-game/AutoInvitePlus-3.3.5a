@@ -597,7 +597,11 @@ local function CreateBlacklistUI()
     reasonBox.placeholder = reasonPlaceholder
 
     reasonBox:SetScript("OnTextChanged", function(self)
-        self.placeholder:SetShown(self:GetText() == "")
+        if self:GetText() == "" then
+            self.placeholder:Show()
+        else
+            self.placeholder:Hide()
+        end
     end)
 
     local addBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")

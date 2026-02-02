@@ -2464,6 +2464,18 @@ function GUI.CreateBrowserTab(container, tabType)
         elseif tab == "lfg" then
             GUI.LfgEnrollments = {}
             if AIP.ChatScanner then AIP.ChatScanner.Players = {} end
+            -- Also clear LFG entries from the queue
+            if AIP.db and AIP.db.queue then
+                for i = #AIP.db.queue, 1, -1 do
+                    if AIP.db.queue[i].isLfgEnrollment then
+                        table.remove(AIP.db.queue, i)
+                    end
+                end
+            end
+            -- Clear DataBus LFG listings if available
+            if AIP.DataBus and AIP.DataBus.ClearLFGListings then
+                AIP.DataBus.ClearLFGListings()
+            end
             AIP.Print("LFG entries cleared")
         elseif tab == "waitlist" then
             if AIP.db then AIP.db.waitlist = {} end
@@ -3976,6 +3988,7 @@ end
 
 -- Refresh browser tab (preserves scroll position and expand/collapse state)
 function GUI.RefreshBrowserTab(tabType, forceReset)
+    if not GUI.Frame or not GUI.Frame.tabContents then return end
     local container = GUI.Frame.tabContents[tabType]
     if not container then return end
 
@@ -6638,18 +6651,64 @@ function GUI.CalculatePlayerIlvl()
     return 200 -- Default fallback
 end
 
--- Get player's achievements for a raid
+-- Raid instance grouping - all variants of same instance
+GUI.RaidInstanceVariants = {
+    ICC = {"ICC25H", "ICC25N", "ICC10H", "ICC10N"},
+    RS = {"RS25H", "RS25N", "RS10H", "RS10N"},
+    TOC = {"TOGC25", "TOGC10", "TOC25", "TOC10"},
+    VOA = {"VOA25", "VOA10"},
+    ULDUAR = {"ULDUAR25", "ULDUAR10"},
+    NAXX = {"NAXX25", "NAXX10"},
+    EoE = {"EoE25", "EoE10"},
+    OS = {"OS25", "OS10"},
+    ONY = {"ONY25", "ONY10"},
+}
+
+-- Map specific raid keys to their instance group
+GUI.RaidToInstance = {
+    ICC25H = "ICC", ICC25N = "ICC", ICC10H = "ICC", ICC10N = "ICC", ICC25 = "ICC", ICC10 = "ICC", ICC = "ICC",
+    RS25H = "RS", RS25N = "RS", RS10H = "RS", RS10N = "RS", RS25 = "RS", RS10 = "RS", RS = "RS",
+    TOGC25 = "TOC", TOGC10 = "TOC", TOC25 = "TOC", TOC10 = "TOC", TOC = "TOC", TOGC = "TOC",
+    VOA25 = "VOA", VOA10 = "VOA", VOA = "VOA",
+    ULDUAR25 = "ULDUAR", ULDUAR10 = "ULDUAR", ULDUAR = "ULDUAR",
+    NAXX25 = "NAXX", NAXX10 = "NAXX", NAXX = "NAXX",
+    EoE25 = "EoE", EoE10 = "EoE", EoE = "EoE",
+    OS25 = "OS", OS10 = "OS", OS = "OS",
+    ONY25 = "ONY", ONY10 = "ONY", ONY = "ONY",
+}
+
+-- Get player's best achievement for a raid instance (checks all variants, returns best)
 function GUI.GetPlayerAchievementsForRaid(raidKey)
-    local achievements = GUI.RaidAchievements[raidKey] or {}
+    if not raidKey then return {} end
+
+    -- Find the instance group for this raid key
+    local instanceGroup = GUI.RaidToInstance[raidKey]
+
+    -- Get all variant keys to check (ordered by prestige: 25H > 25N > 10H > 10N)
+    local keysToCheck
+    if instanceGroup and GUI.RaidInstanceVariants[instanceGroup] then
+        keysToCheck = GUI.RaidInstanceVariants[instanceGroup]
+    else
+        -- Fallback: just check the exact key
+        keysToCheck = {raidKey}
+    end
+
+    -- Collect ALL completed achievements across all variants
     local playerHas = {}
 
-    for _, achieve in ipairs(achievements) do
-        local _, name, _, completed = GetAchievementInfo(achieve.id)
-        if completed then
-            table.insert(playerHas, {id = achieve.id, name = name or achieve.name})
+    for _, key in ipairs(keysToCheck) do
+        local achievements = GUI.RaidAchievements[key] or {}
+        for _, achieve in ipairs(achievements) do
+            local _, name, _, completed = GetAchievementInfo(achieve.id)
+            if completed then
+                table.insert(playerHas, {id = achieve.id, name = name or achieve.name, raidKey = key})
+                -- Only take first (best) achievement per variant
+                break
+            end
         end
     end
 
+    -- Already sorted by prestige due to keysToCheck order (25H first, etc.)
     return playerHas
 end
 

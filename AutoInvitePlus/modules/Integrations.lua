@@ -692,13 +692,13 @@ function Int.ScanRaidBrowser()
     local listings = {}
 
     -- Check if SearchLFG functions exist (WotLK 3.3.5)
-    if not SearchLFGGetResults then
-        AIP.Debug("RaidBrowser: SearchLFGGetResults not available")
+    if not SearchLFGGetResults or not SearchLFGGetNumResults then
+        AIP.Debug("RaidBrowser: SearchLFG functions not available")
         return listings
     end
 
     -- Try to get results from the Raid Browser
-    local numResults = SearchLFGGetResults()
+    local numResults = SearchLFGGetNumResults()
     if not numResults or numResults == 0 then
         return listings
     end

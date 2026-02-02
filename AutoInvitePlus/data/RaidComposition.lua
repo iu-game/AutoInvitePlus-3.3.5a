@@ -2393,7 +2393,7 @@ function Comp.GetBuffsByCategory()
 
                 -- Build provider names list (for backwards compatibility)
                 local providerNames = {}
-                local providers = raid.buffProviders[buffName] or {}
+                local providers = (raid.buffProviders and raid.buffProviders[buffName]) or {}
                 for _, p in ipairs(providers) do
                     if type(p) == "table" then
                         table.insert(providerNames, p.name)

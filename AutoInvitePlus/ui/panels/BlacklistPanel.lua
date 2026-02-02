@@ -186,7 +186,11 @@ function BP.Create(parent)
     namePlaceholder:SetText("Player name")
     namePlaceholder:SetTextColor(0.5, 0.5, 0.5)
     nameInput:SetScript("OnTextChanged", function(self)
-        namePlaceholder:SetShown(self:GetText() == "")
+        if self:GetText() == "" then
+            namePlaceholder:Show()
+        else
+            namePlaceholder:Hide()
+        end
     end)
 
     local reasonInput = CreateFrame("EditBox", "AIPBlacklistReasonInput", frame, "InputBoxTemplate")
@@ -200,7 +204,11 @@ function BP.Create(parent)
     reasonPlaceholder:SetText("Reason (optional)")
     reasonPlaceholder:SetTextColor(0.5, 0.5, 0.5)
     reasonInput:SetScript("OnTextChanged", function(self)
-        reasonPlaceholder:SetShown(self:GetText() == "")
+        if self:GetText() == "" then
+            reasonPlaceholder:Show()
+        else
+            reasonPlaceholder:Hide()
+        end
     end)
 
     local addBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")

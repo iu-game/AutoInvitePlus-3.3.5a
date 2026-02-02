@@ -564,6 +564,20 @@ function DB.GetLFGListings()
     return results
 end
 
+-- Clear all received LFG events
+function DB.ClearLFGListings()
+    for sender, events in pairs(DB.State.receivedEvents) do
+        events.LFG = nil
+    end
+end
+
+-- Clear all received LFM events
+function DB.ClearLFMListings()
+    for sender, events in pairs(DB.State.receivedEvents) do
+        events.LFM = nil
+    end
+end
+
 -- Get online peers
 function DB.GetOnlinePeers()
     local results = {}

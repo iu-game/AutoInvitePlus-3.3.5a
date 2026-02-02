@@ -232,7 +232,7 @@ function Parsers.ParseGearScore(message)
                 end
             end
             -- Handle comma separator (5,800)
-            return tonumber(gs:gsub(",", "")) or nil
+            return tonumber((gs:gsub(",", ""))) or nil
         end
     end
 
