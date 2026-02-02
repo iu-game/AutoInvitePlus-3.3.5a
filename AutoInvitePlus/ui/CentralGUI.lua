@@ -4411,6 +4411,8 @@ function GUI.UpdateDetailsPanel(container, data)
     local ilvlText = "-"
     if data.ilvlMin and data.ilvlMin > 0 then
         ilvlText = tostring(data.ilvlMin) .. "+"
+    elseif data.ilvl and data.ilvl > 0 then
+        ilvlText = tostring(data.ilvl) .. "+"
     end
     if container.ilvlValue then
         container.ilvlValue:SetText(ilvlText)
@@ -4450,6 +4452,9 @@ function GUI.UpdateDetailsPanel(container, data)
         else
             achieveText = "ID: " .. tostring(data.achievementId)
         end
+    elseif data.achievement and data.achievement ~= "" then
+        -- Parsed achievement name from message text
+        achieveText = data.achievement
     end
     if container.achieveValue then
         container.achieveValue:SetText(achieveText)
@@ -4459,6 +4464,8 @@ function GUI.UpdateDetailsPanel(container, data)
     local keywordText = "-"
     if data.inviteKeyword and data.inviteKeyword ~= "" then
         keywordText = '"' .. data.inviteKeyword .. '"'
+    elseif data.triggerKey and data.triggerKey ~= "" then
+        keywordText = '"' .. data.triggerKey .. '"'
     end
     if container.keywordValue then
         container.keywordValue:SetText(keywordText)
@@ -4592,9 +4599,14 @@ function GUI.UpdateDetailsPanel(container, data)
         end)
     end
 
-    -- Total filled (from composition)
+    -- Total filled - prefer parsed [current/max] format, fall back to composition calculation
     local totalFilledText = "-"
-    if data.tanks or data.healers or data.mdps or data.rdps then
+    if data.filledCurrent and data.filledMax then
+        -- Use parsed filled count from [current/max] format
+        local color = data.filledCurrent >= data.filledMax and "|cFF00FF00" or "|cFFFFFF00"
+        totalFilledText = color .. data.filledCurrent .. "/" .. data.filledMax .. "|r"
+    elseif data.tanks or data.healers or data.mdps or data.rdps then
+        -- Calculate from role composition
         local current = (data.tanks and data.tanks.current or 0) +
                        (data.healers and data.healers.current or 0) +
                        (data.mdps and data.mdps.current or 0) +

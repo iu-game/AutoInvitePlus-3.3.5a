@@ -57,6 +57,7 @@ function CS.AddGroup(info)
         existing.time = info.time
         existing.channel = info.channel
         existing.isOwn = info.isOwn or existing.isOwn
+        existing.isDataBus = info.isDataBus or existing.isDataBus
         -- Extended group info fields
         existing.gsMin = info.gsMin or existing.gsMin
         existing.ilvlMin = info.ilvlMin or existing.ilvlMin
@@ -73,12 +74,17 @@ function CS.AddGroup(info)
             existing.rdps = {current = (info.dps.current or 0) - halfCurrent, needed = (info.dps.needed or 0) - halfNeeded}
         end
         existing.achievementId = info.achievementId or existing.achievementId
+        existing.achievement = info.achievement or existing.achievement
         existing.inviteKeyword = info.inviteKeyword or existing.inviteKeyword
+        existing.triggerKey = info.triggerKey or info.inviteKeyword or existing.triggerKey
         existing.selectedClasses = info.selectedClasses or existing.selectedClasses
         existing.lookingForClasses = info.lookingForClasses or existing.lookingForClasses
         existing.roleSpecs = info.roleSpecs or existing.roleSpecs
         existing.lookingForSpecs = info.lookingForSpecs or existing.lookingForSpecs
         existing.note = info.note or existing.note
+        existing.ilvl = info.ilvl or existing.ilvl
+        existing.filledCurrent = info.filledCurrent or existing.filledCurrent
+        existing.filledMax = info.filledMax or existing.filledMax
     else
         -- Handle backwards compatibility for dps -> mdps/rdps
         local mdpsVal = info.mdps
@@ -101,6 +107,7 @@ function CS.AddGroup(info)
             channel = info.channel,
             time = info.time,
             isOwn = info.isOwn,
+            isDataBus = info.isDataBus,
             isGroup = true,
             -- Extended group info fields
             gsMin = info.gsMin,
@@ -110,12 +117,17 @@ function CS.AddGroup(info)
             mdps = mdpsVal,
             rdps = rdpsVal,
             achievementId = info.achievementId,
+            achievement = info.achievement,
             inviteKeyword = info.inviteKeyword,
+            triggerKey = info.triggerKey or info.inviteKeyword,
             selectedClasses = info.selectedClasses,
             lookingForClasses = info.lookingForClasses,
             roleSpecs = info.roleSpecs,
             lookingForSpecs = info.lookingForSpecs,
             note = info.note,
+            ilvl = info.ilvl,
+            filledCurrent = info.filledCurrent,
+            filledMax = info.filledMax,
         }
         CS.PruneGroups()
     end
@@ -693,23 +705,39 @@ local function OnDataBusLFM(event)
     if not CS.Config.useDataBus then return end
     if not event or not event.sender or not event.data then return end
 
+    local data = event.data
+
     -- Create group info from DataBus event
+    -- Note: tanks/healers/mdps/rdps must be at top level for tree view display
     local info = {
         author = event.sender,
-        raid = event.data.raid,
-        raidCategory = event.data.raidCategory,
+        raid = data.raid,
+        raidCategory = data.raidCategory,
+        -- Role composition at top level (required for tree view)
+        tanks = data.tanks,
+        healers = data.healers,
+        mdps = data.mdps,
+        rdps = data.rdps,
+        dps = data.dps,  -- Backwards compatibility (will be converted to mdps/rdps if needed)
+        -- Also store in composition for backwards compatibility
         composition = {
-            tanks = event.data.tanks,
-            healers = event.data.healers,
-            dps = event.data.dps,
+            tanks = data.tanks,
+            healers = data.healers,
+            mdps = data.mdps,
+            rdps = data.rdps,
+            dps = data.dps,
         },
-        gs = event.data.gsMin,
-        message = event.data.note or "",
+        gs = data.gsMin,
+        gsMin = data.gsMin,
+        ilvlMin = data.ilvlMin,
+        message = data.note or "",
+        note = data.note,
         channel = "DataBus",
         time = event.timestamp,
         isLFM = true,
         isDataBus = true,           -- Mark as coming from DataBus
-        triggerKey = event.data.triggerKey,
+        triggerKey = data.triggerKey,
+        inviteKeyword = data.triggerKey,
         version = event.version,
     }
 

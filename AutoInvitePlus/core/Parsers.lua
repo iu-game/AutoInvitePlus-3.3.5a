@@ -306,6 +306,128 @@ function Parsers.DetectClass(message)
     return nil
 end
 
+-- Parse AIP-formatted role composition: [T:0/2 H:0/6 M:0/8 R:0/9]
+-- Returns tanks, healers, mdps, rdps tables with {current, needed} or nil if not found
+function Parsers.ParseAIPComposition(message)
+    if not message then return nil end
+
+    -- Pattern: [T:current/needed H:current/needed M:current/needed R:current/needed]
+    local tc, tn, hc, hn, mc, mn, rc, rn = message:match("%[T:(%d+)/(%d+)%s+H:(%d+)/(%d+)%s+M:(%d+)/(%d+)%s+R:(%d+)/(%d+)%]")
+
+    if tc and tn and hc and hn and mc and mn and rc and rn then
+        return {
+            tanks = {current = tonumber(tc), needed = tonumber(tn)},
+            healers = {current = tonumber(hc), needed = tonumber(hn)},
+            mdps = {current = tonumber(mc), needed = tonumber(mn)},
+            rdps = {current = tonumber(rc), needed = tonumber(rn)},
+        }
+    end
+
+    return nil
+end
+
+-- Parse AIP-formatted filled count: [0/25] or [12/25]
+-- Returns current, max or nil if not found
+function Parsers.ParseFilledCount(message)
+    if not message then return nil, nil end
+
+    -- Pattern: [current/max] - but NOT the role composition format
+    -- Look for [number/number] that's NOT followed by ] (which would be part of role comp)
+    local current, max = message:match("%[(%d+)/(%d+)%]")
+
+    if current and max then
+        local c, m = tonumber(current), tonumber(max)
+        -- Validate it's a raid size (5, 10, 25, 40)
+        if m and (m == 5 or m == 10 or m == 25 or m == 40) then
+            return c, m
+        end
+    end
+
+    return nil, nil
+end
+
+-- Parse iLvl from message: iLvl:264+ or ilvl:264 or iLvl 264
+function Parsers.ParseItemLevel(message)
+    if not message then return nil end
+
+    -- Try various patterns
+    local ilvl = message:match("[iI][lL]v[lL]:?%s*(%d+)")
+    if ilvl then
+        return tonumber(ilvl)
+    end
+
+    -- Try "item level 264" format
+    ilvl = message:match("[iI]tem%s*[lL]evel:?%s*(%d+)")
+    if ilvl then
+        return tonumber(ilvl)
+    end
+
+    return nil
+end
+
+-- Parse whisper keyword from message: w/ "invme-auto" or w/"keyword"
+function Parsers.ParseWhisperKeyword(message)
+    if not message then return nil end
+
+    -- Pattern: w/ "keyword" or w/"keyword" (with quotes)
+    local keyword = message:match('w/%s*"([^"]+)"')
+    if keyword then
+        return keyword
+    end
+
+    -- Pattern: w/ 'keyword' (single quotes)
+    keyword = message:match("w/%s*'([^']+)'")
+    if keyword then
+        return keyword
+    end
+
+    -- Pattern: whisper "keyword"
+    keyword = message:match('[wW]hisper%s*"([^"]+)"')
+    if keyword then
+        return keyword
+    end
+
+    return nil
+end
+
+-- Parse achievement from message: [Achievement Name] at the end
+-- Must distinguish from other bracketed content like [T:0/2...]
+function Parsers.ParseAchievement(message)
+    if not message then return nil end
+
+    -- Achievement links in WoW look like |cffffff00|Hachievement:...|h[Name]|h|r
+    -- But in plain text they appear as [Achievement Name]
+    -- Look for bracketed text that's NOT a role composition or class list
+
+    -- First, try to find achievement link format
+    local achieveName = message:match("|Hachievement:[^|]+|h%[([^%]]+)%]|h")
+    if achieveName then
+        return achieveName
+    end
+
+    -- Look for [Text] at the end of message that looks like an achievement
+    -- Skip patterns that look like role compositions [T:...] or class codes [T:BD,BDK...]
+    local lastBracket = message:match("%[([^%]]+)%]%s*$")
+    if lastBracket then
+        -- Skip if it looks like role composition (contains T: H: M: R: with numbers)
+        if lastBracket:match("T:%d") or lastBracket:match("H:%d") then
+            return nil
+        end
+        -- Skip if it looks like class codes (short comma-separated codes)
+        if lastBracket:match("^[A-Z][A-Za-z]*,[A-Z]") then
+            return nil
+        end
+        -- Skip if it's just numbers/raid size
+        if lastBracket:match("^%d+/%d+$") then
+            return nil
+        end
+        -- Looks like an achievement name
+        return lastBracket
+    end
+
+    return nil
+end
+
 -- Parse need count from "lf2m" style patterns
 function Parsers.ParseNeedCount(message, role)
     if not message or not role then return 0 end
@@ -644,18 +766,73 @@ function Parsers.ParseChatMessage(message, author, channel)
 
     -- Detect GearScore
     info.gs = Parsers.ParseGearScore(message)
+    info.gsMin = info.gs  -- Alias for compatibility
+
+    -- Detect item level
+    info.ilvl = Parsers.ParseItemLevel(message)
+    info.ilvlMin = info.ilvl  -- Alias for compatibility
+
+    -- Detect whisper keyword
+    info.inviteKeyword = Parsers.ParseWhisperKeyword(message)
+    info.triggerKey = info.inviteKeyword  -- Alias for compatibility
+
+    -- Detect achievement
+    info.achievement = Parsers.ParseAchievement(message)
+
+    -- Detect filled count [current/max]
+    local filledCurrent, filledMax = Parsers.ParseFilledCount(message)
+    if filledCurrent and filledMax then
+        info.filledCurrent = filledCurrent
+        info.filledMax = filledMax
+    end
 
     -- If LFM, parse composition needs and looking for specs
     if info.isLFM then
-        info.composition.tanks.needed = Parsers.ParseNeedCount(message, "tank")
-        info.composition.healers.needed = Parsers.ParseNeedCount(message, "healer")
-        info.composition.dps.needed = Parsers.ParseNeedCount(message, "dps")
+        -- First try AIP-specific format: [T:0/2 H:0/6 M:0/8 R:0/9]
+        local aipComp = Parsers.ParseAIPComposition(message)
 
-        -- If no specific needs detected but it's LFM, assume general
-        if info.composition.tanks.needed == 0 and
-           info.composition.healers.needed == 0 and
-           info.composition.dps.needed == 0 then
-            info.composition.dps.needed = 1  -- Assume at least 1 spot
+        if aipComp then
+            -- Use parsed AIP format (includes current counts)
+            info.tanks = aipComp.tanks
+            info.healers = aipComp.healers
+            info.mdps = aipComp.mdps
+            info.rdps = aipComp.rdps
+            -- Calculate total DPS for backwards compatibility
+            local totalDpsCurrent = (aipComp.mdps.current or 0) + (aipComp.rdps.current or 0)
+            local totalDpsNeeded = (aipComp.mdps.needed or 0) + (aipComp.rdps.needed or 0)
+            info.dps = {current = totalDpsCurrent, needed = totalDpsNeeded}
+
+            -- Store in nested composition (backwards compatibility)
+            info.composition.tanks.needed = aipComp.tanks.needed
+            info.composition.tanks.current = aipComp.tanks.current
+            info.composition.healers.needed = aipComp.healers.needed
+            info.composition.healers.current = aipComp.healers.current
+            info.composition.dps.needed = totalDpsNeeded
+            info.composition.dps.current = totalDpsCurrent
+        else
+            -- Fallback to generic parsing
+            local tanksNeeded = Parsers.ParseNeedCount(message, "tank")
+            local healersNeeded = Parsers.ParseNeedCount(message, "healer")
+            local dpsNeeded = Parsers.ParseNeedCount(message, "dps")
+
+            -- If no specific needs detected but it's LFM, assume general
+            if tanksNeeded == 0 and healersNeeded == 0 and dpsNeeded == 0 then
+                dpsNeeded = 1  -- Assume at least 1 spot
+            end
+
+            -- Store in nested composition (backwards compatibility)
+            info.composition.tanks.needed = tanksNeeded
+            info.composition.healers.needed = healersNeeded
+            info.composition.dps.needed = dpsNeeded
+
+            -- Also store at top level for tree view display
+            info.tanks = {current = 0, needed = tanksNeeded}
+            info.healers = {current = 0, needed = healersNeeded}
+            -- Split DPS into mdps/rdps (half each, as we can't determine from chat)
+            local halfDps = math.floor(dpsNeeded / 2)
+            info.mdps = {current = 0, needed = halfDps}
+            info.rdps = {current = 0, needed = dpsNeeded - halfDps}
+            info.dps = {current = 0, needed = dpsNeeded}
         end
 
         -- Parse looking for specs (class/spec preferences)
