@@ -59,8 +59,8 @@ function AIP.IsInQueue(name)
     return false, nil, nil
 end
 
--- Add player to queue
-function AIP.AddToQueue(name, message)
+-- Add player to queue (with optional role, gs, class info)
+function AIP.AddToQueue(name, message, role, gs, class)
     if not EnsureQueueDefaults() then return false end
     if not name or name:trim() == "" then return false end
 
@@ -73,7 +73,10 @@ function AIP.AddToQueue(name, message)
     end
 
     -- Check blacklist
-    local isBlacklisted, blacklistEntry = AIP.IsBlacklisted(name)
+    local isBlacklisted, blacklistEntry = false, nil
+    if AIP.IsBlacklisted then
+        isBlacklisted, blacklistEntry = AIP.IsBlacklisted(name)
+    end
 
     -- If blacklist mode is "reject", auto-reject blacklisted players
     if isBlacklisted and AIP.db.blacklistMode == "reject" then
@@ -86,9 +89,16 @@ function AIP.AddToQueue(name, message)
     -- Proper name capitalization
     local properName = name:sub(1,1):upper() .. name:sub(2):lower()
 
-    -- Try to get class and GS if available
-    local playerClass, playerGS
-    if AIP.Integrations then
+    -- Check if player is a favorite
+    local isFavorite = AIP.IsPlayerFavorite and AIP.IsPlayerFavorite(name) or false
+
+    -- Check if guild member
+    local isGuildMember = AIP.IsPlayerInGuild and AIP.IsPlayerInGuild(name) or false
+
+    -- Try to get class and GS if not provided
+    local playerClass = class
+    local playerGS = gs
+    if not playerGS and AIP.Integrations and AIP.Integrations.GetPlayerGS then
         playerGS = AIP.Integrations.GetPlayerGS(name)
     end
 
@@ -97,69 +107,123 @@ function AIP.AddToQueue(name, message)
         name = properName,
         message = message or "",
         time = time(),
+        role = role,
         isBlacklisted = isBlacklisted,
         blacklistReason = blacklistEntry and blacklistEntry.reason or nil,
+        isFavorite = isFavorite,
+        isGuildMember = isGuildMember,
         class = playerClass,
         gs = playerGS,
     }
 
-    table.insert(AIP.db.queue, entry)
-
-    local queueMsg = properName .. " added to queue (" .. #AIP.db.queue .. " in queue)"
-    if isBlacklisted then
-        queueMsg = queueMsg .. " |cFFFF0000[BLACKLISTED: " .. (entry.blacklistReason or "no reason") .. "]|r"
-    end
-    AIP.Print(queueMsg)
-
-    -- Update UI if open
-    if AIP.UpdateQueueUI then
-        AIP.UpdateQueueUI()
-    end
-
-    -- Auto-show queue window - prefer CentralGUI if available
-    if AIP.db.useQueue then
-        if AIP.CentralGUI then
-            -- Ensure frame exists
-            if not AIP.CentralGUI.Frame then
-                AIP.CentralGUI.CreateFrame()
-            end
-
-            -- Get the LFM container and switch to Queue sub-tab
-            local container = AIP.CentralGUI.Frame and AIP.CentralGUI.Frame.tabContents and AIP.CentralGUI.Frame.tabContents["lfm"]
-            if container then
-                -- Switch to Queue sub-tab so the new entry is visible
-                if container.queueSubTab ~= "queue" then
-                    container.queueSubTab = "queue"
-                    -- Update tab visuals
-                    if container.queueTabBtn and container.queueTabBtn.bg then
-                        container.queueTabBtn.bg:SetTexture(0.3, 0.3, 0.4, 1)
-                        if container.queueTabBtn.text then container.queueTabBtn.text:SetTextColor(1, 0.82, 0) end
-                    end
-                    if container.lfgTabBtn and container.lfgTabBtn.bg then
-                        container.lfgTabBtn.bg:SetTexture(0.15, 0.15, 0.15, 1)
-                        if container.lfgTabBtn.text then container.lfgTabBtn.text:SetTextColor(0.8, 0.8, 0.8) end
-                    end
-                    if container.waitlistTabBtn and container.waitlistTabBtn.bg then
-                        container.waitlistTabBtn.bg:SetTexture(0.15, 0.15, 0.15, 1)
-                        if container.waitlistTabBtn.text then container.waitlistTabBtn.text:SetTextColor(0.8, 0.8, 0.8) end
-                    end
-                    if container.queueContent then container.queueContent:Show() end
-                    if container.lfgContent then container.lfgContent:Hide() end
-                    if container.waitlistContent then container.waitlistContent:Hide() end
-                end
-
-                -- Update the queue panel to show the new entry
-                AIP.CentralGUI.UpdateQueuePanel(container)
-            end
-
-            -- Show the main window
-            if AIP.CentralGUI.Show then
-                AIP.CentralGUI.Show("lfm")
+    -- Determine position (favorites and guild members can be prioritized)
+    local insertPos = #AIP.db.queue + 1
+    if isFavorite or isGuildMember then
+        -- Insert after other favorites/guild members but before regular players
+        for i, existing in ipairs(AIP.db.queue) do
+            if not existing.isFavorite and not existing.isGuildMember then
+                insertPos = i
+                break
             end
         end
     end
 
+    table.insert(AIP.db.queue, insertPos, entry)
+
+    -- Build status message
+    local queueMsg = properName .. " added to queue (position #" .. insertPos .. ", " .. #AIP.db.queue .. " total)"
+    if isFavorite then
+        queueMsg = queueMsg .. " |cFF00FF00[FAVORITE]|r"
+    elseif isGuildMember then
+        queueMsg = queueMsg .. " |cFF00CCFF[GUILD]|r"
+    end
+    if isBlacklisted then
+        queueMsg = queueMsg .. " |cFFFF0000[BLACKLISTED]|r"
+    end
+    if role then
+        queueMsg = queueMsg .. " [" .. role:upper() .. "]"
+    end
+    if playerGS then
+        queueMsg = queueMsg .. " [GS:" .. playerGS .. "]"
+    end
+    AIP.Print(queueMsg)
+
+    -- Send queue position notification
+    if AIP.db.queueNotifyPosition then
+        local posMsg = "[AutoInvite+] Added to queue, position: #" .. insertPos
+        if AIP.db.queueTimeout and AIP.db.queueTimeout > 0 then
+            posMsg = posMsg .. " (expires in " .. AIP.db.queueTimeout .. " min)"
+        end
+        SendChatMessage(posMsg, "WHISPER", nil, properName)
+    end
+
+    -- Notify other players of position changes if they moved down
+    -- Use pcall to prevent errors from breaking the queue operation
+    if insertPos < #AIP.db.queue and AIP.db.queueNotifyPosition then
+        for i = insertPos + 1, #AIP.db.queue do
+            local movedEntry = AIP.db.queue[i]
+            if movedEntry and movedEntry.name then
+                pcall(SendChatMessage, "[AutoInvite+] Your queue position changed to: #" .. i, "WHISPER", nil, movedEntry.name)
+            end
+        end
+    end
+
+    -- Update UI - show queue panel with new entry
+    AIP.ShowQueueWithEntry()
+
     return true
+end
+
+-- Show the queue panel and switch to queue sub-tab
+function AIP.ShowQueueWithEntry()
+    -- Legacy UI update
+    if AIP.UpdateQueueUI then
+        AIP.UpdateQueueUI()
+    end
+
+    -- CentralGUI update
+    if not AIP.CentralGUI then return end
+
+    -- Ensure frame exists
+    if not AIP.CentralGUI.Frame then
+        AIP.CentralGUI.CreateFrame()
+    end
+
+    -- Get the LFM container
+    local container = AIP.CentralGUI.Frame and AIP.CentralGUI.Frame.tabContents and AIP.CentralGUI.Frame.tabContents["lfm"]
+    if not container then return end
+
+    -- Switch to Queue sub-tab so the new entry is visible
+    container.queueSubTab = "queue"
+
+    -- Update tab visuals (active tab)
+    if container.queueTabBtn and container.queueTabBtn.bg then
+        container.queueTabBtn.bg:SetTexture(0.3, 0.3, 0.4, 1)
+        if container.queueTabBtn.text then container.queueTabBtn.text:SetTextColor(1, 0.82, 0) end
+    end
+    if container.lfgTabBtn and container.lfgTabBtn.bg then
+        container.lfgTabBtn.bg:SetTexture(0.15, 0.15, 0.15, 1)
+        if container.lfgTabBtn.text then container.lfgTabBtn.text:SetTextColor(0.8, 0.8, 0.8) end
+    end
+    if container.waitlistTabBtn and container.waitlistTabBtn.bg then
+        container.waitlistTabBtn.bg:SetTexture(0.15, 0.15, 0.15, 1)
+        if container.waitlistTabBtn.text then container.waitlistTabBtn.text:SetTextColor(0.8, 0.8, 0.8) end
+    end
+
+    -- Show queue content, hide others
+    if container.queueContent then container.queueContent:Show() end
+    if container.lfgContent then container.lfgContent:Hide() end
+    if container.waitlistContent then container.waitlistContent:Hide() end
+
+    -- Update the queue panel to show the new entry
+    if AIP.CentralGUI.UpdateQueuePanel then
+        AIP.CentralGUI.UpdateQueuePanel(container)
+    end
+
+    -- Show the main window on LFM tab
+    if AIP.CentralGUI.Show then
+        AIP.CentralGUI.Show("lfm")
+    end
 end
 
 -- Remove player from queue by name
@@ -215,6 +279,30 @@ function AIP.InviteFromQueue(index)
     return false
 end
 
+-- Invite player from queue by name (safer for UI callbacks)
+function AIP.InviteFromQueueByName(name)
+    if not name or not AIP.db or not AIP.db.queue then return false end
+
+    local lowerName = name:lower()
+    for i, entry in ipairs(AIP.db.queue) do
+        if entry.name and entry.name:lower() == lowerName then
+            -- Send response message before invite
+            if AIP.db.responseInvite and AIP.db.responseInvite ~= "" then
+                SendChatMessage(AIP.db.responseInvite, "WHISPER", nil, entry.name)
+            end
+
+            if AIP.InvitePlayer(entry.name) then
+                AIP.RemoveFromQueueByIndex(i)
+                -- Refresh UI
+                AIP.ShowQueueWithEntry()
+                return true
+            end
+            break
+        end
+    end
+    return false
+end
+
 -- Reject player from queue by index (with optional blacklist)
 function AIP.RejectFromQueue(index, addToBlacklist, reason)
     if index <= 0 or index > #AIP.db.queue then return false end
@@ -238,6 +326,36 @@ function AIP.RejectFromQueue(index, addToBlacklist, reason)
     AIP.Print("Rejected " .. entry.name .. " from queue" .. (addToBlacklist and " (added to blacklist)" or ""))
 
     return true
+end
+
+-- Reject player from queue by name (safer for UI callbacks)
+function AIP.RejectFromQueueByName(name, addToBlacklist, reason)
+    if not name or not AIP.db or not AIP.db.queue then return false end
+
+    local lowerName = name:lower()
+    for i, entry in ipairs(AIP.db.queue) do
+        if entry.name and entry.name:lower() == lowerName then
+            -- Send rejection whisper
+            if AIP.db.responseReject and AIP.db.responseReject ~= "" then
+                SendChatMessage(AIP.db.responseReject, "WHISPER", nil, entry.name)
+            end
+
+            -- Optionally add to blacklist
+            if addToBlacklist then
+                AIP.AddToBlacklist(entry.name, reason or "Rejected from queue", "queue")
+            end
+
+            -- Remove from queue
+            AIP.RemoveFromQueueByIndex(i)
+
+            AIP.Print("Rejected " .. entry.name .. " from queue" .. (addToBlacklist and " (added to blacklist)" or ""))
+
+            -- Refresh UI
+            AIP.ShowQueueWithEntry()
+            return true
+        end
+    end
+    return false
 end
 
 -- Move player from queue to waitlist
@@ -324,6 +442,7 @@ local INVITE_DELAY = 0.5
 
 inviteTimer:SetScript("OnUpdate", function(self, elapsed)
     if not inviteAllRunning then return end
+    if not AIP.db or not AIP.db.queue then return end
 
     inviteTimerElapsed = inviteTimerElapsed + elapsed
     if inviteTimerElapsed < INVITE_DELAY then return end
@@ -386,6 +505,146 @@ function AIP.InviteAllFromQueue()
     inviteAllIndex = 1
     inviteTimerElapsed = INVITE_DELAY  -- Start immediately
     AIP.Print("Starting to invite " .. #AIP.db.queue .. " players from queue...")
+end
+
+-- ============================================================================
+-- QUEUE TIMEOUT PROCESSING
+-- ============================================================================
+local timeoutTimer = CreateFrame("Frame")
+local timeoutCheckElapsed = 0
+local TIMEOUT_CHECK_INTERVAL = 10  -- Check every 10 seconds
+
+timeoutTimer:SetScript("OnUpdate", function(self, elapsed)
+    -- Skip if no timeout configured or queue empty
+    if not AIP.db or not AIP.db.queueTimeout or AIP.db.queueTimeout <= 0 then return end
+    if not AIP.db.queue or #AIP.db.queue == 0 then return end
+
+    timeoutCheckElapsed = timeoutCheckElapsed + elapsed
+    if timeoutCheckElapsed < TIMEOUT_CHECK_INTERVAL then return end
+    timeoutCheckElapsed = 0
+
+    local now = time()
+    local timeoutSeconds = AIP.db.queueTimeout * 60  -- Convert minutes to seconds
+    local removed = {}
+
+    -- Find expired entries (iterate backwards for safe removal)
+    for i = #AIP.db.queue, 1, -1 do
+        local entry = AIP.db.queue[i]
+        if entry and entry.time and (now - entry.time) >= timeoutSeconds then
+            -- Notify player before removal
+            if AIP.db.queueNotifyPosition then
+                SendChatMessage("[AutoInvite+] Your queue position has expired.", "WHISPER", nil, entry.name)
+            end
+            table.insert(removed, entry.name)
+            table.remove(AIP.db.queue, i)
+        end
+    end
+
+    -- Report removals and update UI
+    if #removed > 0 then
+        AIP.Print("Removed " .. #removed .. " expired entries from queue: " .. table.concat(removed, ", "))
+        if AIP.UpdateQueueUI then
+            AIP.UpdateQueueUI()
+        end
+    end
+end)
+
+-- ============================================================================
+-- QUEUE AUTO-PROCESSING
+-- ============================================================================
+local autoProcessTimer = CreateFrame("Frame")
+local autoProcessElapsed = 0
+local AUTO_PROCESS_INTERVAL = 2  -- Check every 2 seconds
+local lastRaidSlots = 0
+
+-- Get current available raid slots
+local function GetAvailableRaidSlots()
+    local numRaid = GetNumRaidMembers()
+    if numRaid > 0 then
+        return 40 - numRaid  -- Max raid size minus current members
+    end
+    local numParty = GetNumPartyMembers()
+    if numParty > 0 then
+        return 4 - numParty  -- Max party size minus current members (not counting self)
+    end
+    return 4  -- Solo, can invite 4 to party
+end
+
+-- Check if we are group leader
+local function IsGroupLeader()
+    if GetNumRaidMembers() > 0 then
+        return IsRaidLeader()
+    elseif GetNumPartyMembers() > 0 then
+        return IsPartyLeader()
+    end
+    return true  -- Solo = leader
+end
+
+autoProcessTimer:SetScript("OnUpdate", function(self, elapsed)
+    -- Skip if auto-process disabled or not leader
+    if not AIP.db or not AIP.db.queueAutoProcess then return end
+    if not IsGroupLeader() then return end
+    if not AIP.db.queue or #AIP.db.queue == 0 then return end
+
+    autoProcessElapsed = autoProcessElapsed + elapsed
+    if autoProcessElapsed < AUTO_PROCESS_INTERVAL then return end
+    autoProcessElapsed = 0
+
+    local currentSlots = GetAvailableRaidSlots()
+
+    -- Only process if we gained slots (someone left or raid converted)
+    if currentSlots > lastRaidSlots and currentSlots > 0 then
+        local slotsGained = currentSlots - lastRaidSlots
+
+        -- Invite up to slotsGained players from the front of the queue
+        local invited = 0
+        local failures = 0
+        local maxAttempts = #AIP.db.queue  -- Track original queue size to prevent infinite loop
+        while invited < slotsGained and #AIP.db.queue > 0 and failures < maxAttempts do
+            local entry = AIP.db.queue[1]
+            if entry then
+                -- Skip blacklisted if mode is reject
+                if entry.isBlacklisted and AIP.db.blacklistMode == "reject" then
+                    AIP.RejectFromQueue(1, false)
+                else
+                    -- Attempt to invite
+                    if AIP.db.responseInvite and AIP.db.responseInvite ~= "" then
+                        SendChatMessage(AIP.db.responseInvite, "WHISPER", nil, entry.name)
+                    end
+                    if AIP.InvitePlayer(entry.name) then
+                        AIP.Print("Auto-invited " .. entry.name .. " from queue (slot opened)")
+                        table.remove(AIP.db.queue, 1)
+                        invited = invited + 1
+
+                        if AIP.UpdateQueueUI then
+                            AIP.UpdateQueueUI()
+                        end
+                    else
+                        -- Move failed to end of queue and continue trying others
+                        table.remove(AIP.db.queue, 1)
+                        table.insert(AIP.db.queue, entry)
+                        failures = failures + 1
+                    end
+                end
+            end
+        end
+    end
+
+    lastRaidSlots = currentSlots
+end)
+
+-- Manual trigger for auto-process (called when slots open via other means)
+function AIP.TriggerAutoProcess()
+    if not AIP.db or not AIP.db.queueAutoProcess then return end
+    if not AIP.db.queue or #AIP.db.queue == 0 then return end
+
+    local slots = GetAvailableRaidSlots()
+    if slots > 0 then
+        -- Force lastRaidSlots to 0 to trigger processing on next tick
+        lastRaidSlots = 0
+        autoProcessElapsed = AUTO_PROCESS_INTERVAL
+        AIP.Debug("Auto-process triggered, " .. slots .. " slots available")
+    end
 end
 
 -- ============================================================================

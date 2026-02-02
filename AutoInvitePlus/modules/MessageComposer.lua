@@ -13,7 +13,7 @@ local MC = AIP.MessageComposer
 -- ============================================================================
 
 -- Version for protocol
-MC.Version = "4.1"
+MC.Version = "5.1"
 
 -- Default templates for common raids
 MC.DefaultTemplates = {
@@ -337,12 +337,13 @@ function MC.ParseMessage(message)
     local raid, tankCur, tankNeed, healCur, healNeed, dpsCur, dpsNeed, gs, version = message:match(pattern)
 
     if raid then
+        local gsNum = tonumber(gs)
         return {
             raid = raid,
             tanks = {current = tonumber(tankCur), needed = tonumber(tankNeed)},
             healers = {current = tonumber(healCur), needed = tonumber(healNeed)},
             dps = {current = tonumber(dpsCur), needed = tonumber(dpsNeed)},
-            gsMin = tonumber(gs) * 1000,
+            gsMin = gsNum and (gsNum * 1000) or 0,
             version = version,
             isAIPFormat = true,
         }
@@ -353,12 +354,13 @@ function MC.ParseMessage(message)
     raid, tankNeed, healNeed, dpsNeed, gs = message:match(simplePattern)
 
     if raid then
+        local gsNum = tonumber(gs)
         return {
             raid = raid,
             tanks = {current = 0, needed = tonumber(tankNeed)},
             healers = {current = 0, needed = tonumber(healNeed)},
             dps = {current = 0, needed = tonumber(dpsNeed)},
-            gsMin = tonumber(gs) * 1000,
+            gsMin = gsNum and (gsNum * 1000) or 0,
             isAIPFormat = false,
         }
     end
@@ -482,7 +484,7 @@ end
 -- Update current template with actual raid composition
 function MC.SyncWithRaid()
     if not MC.CurrentTemplate then return end
-    if not AIP.Composition then return end
+    if not AIP.Composition or not AIP.Composition.ScanRaid then return end
 
     -- Scan current raid
     AIP.Composition.ScanRaid()
@@ -562,13 +564,46 @@ function MC.Broadcast()
 
     local message = MC.GenerateMessage(MC.CurrentTemplate)
 
-    -- Use the existing spam system from Core.lua
+    -- Use the existing spam system from Core.lua for chat
     if AIP.db then
         local oldMessage = AIP.db.spamMessage
         AIP.db.spamMessage = message
         AIP.SpamInvite()
         AIP.db.spamMessage = oldMessage
     end
+
+    -- Also broadcast via DataBus to other addon users
+    MC.BroadcastToDataBus()
+end
+
+-- Broadcast LFM data to DataBus (other addon users)
+function MC.BroadcastToDataBus()
+    if not MC.CurrentTemplate then return false end
+    if not AIP.DataBus then return false end
+
+    local template = MC.CurrentTemplate
+
+    -- Build DataBus event data
+    local lfmData = {
+        raid = template.raid,
+        tanks = template.tanks,
+        healers = template.healers,
+        dps = template.dps,
+        gsMin = template.gsMin,
+        ilvlMin = template.ilvlMin,
+        note = template.customNote,
+        triggerKey = AIP.db and AIP.db.triggers or "inv",
+        achievementsRequired = template.includeAchievements or false,
+    }
+
+    -- Publish via DataBus
+    local success = AIP.DataBus.BroadcastLFM(lfmData)
+
+    if success then
+        AIP.Debug("MessageComposer: LFM broadcast to DataBus")
+    end
+
+    return success
 end
 
 -- Copy message to clipboard (via editbox)
@@ -594,9 +629,14 @@ end
 
 -- Delay initialization to ensure db is ready
 local initFrame = CreateFrame("Frame")
+local initStarted = false
 initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_LOGIN" then
+        -- Guard against multiple initialization attempts
+        if initStarted then return end
+        initStarted = true
+
         -- Short delay to ensure all modules loaded
         local delayFrame = CreateFrame("Frame")
         delayFrame.elapsed = 0
@@ -608,5 +648,8 @@ initFrame:SetScript("OnEvent", function(self, event)
                 df:Hide()
             end
         end)
+
+        -- Unregister event after first trigger
+        self:UnregisterEvent("PLAYER_LOGIN")
     end
 end)

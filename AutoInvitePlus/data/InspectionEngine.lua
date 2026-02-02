@@ -144,7 +144,7 @@ local function AnalyzeGems(link)
     tooltip:ClearLines()
     tooltip:SetHyperlink(link)
 
-    local totalSlots = 0
+    local emptySlots = 0
     local filledSlots = 0
     local socketTypes = {"Red Socket", "Yellow Socket", "Blue Socket", "Meta Socket", "Prismatic Socket"}
 
@@ -156,23 +156,20 @@ local function AnalyzeGems(link)
             -- Check for empty socket
             for _, socketType in ipairs(socketTypes) do
                 if text:find(socketType) then
-                    totalSlots = totalSlots + 1
+                    emptySlots = emptySlots + 1
                     break
                 end
             end
 
-            -- Check for filled gem (has stats like "+20 Strength")
+            -- Check for filled gem (has stats like "+20 Strength" but not socket bonus)
             if text:match("^%+%d+") and not text:find("Socket Bonus") then
-                -- This is likely a gem stat, count it
-                -- Note: This is imperfect but works for most cases
+                filledSlots = filledSlots + 1
             end
         end
     end
 
-    -- Filled = total from item - empty showing in tooltip
-    -- Since we counted empty sockets, filled = item's socket count - empty
-    -- For simplicity, we'll use itemLevel to estimate socket count
-    filledSlots = 0  -- Will be calculated differently
+    -- Total slots = empty + filled
+    local totalSlots = emptySlots + filledSlots
 
     tooltip:Hide()
     return totalSlots, filledSlots
@@ -469,7 +466,8 @@ local function OnInspectReady()
         end
     end
 
-    if unit then
+    -- Validate unit still exists and is connected before processing
+    if unit and UnitExists(unit) and UnitIsConnected(unit) then
         IE.InspectUnit(unit)
     end
 

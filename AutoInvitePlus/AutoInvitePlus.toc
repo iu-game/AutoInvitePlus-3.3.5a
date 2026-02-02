@@ -2,39 +2,48 @@
 ## Title: AutoInvite Plus
 ## Notes: Complete raid organization suite with LFM/LFG browser and inspection engine
 ## Author: iuGames
-## Version: 4.3.10
+## Version: 5.5.0
 ## SavedVariables: AutoInvitePlusDB
 ## OptionalDeps: GearScore, GearScoreLite, PlayerScore
 
-# Core functionality
-Core.lua
-Blacklist.lua
-Queue.lua
-Waitlist.lua
-Promote.lua
-MessageComposer.lua
+# ============================================
+# Core (utilities and main namespace)
+# ============================================
+core\Utils.lua
+core\Parsers.lua
+core\DataBus.lua
+core\Core.lua
 
-# Raid organization (existing)
-RaidComposition.lua
-LFMBrowser.lua
-RosterManager.lua
-Integrations.lua
+# ============================================
+# Data layer (scanning, inspection, composition)
+# ============================================
+data\ChatScanner.lua
+data\InspectionEngine.lua
+data\RaidComposition.lua
 
-# New: Data layer (must load before GUI)
-GroupTracker.lua
-InspectionEngine.lua
+# ============================================
+# Modules (feature implementations)
+# ============================================
+modules\Queue.lua
+modules\Waitlist.lua
+modules\Blacklist.lua
+modules\Promote.lua
+modules\MessageComposer.lua
+modules\RosterManager.lua
+modules\RaidSessionManager.lua
+modules\Integrations.lua
+modules\TestData.lua
 
-# New: Tree browser
-TreeBrowser.lua
-
-# Embedded panels
-panels\BlacklistPanel.lua
-panels\SettingsPanel.lua
-
-# New: Central GUI controller
-CentralGUI.lua
-
-# UI definitions (XML loads last)
-UI.xml
-CompositionUI.xml
-CentralGUI.xml
+# ============================================
+# UI components
+# ============================================
+ui\UIFactory.lua
+ui\TreeBrowser.lua
+ui\MainUI.lua
+ui\CompositionUI.lua
+ui\panels\BlacklistPanel.lua
+ui\panels\FavoritesPanel.lua
+ui\panels\RaidManagementPanel.lua
+ui\panels\LootHistoryPanel.lua
+ui\panels\SettingsPanel.lua
+ui\CentralGUI.lua

@@ -43,9 +43,17 @@ end
 
 -- Initialize blacklist on load
 local initFrame = CreateFrame("Frame")
+local blacklistInitialized = false
 initFrame:RegisterEvent("ADDON_LOADED")
 initFrame:SetScript("OnEvent", function(self, event, arg1)
     if arg1 == "AutoInvitePlus" then
+        -- Guard against multiple initialization attempts
+        if blacklistInitialized then return end
+        blacklistInitialized = true
+
+        -- Unregister to prevent future triggers
+        self:UnregisterEvent("ADDON_LOADED")
+
         -- Delay migration to ensure db is ready
         local delayFrame = CreateFrame("Frame")
         delayFrame.elapsed = 0
@@ -89,6 +97,7 @@ function AIP.AddToBlacklist(name, reason, source, notes)
         AIP.Print("Please specify a player name")
         return false
     end
+    if not AIP.db or not AIP.db.blacklist then return false end
 
     name = name:trim()
     local lowerName = name:lower()
@@ -126,6 +135,7 @@ end
 -- Update existing blacklist entry
 function AIP.UpdateBlacklistEntry(name, reason, notes)
     if not name then return false end
+    if not AIP.db or not AIP.db.blacklist then return false end
 
     local lowerName = name:lower()
     local entry = AIP.db.blacklist[lowerName]
@@ -156,6 +166,7 @@ function AIP.RemoveFromBlacklist(name)
         AIP.Print("Please specify a player name")
         return false
     end
+    if not AIP.db or not AIP.db.blacklist then return false end
 
     local lowerName = name:lower():trim()
     local entry = AIP.db.blacklist[lowerName]
@@ -410,8 +421,12 @@ function AIP.ParseImportData(data)
             end
 
             if entry then
-                -- Normalize name
-                entry.name = entry.name:sub(1,1):upper() .. entry.name:sub(2):lower()
+                -- Normalize name (handle single-char names safely)
+                if #entry.name >= 2 then
+                    entry.name = entry.name:sub(1,1):upper() .. entry.name:sub(2):lower()
+                elseif #entry.name == 1 then
+                    entry.name = entry.name:upper()
+                end
                 if entry.reason == "" then entry.reason = "Imported" end
                 if entry.source == "" then entry.source = "import" end
                 table.insert(entries, entry)

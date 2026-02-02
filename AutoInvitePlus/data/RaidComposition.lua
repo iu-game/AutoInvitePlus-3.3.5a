@@ -89,6 +89,174 @@ Comp.TemplateCategories = {
     {id = "WEEKLY", name = "Weekly/Daily", order = 5},
 }
 
+-- Raid bosses for loot ban dropdown
+Comp.RaidBosses = {
+    ["ICC"] = {
+        name = "Icecrown Citadel",
+        zone = "Icecrown Citadel",
+        bosses = {
+            "Lord Marrowgar",
+            "Lady Deathwhisper",
+            "Gunship Battle",
+            "Deathbringer Saurfang",
+            "Festergut",
+            "Rotface",
+            "Professor Putricide",
+            "Blood Prince Council",
+            "Blood-Queen Lana'thel",
+            "Valithria Dreamwalker",
+            "Sindragosa",
+            "The Lich King",
+        },
+    },
+    ["RS"] = {
+        name = "Ruby Sanctum",
+        zone = "The Ruby Sanctum",
+        bosses = {
+            "Baltharus the Warborn",
+            "Saviana Ragefire",
+            "General Zarithrian",
+            "Halion",
+        },
+    },
+    ["TOC"] = {
+        name = "Trial of the Crusader",
+        zone = "Trial of the Crusader",
+        bosses = {
+            "Northrend Beasts",
+            "Lord Jaraxxus",
+            "Faction Champions",
+            "Twin Val'kyr",
+            "Anub'arak",
+        },
+    },
+    ["ULDUAR"] = {
+        name = "Ulduar",
+        zone = "Ulduar",
+        bosses = {
+            "Flame Leviathan",
+            "Ignis the Furnace Master",
+            "Razorscale",
+            "XT-002 Deconstructor",
+            "Assembly of Iron",
+            "Kologarn",
+            "Auriaya",
+            "Hodir",
+            "Thorim",
+            "Freya",
+            "Mimiron",
+            "General Vezax",
+            "Yogg-Saron",
+            "Algalon the Observer",
+        },
+    },
+    ["NAXX"] = {
+        name = "Naxxramas",
+        zone = "Naxxramas",
+        bosses = {
+            "Anub'Rekhan",
+            "Grand Widow Faerlina",
+            "Maexxna",
+            "Noth the Plaguebringer",
+            "Heigan the Unclean",
+            "Loatheb",
+            "Instructor Razuvious",
+            "Gothik the Harvester",
+            "The Four Horsemen",
+            "Patchwerk",
+            "Grobbulus",
+            "Gluth",
+            "Thaddius",
+            "Sapphiron",
+            "Kel'Thuzad",
+        },
+    },
+    ["EOE"] = {
+        name = "Eye of Eternity",
+        zone = "The Eye of Eternity",
+        bosses = {
+            "Malygos",
+        },
+    },
+    ["OS"] = {
+        name = "Obsidian Sanctum",
+        zone = "The Obsidian Sanctum",
+        bosses = {
+            "Sartharion",
+            "Tenebron",
+            "Shadron",
+            "Vesperon",
+        },
+    },
+    ["VOA"] = {
+        name = "Vault of Archavon",
+        zone = "Vault of Archavon",
+        bosses = {
+            "Archavon the Stone Watcher",
+            "Emalon the Storm Watcher",
+            "Koralon the Flame Watcher",
+            "Toravon the Ice Watcher",
+        },
+    },
+    ["ONYXIA"] = {
+        name = "Onyxia's Lair",
+        zone = "Onyxia's Lair",
+        bosses = {
+            "Onyxia",
+        },
+    },
+    ["FOS"] = {
+        name = "Forge of Souls",
+        zone = "The Forge of Souls",
+        bosses = {
+            "Bronjahm",
+            "Devourer of Souls",
+        },
+    },
+    ["POS"] = {
+        name = "Pit of Saron",
+        zone = "Pit of Saron",
+        bosses = {
+            "Forgemaster Garfrost",
+            "Ick & Krick",
+            "Scourgelord Tyrannus",
+        },
+    },
+    ["HOR"] = {
+        name = "Halls of Reflection",
+        zone = "Halls of Reflection",
+        bosses = {
+            "Falric",
+            "Marwyn",
+            "The Lich King",
+        },
+    },
+}
+
+-- Helper to get boss list for current zone (prioritizes current zone)
+function Comp.GetBossListForZone(currentZone)
+    local prioritized = {}
+    local others = {}
+
+    for key, data in pairs(Comp.RaidBosses) do
+        if data.zone and currentZone and data.zone:lower() == currentZone:lower() then
+            table.insert(prioritized, {key = key, data = data})
+        else
+            table.insert(others, {key = key, data = data})
+        end
+    end
+
+    -- Sort others alphabetically by name
+    table.sort(others, function(a, b) return a.data.name < b.data.name end)
+
+    -- Combine: prioritized first, then others
+    local result = {}
+    for _, v in ipairs(prioritized) do table.insert(result, v) end
+    for _, v in ipairs(others) do table.insert(result, v) end
+
+    return result
+end
+
 -- Raid templates for all content
 Comp.RaidTemplates = {
     -- ========================================================================
@@ -1801,7 +1969,7 @@ function Comp.ScanRaid()
 
     -- Scan group members
     local prefix = isRaid and "raid" or "party"
-    local count = isRaid and numMembers or numMembers
+    local count = isRaid and numMembers or (numMembers + 1)
 
     for i = 1, count do
         local unit = prefix .. i
@@ -1880,11 +2048,10 @@ function Comp.ProcessInspectQueue()
 
     local now = GetTime()
     if now - Comp.LastInspectTime < Comp.InspectInterval then
-        -- Schedule next attempt
+        -- Schedule next attempt (WotLK compatible)
         local delay = Comp.InspectInterval - (now - Comp.LastInspectTime) + 0.1
-        C_Timer = C_Timer or {}
-        if C_Timer.After then
-            C_Timer.After(delay, Comp.ProcessInspectQueue)
+        if AIP.Utils and AIP.Utils.DelayedCall then
+            AIP.Utils.DelayedCall(delay, Comp.ProcessInspectQueue)
         end
         return
     end
@@ -1898,9 +2065,8 @@ function Comp.ProcessInspectQueue()
 
     -- Continue processing queue
     if #Comp.InspectQueue > 0 then
-        C_Timer = C_Timer or {}
-        if C_Timer.After then
-            C_Timer.After(Comp.InspectInterval, Comp.ProcessInspectQueue)
+        if AIP.Utils and AIP.Utils.DelayedCall then
+            AIP.Utils.DelayedCall(Comp.InspectInterval, Comp.ProcessInspectQueue)
         end
     end
 end
@@ -1917,7 +2083,7 @@ function Comp.DetectRole(unit)
         local name = UnitName(unit)
         for i = 1, GetNumRaidMembers() do
             local raidName, _, _, _, _, _, _, _, _, raidRole = GetRaidRosterInfo(i)
-            if raidName == name and raidRole == "MAINTANK" then
+            if raidName == name and (raidRole == "MAINTANK" or raidRole == "OFFTANK") then
                 return "TANK"
             end
         end
@@ -2081,10 +2247,9 @@ inspectFrame:SetScript("OnEvent", function(self, event)
 
                     -- Trigger a raid rescan if we're tracking composition
                     if Comp.CurrentRaid.template then
-                        -- Delay slightly to avoid spamming
-                        C_Timer = C_Timer or {}
-                        if C_Timer.After then
-                            C_Timer.After(0.5, function() Comp.CheckBuffCoverage() end)
+                        -- Delay slightly to avoid spamming (WotLK compatible)
+                        if AIP.Utils and AIP.Utils.DelayedCall then
+                            AIP.Utils.DelayedCall(0.5, Comp.CheckBuffCoverage)
                         end
                     end
                 end

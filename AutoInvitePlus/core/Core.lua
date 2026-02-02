@@ -1,16 +1,23 @@
 -- AutoInvite Plus - Core Module
 -- Combined and enhanced version for WotLK 3.3.5a
 -- Original authors: Martag of Greymane, Matthias Fechner
+-- Refactored with DRY principle and OOP patterns
 
 local ADDON_NAME = "AutoInvitePlus"
-local VERSION = "4.3.10"
+local VERSION = "5.5.0"
+local DB_VERSION = 5  -- Increment when saved variables structure changes (5.5: raid sessions, 5.4: mdps/rdps split, 4: loot history retention)
 
--- Create main addon namespace
-AutoInvitePlus = {}
+-- Create main addon namespace (may already exist from Utils.lua)
+AutoInvitePlus = AutoInvitePlus or {}
 local AIP = AutoInvitePlus
+
+-- Store version info
+AIP.Version = VERSION
+AIP.DBVersion = DB_VERSION
 
 -- Default saved variables structure
 local defaults = {
+    dbVersion = DB_VERSION,
     enabled = false,
     triggers = "invme-auto",
     spamMessage = 'LFM <raid> <roles> | <gs>+ | Whisper "<key>" for invite',
@@ -19,6 +26,9 @@ local defaults = {
     autoRaid = true,
     guildOnly = false,
     useQueue = false,
+
+    -- Player mode: "none", "lfm" (looking for members), "lfg" (looking for group)
+    playerMode = "none",
 
     -- Listening channels
     listenWhisper = true,
@@ -29,8 +39,11 @@ local defaults = {
     listenTrade = false,
     listenLFG = false,
     listenDefense = false,
+    listenGlobal = false,       -- Global channel (common on private servers)
+    listenWorld = false,        -- World channel (common on private servers)
     listenCustom = false,
     customChannel = "",
+    listenAllJoined = false,    -- Auto-listen to all joined channels
 
     -- Spam channels
     spamGeneral = false,
@@ -38,6 +51,10 @@ local defaults = {
     spamTrade = false,
     spamGuild = false,
     spamLFG = false,
+    spamDefense = false,        -- Defense channel (LocalDefense)
+    spamGlobal = false,         -- Global channel
+    spamWorld = false,          -- World channel
+    spamAllJoined = false,      -- Broadcast to all joined channels
     spamCustom = false,
     spamYell = false,
     spamChannels = {},  -- Dynamic custom channels {["ChannelName"] = true/false}
@@ -48,6 +65,24 @@ local defaults = {
     -- Blacklist
     blacklist = {},
 
+    -- Whitelist/Favorites (priority players)
+    whitelist = {},  -- {name = {name, note, addedTime, source}}
+
+    -- Smart Auto-Invite Conditions
+    smartInvite = {
+        enabled = false,            -- Enable smart conditions (beyond just keyword)
+        minGS = 0,                  -- Minimum GearScore (0 = no minimum)
+        minIlvl = 0,                -- Minimum item level (0 = no minimum)
+        requireRole = false,        -- Only invite if they specify a role
+        roleMatching = false,       -- Only invite if we need their role
+        acceptTanks = true,         -- Accept tank role
+        acceptHealers = true,       -- Accept healer role
+        acceptDPS = true,           -- Accept DPS role
+        acceptClasses = {},         -- Empty = all classes, or specific: {WARRIOR = true, PALADIN = true}
+        prioritizeFavorites = true, -- Favorites skip queue and get invited directly
+        prioritizeGuild = false,    -- Guild members skip queue
+    },
+
     -- Promote system
     promoteEnabled = false,
     promoteKey = "assist",
@@ -55,6 +90,10 @@ local defaults = {
 
     -- Queue
     queue = {},
+    queueTimeout = 0,               -- Auto-remove from queue after X minutes (0 = disabled)
+    queueAutoProcess = false,       -- Auto-invite from queue when slots open
+    queuePersist = true,            -- Save queue across reload/relog
+    queueNotifyPosition = true,     -- Whisper position updates
 
     -- Waitlist
     waitlist = {},
@@ -81,6 +120,31 @@ local defaults = {
     guiUnfocusedOpacity = 0.6,  -- Opacity when window is not focused
     guiUnfocusedEnabled = false, -- Enable unfocused opacity reduction
     minimapAngle = 220,         -- Minimap button angle
+
+    -- LFM/LFG Browser settings
+    treeStaleTimeout = 180,     -- Hide tree entries older than this (seconds). Default: 3 min
+
+    -- Raid Management (v5.3)
+    raidWarningTemplates = {},      -- Custom raid warning templates
+    reservedItems = "",             -- Reserved items list (multi-line)
+    lootBans = {},                  -- Loot bans: {player, boss, item, itemLink}
+    lootBannedPlayers = "",         -- (deprecated) Players banned from loot
+    autoAnnounceReserved = false,   -- Auto-announce reserved items
+    reservedAnnounceInterval = 5,   -- Minutes between announcements
+    msTracking = {},                -- MS/OS tracking per player
+
+    -- Loot History (v5.3)
+    lootHistory = {},               -- Historical loot drops (legacy, migrated to raidSessions)
+    lootTrackThreshold = 2,         -- Min item quality to track (2 = Green)
+    lootHistoryRetentionDays = 30,  -- Days to keep loot history (0 = forever)
+    currentRaidStartTime = nil,     -- Track when current raid session started (legacy)
+
+    -- Raid Sessions (v5.5) - Enhanced loot tracking with boss kills and attendees
+    raidSessions = {},              -- Array of raid session objects
+    currentRaidSessionId = nil,     -- ID of active session
+    nextRaidSessionId = 1,          -- Auto-increment ID for new sessions
+    selectedRaidSessionId = nil,    -- Currently selected session in UI
+    selectedBossId = nil,           -- Currently selected boss in UI
 }
 
 -- Channel IDs for WotLK (default IDs, actual may vary by server)
@@ -213,7 +277,7 @@ AIP.CanInvite = CanInvite
 
 -- Check if group/raid is full
 local function IsGroupFull()
-    if not AIP.db.useMaxLimit then return false end
+    if not AIP.db or not AIP.db.useMaxLimit then return false end
 
     local current
     if UnitInRaid("player") then
@@ -304,16 +368,255 @@ end
 
 AIP.InvitePlayer = InvitePlayer
 
+-- Check if player is in favorites/whitelist
+local function IsPlayerFavorite(name)
+    if not AIP.db or not AIP.db.whitelist or not name then return false, nil end
+    local entry = AIP.db.whitelist[name:lower()]
+    return entry ~= nil, entry
+end
+
+AIP.IsPlayerFavorite = IsPlayerFavorite
+
+-- ============================================================================
+-- PLAYER MODE FUNCTIONS (LFM vs LFG)
+-- ============================================================================
+
+-- Set the player's current mode
+function AIP.SetPlayerMode(mode)
+    if not AIP.db then return end
+    local validModes = {none = true, lfm = true, lfg = true}
+    if validModes[mode] then
+        AIP.db.playerMode = mode
+        Debug("Player mode set to: " .. mode)
+        -- Update UI if available
+        if AIP.CentralGUI and AIP.CentralGUI.UpdateModeIndicator then
+            AIP.CentralGUI.UpdateModeIndicator()
+        end
+    end
+end
+
+-- Get the player's current mode
+function AIP.GetPlayerMode()
+    return AIP.db and AIP.db.playerMode or "none"
+end
+
+-- Check if in LFM mode (looking for members / leading)
+function AIP.IsLFMMode()
+    return AIP.GetPlayerMode() == "lfm"
+end
+
+-- Check if in LFG mode (looking for group / joining)
+function AIP.IsLFGMode()
+    return AIP.GetPlayerMode() == "lfg"
+end
+
+-- Add player to favorites/whitelist
+function AIP.AddToFavorites(name, note, source)
+    if not AIP.db then return false end
+    if not AIP.db.whitelist then AIP.db.whitelist = {} end
+    if not name or name:trim() == "" then return false end
+
+    local properName = name:sub(1,1):upper() .. name:sub(2):lower()
+    local lowerName = name:lower()
+
+    AIP.db.whitelist[lowerName] = {
+        name = properName,
+        note = note or "",
+        addedTime = time(),
+        source = source or "manual",
+    }
+
+    Print("Added " .. properName .. " to favorites")
+    return true
+end
+
+-- Remove player from favorites
+function AIP.RemoveFromFavorites(name)
+    if not AIP.db or not AIP.db.whitelist or not name then return false end
+    local lowerName = name:lower()
+    if AIP.db.whitelist[lowerName] then
+        AIP.db.whitelist[lowerName] = nil
+        Print("Removed " .. name .. " from favorites")
+        return true
+    end
+    return false
+end
+
+-- Get player info from message (role, class, GS)
+local function ParsePlayerInfo(author, message)
+    local info = {
+        name = author,
+        message = message,
+        role = nil,
+        class = nil,
+        gs = nil,
+    }
+
+    -- Try to detect role from message using Parsers
+    if AIP.Parsers and AIP.Parsers.DetectRole then
+        info.role = AIP.Parsers.DetectRole(message)
+    end
+
+    -- Try to detect GearScore from message
+    if AIP.Parsers and AIP.Parsers.ParseGearScore then
+        info.gs = AIP.Parsers.ParseGearScore(message)
+    end
+
+    -- Try to get GS from GearScore addon if available
+    if not info.gs and AIP.Integrations and AIP.Integrations.GetPlayerGS then
+        info.gs = AIP.Integrations.GetPlayerGS(author)
+    end
+
+    return info
+end
+
+-- Check if player meets smart invite conditions
+local function CheckSmartConditions(playerInfo)
+    local smart = AIP.db.smartInvite
+    if not smart or not smart.enabled then
+        return true, nil  -- Smart conditions disabled, allow all
+    end
+
+    -- Check minimum GearScore
+    if smart.minGS and smart.minGS > 0 then
+        if not playerInfo.gs or playerInfo.gs < smart.minGS then
+            return false, "GearScore too low (need " .. smart.minGS .. "+)"
+        end
+    end
+
+    -- Check if role is required
+    if smart.requireRole and not playerInfo.role then
+        return false, "No role specified in message"
+    end
+
+    -- Check role acceptance
+    if playerInfo.role then
+        local roleUpper = playerInfo.role:upper()
+        if roleUpper == "TANK" and not smart.acceptTanks then
+            return false, "Not accepting tanks"
+        elseif roleUpper == "HEALER" and not smart.acceptHealers then
+            return false, "Not accepting healers"
+        elseif roleUpper == "DPS" and not smart.acceptDPS then
+            return false, "Not accepting DPS"
+        end
+    end
+
+    -- Check role matching (only invite if we need that role)
+    if smart.roleMatching and playerInfo.role then
+        if AIP.Composition and AIP.Composition.GetRoleNeeds then
+            local needs = AIP.Composition.GetRoleNeeds()
+            local roleUpper = playerInfo.role:upper()
+            if roleUpper == "TANK" and (needs.tanks or 0) <= 0 then
+                return false, "No tank slots available"
+            elseif roleUpper == "HEALER" and (needs.healers or 0) <= 0 then
+                return false, "No healer slots available"
+            elseif roleUpper == "DPS" and (needs.dps or 0) <= 0 then
+                return false, "No DPS slots available"
+            end
+        end
+    end
+
+    -- Check class/spec matching against Looking For preferences
+    -- Only check if we have an active LFM with roleSpecs defined
+    if smart.roleMatching then
+        local GUI = AIP.CentralGUI or {}
+        local myGroup = GUI.MyGroup
+        if myGroup and myGroup.roleSpecs then
+            local hasAnySpecs = false
+            for role, specs in pairs(myGroup.roleSpecs) do
+                if specs and #specs > 0 then
+                    hasAnySpecs = true
+                    break
+                end
+            end
+
+            -- Only enforce if roleSpecs are defined
+            if hasAnySpecs and playerInfo.class then
+                local playerClass = playerInfo.class:upper()
+                local playerRole = playerInfo.role and playerInfo.role:upper() or nil
+
+                -- Use the parser's matching function
+                if AIP.Parsers and AIP.Parsers.MatchesLookingFor then
+                    local matches = AIP.Parsers.MatchesLookingFor(playerClass, nil, playerRole, myGroup.roleSpecs)
+                    if not matches then
+                        -- Build helpful rejection message
+                        local wantedClasses = {}
+                        local rolesToCheck = {}
+                        if playerRole == "TANK" then
+                            rolesToCheck = {"TANK"}
+                        elseif playerRole == "HEALER" then
+                            rolesToCheck = {"HEALER"}
+                        elseif playerRole == "DPS" then
+                            rolesToCheck = {"MDPS", "RDPS"}
+                        else
+                            rolesToCheck = {"TANK", "HEALER", "MDPS", "RDPS"}
+                        end
+
+                        for _, role in ipairs(rolesToCheck) do
+                            local specs = myGroup.roleSpecs[role]
+                            if specs then
+                                for _, code in ipairs(specs) do
+                                    local info = AIP.Parsers.SpecCodeInfo and AIP.Parsers.SpecCodeInfo[code]
+                                    if info then
+                                        wantedClasses[info.shortClass] = true
+                                    end
+                                end
+                            end
+                        end
+
+                        local wantedList = {}
+                        for cls in pairs(wantedClasses) do
+                            table.insert(wantedList, cls)
+                        end
+
+                        if #wantedList > 0 then
+                            return false, "Looking for: " .. table.concat(wantedList, ", ")
+                        else
+                            return false, "Class/spec not in Looking For list"
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Check class restrictions
+    if smart.acceptClasses and next(smart.acceptClasses) then
+        if playerInfo.class then
+            local classUpper = playerInfo.class:upper()
+            if not smart.acceptClasses[classUpper] then
+                return false, "Class not accepted"
+            end
+        end
+    end
+
+    return true, nil
+end
+
 -- Process incoming message for invite triggers
 local function ProcessMessage(author, message, channel)
     if not AIP.db then
         Debug("ProcessMessage: db not initialized")
         return
     end
-    if not AIP.db.enabled then
-        Debug("ProcessMessage: auto-invite disabled")
+
+    -- Check player mode - in LFG mode, don't auto-invite anyone (we're looking for a group)
+    local mode = AIP.GetPlayerMode()
+    if mode == "lfg" then
+        Debug("ProcessMessage: skipped - in LFG mode (looking for group, not inviting)")
         return
     end
+
+    -- Check if either auto-invite or queue mode is active
+    local autoInviteActive = AIP.db.enabled
+    local queueModeActive = AIP.db.useQueue
+
+    -- If neither mode is active, skip processing
+    if not autoInviteActive and not queueModeActive then
+        Debug("ProcessMessage: both auto-invite and queue mode disabled")
+        return
+    end
+
     if not author or author == "" then return end
     if author:lower() == UnitName("player"):lower() then return end
 
@@ -325,10 +628,43 @@ local function ProcessMessage(author, message, channel)
 
     Print("Trigger matched from " .. author .. " via " .. channel)
 
-    -- Queue or direct invite
-    if AIP.db.useQueue and AIP.AddToQueue then
-        AIP.AddToQueue(author, message)
-    else
+    -- Parse player info from message
+    local playerInfo = ParsePlayerInfo(author, message)
+
+    -- Check if player is a favorite (priority handling)
+    local isFavorite, favoriteEntry = IsPlayerFavorite(author)
+    local isGuildMember = IsPlayerInGuild(author)
+    local smart = AIP.db.smartInvite or {}
+
+    -- Check smart invite conditions
+    local meetsConditions, rejectReason = CheckSmartConditions(playerInfo)
+
+    if not meetsConditions then
+        -- Player doesn't meet conditions
+        Debug("ProcessMessage: " .. author .. " rejected - " .. (rejectReason or "unknown"))
+        if AIP.db.responseReject and AIP.db.responseReject ~= "" then
+            local msg = rejectReason and ("[AutoInvite+] " .. rejectReason) or AIP.db.responseReject
+            SendChatMessage(msg, "WHISPER", nil, author)
+        end
+        return
+    end
+
+    -- Determine if player should skip queue (priority players)
+    local skipQueue = false
+    if smart.prioritizeFavorites and isFavorite then
+        skipQueue = true
+        Debug("ProcessMessage: " .. author .. " is a favorite, skipping queue")
+    elseif smart.prioritizeGuild and isGuildMember then
+        skipQueue = true
+        Debug("ProcessMessage: " .. author .. " is a guild member, skipping queue")
+    end
+
+    -- Process based on mode
+    if queueModeActive and not skipQueue and AIP.AddToQueue then
+        -- Add to queue with player info
+        AIP.AddToQueue(author, message, playerInfo.role, playerInfo.gs, playerInfo.class)
+    elseif autoInviteActive or skipQueue then
+        -- Direct invite (priority players or auto-invite mode)
         InvitePlayer(author)
     end
 end
@@ -392,7 +728,10 @@ function AIP.SpamInvite()
     end
 
     local msg = AIP.db.spamMessage
-    msg = msg:gsub("<key>", AIP.db.triggers:gsub(";", " or "))
+    -- Escape special pattern characters in triggers to avoid gsub errors
+    local triggers = AIP.db.triggers:gsub(";", " or ")
+    -- Use plain string replacement to avoid pattern interpretation
+    msg = msg:gsub("<key>", function() return triggers end)
 
     -- Build message queue with staggered delays
     local messageQueue = {}
@@ -408,7 +747,7 @@ function AIP.SpamInvite()
     if AIP.db.spamLFG then
         local id = FindChannelId("lookingforgroup", "lfg")
         if id then
-            table.insert(messageQueue, {delay = delay, func = function()
+            table.insert(messageQueue, {delay = delay, channelId = id, func = function()
                 SendChatMessage(msg, "CHANNEL", nil, id)
             end, name = "LFG"})
             delay = delay + delayIncrement
@@ -418,7 +757,7 @@ function AIP.SpamInvite()
     if AIP.db.spamTrade then
         local id = FindChannelId("trade")
         if id then
-            table.insert(messageQueue, {delay = delay, func = function()
+            table.insert(messageQueue, {delay = delay, channelId = id, func = function()
                 SendChatMessage(msg, "CHANNEL", nil, id)
             end, name = "Trade"})
             delay = delay + delayIncrement
@@ -428,10 +767,70 @@ function AIP.SpamInvite()
     if AIP.db.spamGeneral then
         local id = FindChannelId("general")
         if id then
-            table.insert(messageQueue, {delay = delay, func = function()
+            table.insert(messageQueue, {delay = delay, channelId = id, func = function()
                 SendChatMessage(msg, "CHANNEL", nil, id)
             end, name = "General"})
             delay = delay + delayIncrement
+        end
+    end
+
+    if AIP.db.spamDefense then
+        local id = FindChannelId("localdefense", "defense")
+        if id then
+            table.insert(messageQueue, {delay = delay, channelId = id, func = function()
+                SendChatMessage(msg, "CHANNEL", nil, id)
+            end, name = "Defense"})
+            delay = delay + delayIncrement
+        end
+    end
+
+    -- Global channel (common on private servers)
+    if AIP.db.spamGlobal then
+        local id = FindChannelId("global")
+        if id then
+            table.insert(messageQueue, {delay = delay, channelId = id, func = function()
+                SendChatMessage(msg, "CHANNEL", nil, id)
+            end, name = "Global"})
+            delay = delay + delayIncrement
+        end
+    end
+
+    -- World channel (common on private servers)
+    if AIP.db.spamWorld then
+        local id = FindChannelId("world")
+        if id then
+            table.insert(messageQueue, {delay = delay, channelId = id, func = function()
+                SendChatMessage(msg, "CHANNEL", nil, id)
+            end, name = "World"})
+            delay = delay + delayIncrement
+        end
+    end
+
+    -- All Joined channels (broadcast to every channel we're in)
+    if AIP.db.spamAllJoined then
+        -- Track which channel IDs we've already added to avoid duplicates
+        local addedIds = {}
+        for _, entry in ipairs(messageQueue) do
+            if entry.channelId then
+                addedIds[entry.channelId] = true
+            end
+        end
+
+        -- Iterate through all joined channels
+        for i = 1, 20 do
+            local id, name = GetChannelName(i)
+            if id and id > 0 and name and name ~= "" then
+                -- Skip if already added by specific channel settings
+                if not addedIds[id] then
+                    local channelId = id
+                    local channelName = name
+                    table.insert(messageQueue, {delay = delay, func = function()
+                        SendChatMessage(msg, "CHANNEL", nil, channelId)
+                    end, name = channelName, channelId = channelId})
+                    delay = delay + delayIncrement
+                    addedIds[id] = true
+                end
+            end
         end
     end
 
@@ -441,7 +840,7 @@ function AIP.SpamInvite()
             if enabled then
                 local id = GetChannelName(channelName)
                 if id and id > 0 then
-                    table.insert(messageQueue, {delay = delay, func = function()
+                    table.insert(messageQueue, {delay = delay, channelId = id, func = function()
                         SendChatMessage(msg, "CHANNEL", nil, id)
                     end, name = channelName})
                     delay = delay + delayIncrement
@@ -454,7 +853,7 @@ function AIP.SpamInvite()
     if AIP.db.spamCustom and AIP.db.customChannel and AIP.db.customChannel ~= "" then
         local id = GetChannelName(AIP.db.customChannel)
         if id and id > 0 then
-            table.insert(messageQueue, {delay = delay, func = function()
+            table.insert(messageQueue, {delay = delay, channelId = id, func = function()
                 SendChatMessage(msg, "CHANNEL", nil, id)
             end, name = AIP.db.customChannel})
             delay = delay + delayIncrement
@@ -635,19 +1034,50 @@ local function OnEvent(self, event, ...)
     if event == "ADDON_LOADED" then
         local addonName = ...
         if addonName == ADDON_NAME then
-            -- Initialize saved variables
-            if not AutoInvitePlusDB then
+            -- Check DB version and handle migration
+            local needsReset = false
+            if AutoInvitePlusDB then
+                local savedVersion = AutoInvitePlusDB.dbVersion or 1
+                if savedVersion < DB_VERSION then
+                    Print("|cFFFFFF00Upgrading saved data from v" .. savedVersion .. " to v" .. DB_VERSION .. "|r")
+                    -- Perform migrations here if needed
+                    -- For now, just merge new defaults
+                    AutoInvitePlusDB.dbVersion = DB_VERSION
+                end
+            else
                 AutoInvitePlusDB = {}
             end
 
-            -- Merge defaults with saved data
+            -- Deep copy function for nested tables
+            local function deepCopy(orig)
+                if type(orig) ~= "table" then return orig end
+                local copy = {}
+                for k, v in pairs(orig) do
+                    copy[k] = deepCopy(v)
+                end
+                return copy
+            end
+
+            -- Merge defaults with saved data (preserves user settings)
             for k, v in pairs(defaults) do
                 if AutoInvitePlusDB[k] == nil then
-                    AutoInvitePlusDB[k] = v
+                    AutoInvitePlusDB[k] = deepCopy(v)
                 end
             end
 
             AIP.db = AutoInvitePlusDB
+
+            -- Initialize Utils event system if available
+            if AIP.Utils and AIP.Utils.Events and AIP.Utils.Events.Init then
+                AIP.Utils.Events.Init()
+            end
+
+            -- Apply saved tree browser settings
+            if AIP.TreeBrowser then
+                if AIP.db.treeStaleTimeout then
+                    AIP.TreeBrowser.StaleTimeout = AIP.db.treeStaleTimeout
+                end
+            end
 
             Print("v" .. VERSION .. " loaded. Type /aip or /autoinvite for options.")
         end
@@ -705,29 +1135,60 @@ local function OnEvent(self, event, ...)
         -- Check standard channels
         local channelLower = channelName and channelName:lower() or ""
 
+        -- Skip DataBus addon channel (it's for addon communication only)
+        if AIP.DataBus and AIP.DataBus.Config and channelLower:find(AIP.DataBus.Config.channelName:lower()) then
+            return
+        end
+
+        local processed = false
+
+        -- Standard channels
         if channelLower:find("general") and AIP.db.listenGeneral then
             ProcessMessage(author, message, "general")
+            processed = true
         elseif channelLower:find("trade") and AIP.db.listenTrade then
             ProcessMessage(author, message, "trade")
+            processed = true
         elseif (channelLower:find("lookingforgroup") or channelLower:find("lfg")) and AIP.db.listenLFG then
             ProcessMessage(author, message, "lfg")
+            processed = true
         elseif (channelLower:find("localdefense") or channelLower:find("defense")) and AIP.db.listenDefense then
             ProcessMessage(author, message, "defense")
-        else
+            processed = true
+        -- Global channel (common on private servers)
+        elseif (channelLower:find("global") or channelLower == "global") and AIP.db.listenGlobal then
+            ProcessMessage(author, message, "global")
+            processed = true
+        -- World channel (common on private servers)
+        elseif (channelLower:find("world") or channelLower == "world") and AIP.db.listenWorld then
+            ProcessMessage(author, message, "world")
+            processed = true
+        end
+
+        -- If not processed by standard channels, check custom channels
+        if not processed then
             -- Check custom listen channels
             if AIP.db.listenChannels then
                 for chName, enabled in pairs(AIP.db.listenChannels) do
                     if enabled and channelLower:find(chName:lower()) then
                         ProcessMessage(author, message, "custom:" .. chName)
+                        processed = true
                         break
                     end
                 end
             end
+
             -- Legacy custom channel support
-            if AIP.db.listenCustom and AIP.db.customChannel and AIP.db.customChannel ~= "" then
+            if not processed and AIP.db.listenCustom and AIP.db.customChannel and AIP.db.customChannel ~= "" then
                 if channelLower:find(AIP.db.customChannel:lower()) then
                     ProcessMessage(author, message, "custom")
+                    processed = true
                 end
+            end
+
+            -- Listen to all joined channels option
+            if not processed and AIP.db.listenAllJoined then
+                ProcessMessage(author, message, "channel:" .. channelName)
             end
         end
 
@@ -848,6 +1309,40 @@ local function SlashHandler(msg)
             AIP.Integrations.RaidBrowserSlashHandler(rest)
         end
 
+    -- DataBus (addon-to-addon communication)
+    elseif cmd == "databus" or cmd == "db" or cmd == "net" then
+        if AIP.DataBus then
+            AIP.DataBus.SlashHandler(rest)
+        else
+            AIP.Print("DataBus module not loaded")
+        end
+
+    -- Test Data (for UI development/testing)
+    elseif cmd == "testdata" or cmd == "test" then
+        if AIP.TestData then
+            AIP.TestData.LoadTestData()
+        else
+            Print("TestData module not loaded")
+        end
+    elseif cmd == "cleartest" or cmd == "cleartestdata" then
+        if AIP.TestData then
+            AIP.TestData.ClearTestData()
+        else
+            Print("TestData module not loaded")
+        end
+    elseif cmd == "testloot" then
+        if AIP.Panels and AIP.Panels.LootHistory then
+            AIP.Panels.LootHistory.LoadTestData()
+        else
+            Print("LootHistory panel not loaded")
+        end
+    elseif cmd == "cleartestloot" then
+        if AIP.Panels and AIP.Panels.LootHistory then
+            AIP.Panels.LootHistory.ClearTestData()
+        else
+            Print("LootHistory panel not loaded")
+        end
+
     -- Status
     elseif cmd == "status" then
         Print("=== AutoInvite Plus Status ===")
@@ -885,6 +1380,15 @@ local function SlashHandler(msg)
         Print("  /aip gs <name> - Check GearScore")
         Print("  /aip rb import - Import from Blizzard Raid Browser")
         Print("  /aip status - Current status")
+        Print("|cFFFFFF00DataBus (Addon Network):|r")
+        Print("  /aip databus - Show network status")
+        Print("  /aip databus peers - List online addon users")
+        Print("  /aip databus ping - Discover nearby users")
+        Print("|cFFFFFF00Development:|r")
+        Print("  /aip testdata - Load test data for UI preview")
+        Print("  /aip cleartest - Clear test data (preserves real data)")
+        Print("  /aip testloot - Load loot history test data")
+        Print("  /aip cleartestloot - Clear loot history test data")
 
     else
         Print("Unknown command. Type /aip help for options.")

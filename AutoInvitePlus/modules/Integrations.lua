@@ -5,20 +5,7 @@ local AIP = AutoInvitePlus
 AIP.Integrations = {}
 local Int = AIP.Integrations
 
--- Fallback C_Timer_After for WotLK
-if not C_Timer_After then
-    C_Timer_After = function(delay, func)
-        local frame = CreateFrame("Frame")
-        frame.elapsed = 0
-        frame:SetScript("OnUpdate", function(self, elapsed)
-            self.elapsed = self.elapsed + elapsed
-            if self.elapsed >= delay then
-                self:SetScript("OnUpdate", nil)
-                func()
-            end
-        end)
-    end
-end
+-- Use AIP.Utils.DelayedCall for WotLK-compatible timers
 
 -- ==========================================
 -- GEARSCORE CALCULATION (GearScoreLite Formula)
@@ -210,16 +197,43 @@ function Int.GetGearScore(name)
     if not name then return nil end
 
     -- Try GearScore addon first (most accurate)
+    -- GearScore_GetScore expects (unitId) as parameter, not player name
     if GearScore_GetScore then
-        local gs, ilvl = GearScore_GetScore(name, "player")
-        if not gs or gs == 0 then
-            -- Try with different unit IDs
-            if UnitExists("target") and UnitName("target") == name then
-                gs, ilvl = GearScore_GetScore(name, "target")
-            elseif UnitExists("mouseover") and UnitName("mouseover") == name then
-                gs, ilvl = GearScore_GetScore(name, "mouseover")
+        local gs, ilvl = nil, nil
+
+        -- Find the unit ID for this player
+        local unit = nil
+        if UnitExists("target") and UnitName("target") == name then
+            unit = "target"
+        elseif UnitExists("mouseover") and UnitName("mouseover") == name then
+            unit = "mouseover"
+        elseif UnitName("player") == name then
+            unit = "player"
+        else
+            -- Check party/raid
+            local numRaid = GetNumRaidMembers()
+            if numRaid > 0 then
+                for i = 1, numRaid do
+                    if UnitName("raid" .. i) == name then
+                        unit = "raid" .. i
+                        break
+                    end
+                end
+            else
+                local numParty = GetNumPartyMembers()
+                for i = 1, numParty do
+                    if UnitName("party" .. i) == name then
+                        unit = "party" .. i
+                        break
+                    end
+                end
             end
         end
+
+        if unit then
+            gs, ilvl = GearScore_GetScore(unit)
+        end
+
         if gs and gs > 0 then
             return gs, "GearScore", ilvl
         end
@@ -814,18 +828,14 @@ local function HookRaidBrowser()
     -- Try to hook LFRBrowseFrame if it exists
     if LFRBrowseFrame then
         LFRBrowseFrame:HookScript("OnShow", function()
-            -- Delay to allow Blizzard UI to populate
-            C_Timer_After(0.5, function()
-                Int.ImportRaidBrowserToLFG()
-            end)
+            -- Delay to allow Blizzard UI to populate (WotLK compatible)
+            AIP.Utils.DelayedCall(0.5, Int.ImportRaidBrowserToLFG)
         end)
 
         -- Also hook the Refresh button if it exists
         if LFRBrowseFrameRefreshButton then
             LFRBrowseFrameRefreshButton:HookScript("OnClick", function()
-                C_Timer_After(1, function()
-                    Int.ImportRaidBrowserToLFG()
-                end)
+                AIP.Utils.DelayedCall(1, Int.ImportRaidBrowserToLFG)
             end)
         end
 

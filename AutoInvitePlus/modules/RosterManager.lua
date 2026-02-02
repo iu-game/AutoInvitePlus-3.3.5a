@@ -139,6 +139,7 @@ end
 function Roster.GetSavedRosters()
     Roster.InitDB()
     local list = {}
+    if not AIP.db.rosters or not AIP.db.rosters.savedRosters then return list end
 
     for name, data in pairs(AIP.db.rosters.savedRosters) do
         table.insert(list, {
@@ -363,7 +364,7 @@ function Roster.GetWaitlist()
 
     table.sort(list, function(a, b)
         if a.priority ~= b.priority then
-            return a.priority > b.priority  -- Higher priority first
+            return a.priority < b.priority  -- Lower priority number = higher priority
         end
         return a.time < b.time  -- Earlier time first
     end)
@@ -781,8 +782,8 @@ function Roster.UpdateRosterList()
     end
 end
 
--- Update waitlist display
-function AIP.UpdateWaitlistUI()
+-- Update waitlist display (local to Roster module)
+function Roster.UpdateWaitlistUI()
     if not rosterFrame or not rosterFrame:IsVisible() then return end
 
     local list = Roster.GetWaitlist()
@@ -843,7 +844,7 @@ function AIP.ToggleRosterUI()
     else
         frame:Show()
         Roster.UpdateRosterList()
-        AIP.UpdateWaitlistUI()
+        Roster.UpdateWaitlistUI()
     end
 end
 

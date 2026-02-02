@@ -212,9 +212,10 @@ end
 
 -- Remove player from waitlist
 function AIP.RemoveFromWaitlist(name)
-    if not AIP.db or not AIP.db.waitlist or not name then return false end
+    if not AIP.db or not AIP.db.waitlist or not name or name == "" then return false end
 
-    local lowerName = name:lower():trim()
+    -- Use gsub for trim since string:trim() may not exist in WotLK
+    local lowerName = name:lower():gsub("^%s+", ""):gsub("%s+$", "")
 
     for i, entry in ipairs(AIP.db.waitlist) do
         if entry.name:lower() == lowerName then

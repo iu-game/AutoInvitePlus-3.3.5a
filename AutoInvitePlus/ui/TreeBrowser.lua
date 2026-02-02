@@ -22,7 +22,7 @@ TB.TreeData = {
 -- Configuration
 TB.Config = {
     indentWidth = 16,
-    rowHeight = 20,
+    rowHeight = 32,  -- Increased from 20 to accommodate two lines (name + composition)
     iconSize = 16,
     maxVisibleRows = 20,
 }
@@ -57,6 +57,10 @@ TB.KnownCategories = {}
 
 -- Settings for hiding locked instances
 TB.HideLocked = false
+
+-- Stale entry timeout (seconds) - entries older than this are hidden from tree
+-- Default: 180 seconds (3 minutes). Set to 0 to disable filtering.
+TB.StaleTimeout = 180
 
 -- Instance name to saved instance mapping for WotLK 3.3.5a (+ TBC and Classic)
 TB.InstanceMapping = {
@@ -327,13 +331,21 @@ end
 -- Extract raid size from raid string (returns 10, 25, or nil if not specified)
 local function ExtractRaidSize(raidStr)
     if not raidStr then return nil end
-    -- Check for explicit size indicators (must be at word boundary or with letters)
-    -- Match patterns like "10N", "10H", "10HC", "25N", "25H", "25HC", or just "10"/"25"
-    if raidStr:match("25[HNM]?") or raidStr:match("25HC") then
-        return 25
-    elseif raidStr:match("10[HNM]?") or raidStr:match("10HC") then
+
+    -- Look for size indicators in common raid string formats
+    -- Valid patterns: ICC10, ICC25, ICC10N, ICC10H, ICC10HC, ICC25HC, VOA10, TOC25, etc.
+    -- The number should be followed by end-of-string, H, N, M, or HC (difficulty indicators)
+
+    -- Check for 10-man: number 10 followed by end or difficulty letter (not another digit)
+    if raidStr:match("10$") or raidStr:match("10[HNM]") then
         return 10
     end
+
+    -- Check for 25-man: number 25 followed by end or difficulty letter (not another digit)
+    if raidStr:match("25$") or raidStr:match("25[HNM]") then
+        return 25
+    end
+
     return nil  -- Size not specified
 end
 
@@ -352,7 +364,9 @@ function TB.IsLockedToInstance(raidStr)
     -- Helper function to check if a lock matches the requested size
     local function LockMatchesSize(lock, wantedSize)
         if not wantedSize then
-            return true  -- No size specified, any lock counts
+            -- No size specified in raid string - don't mark as locked
+            -- (player might be doing the other size which isn't locked)
+            return false
         end
         return lock.maxPlayers == wantedSize
     end
@@ -424,6 +438,26 @@ function TB.BuildLFMTree(preserveState)
         return tree
     end
 
+    -- Filter out stale entries if timeout is set
+    local now = time()
+    local staleTimeout = TB.StaleTimeout or 180  -- Default 3 min
+    if staleTimeout > 0 then
+        local freshGroups = {}
+        for _, group in ipairs(allGroups) do
+            local age = group.time and (now - group.time) or 0
+            -- Keep if fresh OR if it's our own listing
+            if age <= staleTimeout or group.isOwn then
+                table.insert(freshGroups, group)
+            end
+        end
+        allGroups = freshGroups
+    end
+
+    -- If no fresh groups remain, return empty tree
+    if #allGroups == 0 then
+        return tree
+    end
+
     -- Organize groups by category
     local groupsByCategory = {}  -- {categoryId = {groups}}
     local unmatchedGroups = {}   -- Groups that don't match any category
@@ -469,15 +503,10 @@ function TB.BuildLFMTree(preserveState)
             end
 
             if #filteredGroups > 0 then
-                local countText = #filteredGroups
-                if lockedCount > 0 and not TB.HideLocked then
-                    countText = #filteredGroups .. ", |cFFFF4444" .. lockedCount .. " locked|r"
-                end
-
                 local catNode = {
                     id = "lfm_" .. category.id,
                     type = "category",
-                    text = category.name .. " (" .. countText .. ")",
+                    text = category.name .. " (" .. #filteredGroups .. ")",
                     count = #filteredGroups,
                     icon = TB.Icons.raid,
                     children = {},
@@ -494,22 +523,61 @@ function TB.BuildLFMTree(preserveState)
                 -- Add each group as a direct child
                 for _, group in ipairs(filteredGroups) do
                     local displayName = group.leader .. " - " .. (group.raid or "?")
+
+                    -- Build composition text for second line
+                    local compText = ""
+                    if group.tanks or group.healers or group.mdps or group.rdps or group.dps then
+                        local compParts = {}
+                        if group.tanks then
+                            local tc = group.tanks.current or 0
+                            local tn = group.tanks.needed or 0
+                            table.insert(compParts, string.format("|cFF00FF00T|r:%d/%d", tc, tn))
+                        end
+                        if group.healers then
+                            local hc = group.healers.current or 0
+                            local hn = group.healers.needed or 0
+                            table.insert(compParts, string.format("|cFF00D1FFH|r:%d/%d", hc, hn))
+                        end
+                        if group.mdps then
+                            local mc = group.mdps.current or 0
+                            local mn = group.mdps.needed or 0
+                            table.insert(compParts, string.format("|cFFFF6600M|r:%d/%d", mc, mn))
+                        end
+                        if group.rdps then
+                            local rc = group.rdps.current or 0
+                            local rn = group.rdps.needed or 0
+                            table.insert(compParts, string.format("|cFFFFCC00R|r:%d/%d", rc, rn))
+                        end
+                        -- Backwards compatibility: show old dps field if mdps/rdps not present
+                        if not group.mdps and not group.rdps and group.dps then
+                            local dc = group.dps.current or 0
+                            local dn = group.dps.needed or 0
+                            table.insert(compParts, string.format("D:%d/%d", dc, dn))
+                        end
+                        if #compParts > 0 then
+                            compText = table.concat(compParts, "  ")
+                        end
+                    end
+
                     local textColor = nil
 
                     -- Highlight player's own listing (green)
                     if group.isOwn then
                         displayName = "|cFF00FF00(You)|r " .. displayName
                         textColor = {r = 0, g = 1, b = 0}
-                    -- Mark locked instances (red)
+                    -- Mark locked instances with red color (no label)
                     elseif group.isLocked then
-                        displayName = "|cFFFF4444[Locked]|r " .. displayName
-                        textColor = {r = 1, g = 0.27, b = 0.27}
+                        textColor = {r = 1, g = 0.4, b = 0.4}
+                    -- Mark DataBus entries (cyan indicator)
+                    elseif group.isDataBus then
+                        displayName = "|cFF00CCFF[AIP]|r " .. displayName
                     end
 
                     local groupNode = {
                         id = "lfm_group_" .. group.leader,
                         type = "group",
                         text = displayName,
+                        compText = compText,  -- Composition on second line
                         textColor = textColor,
                         icon = TB.Icons.group,
                         isLeaf = true,
@@ -554,22 +622,61 @@ function TB.BuildLFMTree(preserveState)
 
             for _, group in ipairs(filteredUnmatched) do
                 local displayName = group.leader .. " - " .. (group.raid or "Unknown")
+
+                -- Build composition text for second line
+                local compText = ""
+                if group.tanks or group.healers or group.mdps or group.rdps or group.dps then
+                    local compParts = {}
+                    if group.tanks then
+                        local tc = group.tanks.current or 0
+                        local tn = group.tanks.needed or 0
+                        table.insert(compParts, string.format("|cFF00FF00T|r:%d/%d", tc, tn))
+                    end
+                    if group.healers then
+                        local hc = group.healers.current or 0
+                        local hn = group.healers.needed or 0
+                        table.insert(compParts, string.format("|cFF00D1FFH|r:%d/%d", hc, hn))
+                    end
+                    if group.mdps then
+                        local mc = group.mdps.current or 0
+                        local mn = group.mdps.needed or 0
+                        table.insert(compParts, string.format("|cFFFF6600M|r:%d/%d", mc, mn))
+                    end
+                    if group.rdps then
+                        local rc = group.rdps.current or 0
+                        local rn = group.rdps.needed or 0
+                        table.insert(compParts, string.format("|cFFFFCC00R|r:%d/%d", rc, rn))
+                    end
+                    -- Backwards compatibility
+                    if not group.mdps and not group.rdps and group.dps then
+                        local dc = group.dps.current or 0
+                        local dn = group.dps.needed or 0
+                        table.insert(compParts, string.format("D:%d/%d", dc, dn))
+                    end
+                    if #compParts > 0 then
+                        compText = table.concat(compParts, "  ")
+                    end
+                end
+
                 local textColor = nil
 
                 -- Highlight player's own listing (green)
                 if group.isOwn then
                     displayName = "|cFF00FF00(You)|r " .. displayName
                     textColor = {r = 0, g = 1, b = 0}
-                -- Mark locked instances (red)
+                -- Mark locked instances with red color (no label)
                 elseif group.isLocked then
-                    displayName = "|cFFFF4444[Locked]|r " .. displayName
-                    textColor = {r = 1, g = 0.27, b = 0.27}
+                    textColor = {r = 1, g = 0.4, b = 0.4}
+                -- Mark DataBus entries (cyan indicator)
+                elseif group.isDataBus then
+                    displayName = "|cFF00CCFF[AIP]|r " .. displayName
                 end
 
                 local groupNode = {
                     id = "lfm_group_" .. group.leader,
                     type = "group",
                     text = displayName,
+                    compText = compText,  -- Composition on second line
                     textColor = textColor,
                     icon = TB.Icons.group,
                     isLeaf = true,
@@ -596,6 +703,25 @@ function TB.BuildLFGTree(preserveState)
     -- Get all players (both LFG and LFM for now)
     local allPlayers = AIP.LFMBrowser.GetFilteredPlayers({})
 
+    if #allPlayers == 0 then
+        return tree
+    end
+
+    -- Filter out stale entries if timeout is set
+    local now = time()
+    local staleTimeout = TB.StaleTimeout or 180  -- Default 3 min
+    if staleTimeout > 0 then
+        local freshPlayers = {}
+        for _, player in ipairs(allPlayers) do
+            local age = player.time and (now - player.time) or 0
+            if age <= staleTimeout then
+                table.insert(freshPlayers, player)
+            end
+        end
+        allPlayers = freshPlayers
+    end
+
+    -- If no fresh players remain, return empty tree
     if #allPlayers == 0 then
         return tree
     end
@@ -661,15 +787,21 @@ function TB.BuildLFGTree(preserveState)
             for _, player in ipairs(catPlayers) do
                 local r, g, b = GetClassColor(player.class or "UNKNOWN")
                 local roleStr = player.role and (" [" .. player.role .. "]") or ""
+                local displayName = player.name .. roleStr
+                -- Mark DataBus entries (cyan indicator)
+                if player.isDataBus then
+                    displayName = "|cFF00CCFF[AIP]|r " .. displayName
+                end
                 local playerNode = {
                     id = "lfg_player_" .. player.name,
                     type = "player",
-                    text = player.name .. roleStr,
+                    text = displayName,
                     textColor = {r = r, g = g, b = b},
                     role = player.role,
                     icon = TB.Icons.player,
                     isLeaf = true,
                     data = player,
+                    isDataBus = player.isDataBus,
                 }
                 table.insert(catNode.children, playerNode)
             end
@@ -698,15 +830,21 @@ function TB.BuildLFGTree(preserveState)
         for _, player in ipairs(unmatchedPlayers) do
             local r, g, b = GetClassColor(player.class or "UNKNOWN")
             local roleStr = player.role and (" [" .. player.role .. "]") or ""
+            local displayName = player.name .. roleStr
+            -- Mark DataBus entries (cyan indicator)
+            if player.isDataBus then
+                displayName = "|cFF00CCFF[AIP]|r " .. displayName
+            end
             local playerNode = {
                 id = "lfg_player_" .. player.name,
                 type = "player",
-                text = player.name .. roleStr,
+                text = displayName,
                 textColor = {r = r, g = g, b = b},
                 role = player.role,
                 icon = TB.Icons.player,
                 isLeaf = true,
                 data = player,
+                isDataBus = player.isDataBus,
             }
             table.insert(otherNode.children, playerNode)
         end
@@ -932,10 +1070,28 @@ function TB.CreateTreeView(parent, width, height)
         -- Text - anchored to row with fixed left offset (not to icons)
         -- This ensures text position is stable regardless of icon visibility
         local text = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        text:SetPoint("LEFT", row, "LEFT", 56, 0)  -- Fixed position after icons
-        text:SetPoint("RIGHT", row, "RIGHT", -5, 0)
+        text:SetPoint("LEFT", row, "LEFT", 56, 5)  -- Offset up for two-line layout
+        text:SetPoint("RIGHT", row, "RIGHT", -5, 5)
         text:SetJustifyH("LEFT")
         row.text = text
+
+        -- Composition text (second line, smaller font)
+        local compText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        compText:SetPoint("TOPLEFT", text, "BOTTOMLEFT", 0, -1)
+        compText:SetPoint("RIGHT", row, "RIGHT", -40, 0)  -- Leave room for timer
+        compText:SetJustifyH("LEFT")
+        compText:SetTextColor(0.7, 0.7, 0.7)  -- Slightly dimmer
+        compText:Hide()
+        row.compText = compText
+
+        -- Timer text (right side, shows seconds since detected)
+        local timerText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        timerText:SetPoint("RIGHT", row, "RIGHT", -5, 0)
+        timerText:SetWidth(35)
+        timerText:SetJustifyH("RIGHT")
+        timerText:SetTextColor(0.5, 0.5, 0.5)
+        timerText:Hide()
+        row.timerText = timerText
 
         row:Hide()
         frame.rows[i] = row
@@ -1002,9 +1158,14 @@ function TB.CreateTreeView(parent, width, height)
                 local textOffset = indent + 18  -- Base offset after expand button
                 if node.icon then textOffset = textOffset + 18 end  -- Icon space
                 if roleShown then textOffset = textOffset + 18 end  -- Role icon space
+
+                -- Check if this node has composition data (groups/players with role info)
+                local hasComp = node.compText and node.compText ~= ""
+                local vertOffset = hasComp and 5 or 0  -- Shift up if we have a second line
+
                 row.text:ClearAllPoints()
-                row.text:SetPoint("LEFT", row, "LEFT", textOffset, 0)
-                row.text:SetPoint("RIGHT", row, "RIGHT", -5, 0)
+                row.text:SetPoint("LEFT", row, "LEFT", textOffset, vertOffset)
+                row.text:SetPoint("RIGHT", row, "RIGHT", -5, vertOffset)
 
                 -- Text with highlight color for categories
                 row.text:SetText(node.text or "")
@@ -1014,6 +1175,43 @@ function TB.CreateTreeView(parent, width, height)
                     row.text:SetTextColor(1, 0.82, 0)  -- Gold for categories
                 else
                     row.text:SetTextColor(1, 1, 1)
+                end
+
+                -- Composition text (second line for groups)
+                if hasComp then
+                    row.compText:ClearAllPoints()
+                    row.compText:SetPoint("TOPLEFT", row.text, "BOTTOMLEFT", 0, -1)
+                    row.compText:SetPoint("RIGHT", row, "RIGHT", -40, 0)  -- Leave room for timer
+                    row.compText:SetText(node.compText)
+                    row.compText:Show()
+                else
+                    row.compText:Hide()
+                end
+
+                -- Timer display (seconds since detected/synced)
+                row.nodeData = node  -- Store for timer refresh
+                if node.data and node.data.time and (node.type == "group" or node.type == "player") then
+                    local elapsed = time() - node.data.time
+                    local timerStr
+                    if elapsed < 60 then
+                        timerStr = elapsed .. "s"
+                    elseif elapsed < 3600 then
+                        timerStr = math.floor(elapsed / 60) .. "m"
+                    else
+                        timerStr = math.floor(elapsed / 3600) .. "h"
+                    end
+                    row.timerText:SetText(timerStr)
+                    -- Color based on age (green=fresh, yellow=aging, red=stale)
+                    if elapsed < 120 then
+                        row.timerText:SetTextColor(0.4, 0.8, 0.4)  -- Green
+                    elseif elapsed < 300 then
+                        row.timerText:SetTextColor(0.8, 0.8, 0.4)  -- Yellow
+                    else
+                        row.timerText:SetTextColor(0.8, 0.4, 0.4)  -- Red
+                    end
+                    row.timerText:Show()
+                else
+                    row.timerText:Hide()
                 end
 
                 -- Alternating row background
@@ -1026,10 +1224,12 @@ function TB.CreateTreeView(parent, width, height)
                 -- Click handlers
                 row:SetScript("OnClick", function()
                     local playerName = nil
+                    local nodeData = nil
                     if node.type == "player" or node.type == "group" then
                         playerName = node.data and (node.data.name or node.data.leader)
+                        nodeData = node.data  -- Pass the actual data
                     end
-                    TB.SelectNode(node.id, playerName)
+                    TB.SelectNode(node.id, playerName, nodeData)
                     self:Update(treeData, FauxScrollFrame_GetOffset(self.scrollFrame))
                 end)
 
@@ -1038,6 +1238,107 @@ function TB.CreateTreeView(parent, width, height)
                         TB.ToggleNode(node.id)
                         self:Update(treeData, FauxScrollFrame_GetOffset(self.scrollFrame))
                     end
+                end)
+
+                -- Tooltip for composition display
+                row:SetScript("OnEnter", function(self)
+                    local n = self.nodeData
+                    if not n or not n.data then return end
+                    if n.type == "group" or n.type == "player" then
+                        local group = n.data
+                        if group.tanks or group.healers or group.mdps or group.rdps or group.dps then
+                            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                            GameTooltip:AddLine(group.leader or group.name or "Group", 1, 0.82, 0)
+                            GameTooltip:AddLine(" ")
+                            GameTooltip:AddLine("Composition (Filled/Needed):", 0.8, 0.8, 0.8)
+
+                            if group.tanks then
+                                local tc = group.tanks.current or 0
+                                local tn = group.tanks.needed or 0
+                                local color = tc >= tn and {0, 1, 0} or {1, 0.5, 0}
+                                GameTooltip:AddDoubleLine("|cFF00FF00T|r = Tanks", string.format("%d / %d", tc, tn), 0.7, 0.7, 0.7, color[1], color[2], color[3])
+                            end
+                            if group.healers then
+                                local hc = group.healers.current or 0
+                                local hn = group.healers.needed or 0
+                                local color = hc >= hn and {0, 1, 0} or {1, 0.5, 0}
+                                GameTooltip:AddDoubleLine("|cFF00D1FFH|r = Healers", string.format("%d / %d", hc, hn), 0.7, 0.7, 0.7, color[1], color[2], color[3])
+                            end
+                            if group.mdps then
+                                local mc = group.mdps.current or 0
+                                local mn = group.mdps.needed or 0
+                                local color = mc >= mn and {0, 1, 0} or {1, 0.5, 0}
+                                GameTooltip:AddDoubleLine("|cFFFF6600M|r = Melee DPS", string.format("%d / %d", mc, mn), 0.7, 0.7, 0.7, color[1], color[2], color[3])
+                            end
+                            if group.rdps then
+                                local rc = group.rdps.current or 0
+                                local rn = group.rdps.needed or 0
+                                local color = rc >= rn and {0, 1, 0} or {1, 0.5, 0}
+                                GameTooltip:AddDoubleLine("|cFFFFCC00R|r = Ranged DPS", string.format("%d / %d", rc, rn), 0.7, 0.7, 0.7, color[1], color[2], color[3])
+                            end
+                            -- Backwards compat
+                            if not group.mdps and not group.rdps and group.dps then
+                                local dc = group.dps.current or 0
+                                local dn = group.dps.needed or 0
+                                local color = dc >= dn and {0, 1, 0} or {1, 0.5, 0}
+                                GameTooltip:AddDoubleLine("D = DPS", string.format("%d / %d", dc, dn), 0.7, 0.7, 0.7, color[1], color[2], color[3])
+                            end
+
+                            -- Total filled
+                            local totalCurrent = (group.tanks and group.tanks.current or 0) +
+                                               (group.healers and group.healers.current or 0) +
+                                               (group.mdps and group.mdps.current or 0) +
+                                               (group.rdps and group.rdps.current or 0)
+                            local totalNeeded = (group.tanks and group.tanks.needed or 0) +
+                                              (group.healers and group.healers.needed or 0) +
+                                              (group.mdps and group.mdps.needed or 0) +
+                                              (group.rdps and group.rdps.needed or 0)
+                            if totalNeeded > 0 then
+                                GameTooltip:AddLine(" ")
+                                local color = totalCurrent >= totalNeeded and {0, 1, 0} or {1, 0.82, 0}
+                                GameTooltip:AddDoubleLine("Total Filled:", string.format("%d / %d", totalCurrent, totalNeeded), 0.7, 0.7, 0.7, color[1], color[2], color[3])
+                            end
+
+                            if group.gsMin then
+                                GameTooltip:AddLine(" ")
+                                GameTooltip:AddDoubleLine("Min GS:", tostring(group.gsMin) .. "+", 0.7, 0.7, 0.7, 1, 1, 0)
+                            end
+                            if group.ilvlMin and group.ilvlMin > 0 then
+                                GameTooltip:AddDoubleLine("Min iLvl:", tostring(group.ilvlMin) .. "+", 0.7, 0.7, 0.7, 1, 0.82, 0)
+                            end
+
+                            -- Looking For classes/specs
+                            if group.roleSpecs then
+                                GameTooltip:AddLine(" ")
+                                GameTooltip:AddLine("Looking For:", 0.8, 0.8, 0.8)
+                                if group.roleSpecs.TANK and #group.roleSpecs.TANK > 0 then
+                                    GameTooltip:AddLine("  |cFF00FFFFTanks:|r " .. table.concat(group.roleSpecs.TANK, ", "), 0.9, 0.9, 0.9)
+                                end
+                                if group.roleSpecs.HEALER and #group.roleSpecs.HEALER > 0 then
+                                    GameTooltip:AddLine("  |cFF00FF00Healers:|r " .. table.concat(group.roleSpecs.HEALER, ", "), 0.9, 0.9, 0.9)
+                                end
+                                if group.roleSpecs.MDPS and #group.roleSpecs.MDPS > 0 then
+                                    GameTooltip:AddLine("  |cFFFF6600Melee:|r " .. table.concat(group.roleSpecs.MDPS, ", "), 0.9, 0.9, 0.9)
+                                end
+                                if group.roleSpecs.RDPS and #group.roleSpecs.RDPS > 0 then
+                                    GameTooltip:AddLine("  |cFFFFCC00Ranged:|r " .. table.concat(group.roleSpecs.RDPS, ", "), 0.9, 0.9, 0.9)
+                                end
+                            elseif group.lookingForSpecs and #group.lookingForSpecs > 0 then
+                                GameTooltip:AddLine(" ")
+                                GameTooltip:AddLine("Looking For: " .. table.concat(group.lookingForSpecs, ", "), 0.9, 0.9, 0.9)
+                            end
+
+                            if group.note and group.note ~= "" then
+                                GameTooltip:AddLine(" ")
+                                GameTooltip:AddLine("Note: " .. group.note, 0.7, 0.7, 0.7, true)
+                            end
+                            GameTooltip:Show()
+                        end
+                    end
+                end)
+
+                row:SetScript("OnLeave", function()
+                    GameTooltip:Hide()
                 end)
 
                 -- Highlight selected
@@ -1080,6 +1381,160 @@ function TB.CreateTreeView(parent, width, height)
         end
         return 0
     end
+
+    -- Update size dynamically (for window resize handling)
+    -- If width/height are nil, use the frame's actual dimensions (from anchors)
+    function frame:UpdateSize(newWidth, newHeight)
+        -- If using anchor-based sizing, get dimensions from frame itself
+        if not newWidth or not newHeight then
+            newWidth = self:GetWidth()
+            newHeight = self:GetHeight()
+        end
+
+        -- Skip update if dimensions are too small (frame not yet visible/laid out)
+        if newWidth < 50 or newHeight < 50 then
+            return
+        end
+
+        -- Only call SetSize if not using opposite-corner anchors
+        -- (When TOPLEFT+BOTTOMRIGHT anchors are set, size is determined by anchors)
+        -- Check if we have anchor-based sizing by seeing if we have a BOTTOMRIGHT point
+        local _, relativeTo = self:GetPoint(2)
+        if not relativeTo then
+            -- No second anchor point, use explicit size
+            self:SetSize(newWidth, newHeight)
+        end
+
+        -- Calculate new number of rows
+        local newNumRows = math.floor((newHeight - 10) / TB.Config.rowHeight)
+        if newNumRows < 1 then newNumRows = 1 end
+        if newNumRows > 50 then newNumRows = 50 end  -- Sanity limit
+
+        -- Update content area
+        if self.content then
+            self.content:SetPoint("TOPLEFT", 5, -5)
+            self.content:SetPoint("BOTTOMRIGHT", -22, 5)
+        end
+
+        -- Create additional rows if needed
+        local rowWidth = newWidth - 35
+        for i = #self.rows + 1, newNumRows do
+            local row = CreateFrame("Button", self:GetName().."Row"..i, self.content)
+            row:SetSize(rowWidth, TB.Config.rowHeight)
+            row:SetPoint("TOPLEFT", self.content, "TOPLEFT", 0, -((i - 1) * TB.Config.rowHeight))
+            row:SetFrameLevel(self.content:GetFrameLevel() + 1)
+
+            local rowBg = row:CreateTexture(nil, "BACKGROUND")
+            rowBg:SetAllPoints()
+            rowBg:SetTexture(0, 0, 0, 0)
+            row.bg = rowBg
+
+            row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+
+            local expandBtn = CreateFrame("Button", nil, row)
+            expandBtn:SetSize(14, 14)
+            expandBtn:SetPoint("LEFT", 2, 0)
+            expandBtn:SetNormalTexture(TB.Icons.collapsed)
+            expandBtn:Hide()
+            row.expandBtn = expandBtn
+
+            local icon = row:CreateTexture(nil, "ARTWORK")
+            icon:SetSize(TB.Config.iconSize, TB.Config.iconSize)
+            icon:SetPoint("LEFT", expandBtn, "RIGHT", 2, 0)
+            row.icon = icon
+
+            local roleIcon = row:CreateTexture(nil, "ARTWORK")
+            roleIcon:SetSize(TB.Config.iconSize, TB.Config.iconSize)
+            roleIcon:SetPoint("LEFT", icon, "RIGHT", 2, 0)
+            roleIcon:Hide()
+            row.roleIcon = roleIcon
+
+            local text = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            text:SetPoint("LEFT", row, "LEFT", 56, 5)
+            text:SetPoint("RIGHT", row, "RIGHT", -5, 5)
+            text:SetJustifyH("LEFT")
+            row.text = text
+
+            local compText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            compText:SetPoint("TOPLEFT", text, "BOTTOMLEFT", 0, -1)
+            compText:SetPoint("RIGHT", row, "RIGHT", -40, 0)  -- Leave room for timer
+            compText:SetJustifyH("LEFT")
+            compText:SetTextColor(0.7, 0.7, 0.7)
+            compText:Hide()
+            row.compText = compText
+
+            -- Timer text (right side, shows seconds since detected)
+            local timerText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            timerText:SetPoint("RIGHT", row, "RIGHT", -5, 0)
+            timerText:SetWidth(35)
+            timerText:SetJustifyH("RIGHT")
+            timerText:SetTextColor(0.5, 0.5, 0.5)
+            timerText:Hide()
+            row.timerText = timerText
+
+            row:Hide()
+            self.rows[i] = row
+        end
+
+        -- Update existing row widths
+        for i = 1, #self.rows do
+            self.rows[i]:SetSize(rowWidth, TB.Config.rowHeight)
+            self.rows[i]:SetPoint("TOPLEFT", self.content, "TOPLEFT", 0, -((i - 1) * TB.Config.rowHeight))
+        end
+
+        self.numRows = newNumRows
+
+        -- Refresh display with current data
+        if self.currentTreeData then
+            local offset = 0
+            if self.scrollFrame then
+                offset = FauxScrollFrame_GetOffset(self.scrollFrame)
+            end
+            self:Update(self.currentTreeData, offset)
+        end
+    end
+
+    -- Timer refresh mechanism - update timer displays every 5 seconds
+    frame.timerElapsed = 0
+    frame:SetScript("OnUpdate", function(self, elapsed)
+        self.timerElapsed = self.timerElapsed + elapsed
+        if self.timerElapsed >= 5 then
+            self.timerElapsed = 0
+            -- Only update timer text, not full refresh (performance)
+            if self.rows and self.currentTreeData then
+                local offset = 0
+                if self.scrollFrame then
+                    offset = FauxScrollFrame_GetOffset(self.scrollFrame)
+                end
+                -- Update timer displays for visible rows
+                for i, row in ipairs(self.rows) do
+                    if row:IsShown() and row.timerText and row.nodeData then
+                        local node = row.nodeData
+                        if node and node.data and node.data.time then
+                            local elapsed = time() - node.data.time
+                            local timerStr
+                            if elapsed < 60 then
+                                timerStr = elapsed .. "s"
+                            elseif elapsed < 3600 then
+                                timerStr = math.floor(elapsed / 60) .. "m"
+                            else
+                                timerStr = math.floor(elapsed / 3600) .. "h"
+                            end
+                            row.timerText:SetText(timerStr)
+                            -- Color based on age
+                            if elapsed < 120 then
+                                row.timerText:SetTextColor(0.4, 0.8, 0.4)
+                            elseif elapsed < 300 then
+                                row.timerText:SetTextColor(0.8, 0.8, 0.4)
+                            else
+                                row.timerText:SetTextColor(0.8, 0.4, 0.4)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
 
     return frame
 end
