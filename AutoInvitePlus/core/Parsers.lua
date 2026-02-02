@@ -477,8 +477,9 @@ Parsers.SpecCodeInfo = {
     Ret  = {class = "PALADIN", spec = "Retribution", shortClass = "Paladin"},
     Rog  = {class = "ROGUE", spec = "Any", shortClass = "Rogue"},
     FD   = {class = "DRUID", spec = "Feral (Cat)", shortClass = "Druid"},
-    WA   = {class = "DRUID", spec = "Feral (Cat)", shortClass = "Druid"},
     Enh  = {class = "SHAMAN", spec = "Enhancement", shortClass = "Shaman"},
+    FDK  = {class = "DEATHKNIGHT", spec = "Frost", shortClass = "DK"},
+    UDK  = {class = "DEATHKNIGHT", spec = "Unholy", shortClass = "DK"},
     Df   = {class = "DEATHKNIGHT", spec = "DPS", shortClass = "DK"},
     DK   = {class = "DEATHKNIGHT", spec = "Any", shortClass = "DK"},
     -- Ranged DPS

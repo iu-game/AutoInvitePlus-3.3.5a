@@ -4637,11 +4637,17 @@ function GUI.GetCustomChannelId(channelName)
 end
 
 -- Parse LFG enrollment message from other addon users
--- New format: "LFG <RAID> - <Class> (<Spec>) <Role> | GS:<gs> iL:<ilvl> Lv:<level> {AIP:5.2}"
+-- Current format: "LFG <RAID> - <Class> (<Spec>) <Role> - GS:<gs> iL:<ilvl> Lv:<level> {AIP:5.2}"
+-- Legacy format with |: "LFG <RAID> - <Class> (<Spec>) <Role> | GS:<gs> iL:<ilvl> Lv:<level> {AIP:5.2}"
 -- Old format: "LFG <RAID> - <Class> (<Spec>) <Role>, GS: <gs>, iLvl: <ilvl> {AIP:<version>}"
 function GUI.ParseLfgEnrollment(message, author)
-    -- Try new format first: "LFG ICC25H - War (Arms) DPS | GS:5500 iL:264 Lv:80 {AIP:5.2}"
-    local raid, classDisplay, spec, role, gs, ilvl, level = message:match("LFG%s+(%S+)%s+%-%s+(%S+)%s+%(([^)]+)%)%s+(%a+)%s+|%s*GS:(%d+)%s+iL:(%d+)%s+Lv:(%d+)")
+    -- Try current format first: "LFG ICC25H - War (Arms) DPS - GS:5500 iL:264 Lv:80 {AIP:5.2}"
+    local raid, classDisplay, spec, role, gs, ilvl, level = message:match("LFG%s+(%S+)%s+%-%s+(%S+)%s+%(([^)]+)%)%s+(%a+)%s+%-%s*GS:(%d+)%s+iL:(%d+)%s+Lv:(%d+)")
+
+    -- Try legacy format with |
+    if not raid then
+        raid, classDisplay, spec, role, gs, ilvl, level = message:match("LFG%s+(%S+)%s+%-%s+(%S+)%s+%(([^)]+)%)%s+(%a+)%s+|%s*GS:(%d+)%s+iL:(%d+)%s+Lv:(%d+)")
+    end
 
     -- Fallback to old format if new format doesn't match
     if not raid then
@@ -4942,6 +4948,36 @@ function GUI.DoBroadcast()
     if delayIncrement > 2 then
         -- Debug: show that we're using elevated delays
         -- AIP.Print("|cFFFFFF00Broadcast using " .. delayIncrement .. "s delay between channels|r")
+    end
+
+    -- Also broadcast via DataBus for addon-to-addon communication
+    if AIP.DataBus then
+        if mode == "lfm" and GUI.MyGroup then
+            -- Broadcast LFM data to other addon users
+            local lfmData = {
+                raid = GUI.MyGroup.raid,
+                tanks = GUI.MyGroup.tanks,
+                healers = GUI.MyGroup.healers,
+                mdps = GUI.MyGroup.mdps,
+                rdps = GUI.MyGroup.rdps,
+                gsMin = GUI.MyGroup.gsMin,
+                ilvlMin = GUI.MyGroup.ilvlMin,
+                triggerKey = GUI.MyGroup.inviteKeyword,
+                roleSpecs = GUI.MyGroup.roleSpecs,
+            }
+            AIP.DataBus.BroadcastLFM(lfmData)
+        elseif mode == "lfg" and GUI.MyEnrollment then
+            -- Broadcast LFG data to other addon users
+            local lfgData = {
+                raids = {GUI.MyEnrollment.raid},
+                role = GUI.MyEnrollment.role,
+                class = GUI.MyEnrollment.class,
+                spec = GUI.MyEnrollment.spec,
+                gs = GUI.MyEnrollment.gs,
+                ilvl = GUI.MyEnrollment.ilvl,
+            }
+            AIP.DataBus.BroadcastLFG(lfgData)
+        end
     end
 end
 
@@ -5558,7 +5594,8 @@ GUI.ClassSpecs = {
         -- Melee DPS
         {class = "WARRIOR", spec = "Arms/Fury", icon = "Interface\\Icons\\Ability_Warrior_BattleShout", melee = true},
         {class = "PALADIN", spec = "Retribution", icon = "Interface\\Icons\\Spell_Holy_AuraOfLight", melee = true},
-        {class = "DEATHKNIGHT", spec = "Frost/Unholy", icon = "Interface\\Icons\\Spell_Deathknight_FrostPresence", melee = true},
+        {class = "DEATHKNIGHT", spec = "Frost", icon = "Interface\\Icons\\Spell_Deathknight_FrostPresence", melee = true},
+        {class = "DEATHKNIGHT", spec = "Unholy", icon = "Interface\\Icons\\Spell_Deathknight_UnholyPresence", melee = true},
         {class = "ROGUE", spec = "All", icon = "Interface\\Icons\\Ability_BackStab", melee = true},
         {class = "DRUID", spec = "Feral (Cat)", icon = "Interface\\Icons\\Ability_Druid_CatForm", melee = true},
         {class = "SHAMAN", spec = "Enhancement", icon = "Interface\\Icons\\Spell_Nature_LightningShield", melee = true},
@@ -6142,9 +6179,10 @@ function GUI.CreateAddGroupPopup()
             DRUID_Restoration = "RD",       -- Resto Druid
             SHAMAN_Restoration = "RS",      -- Resto Shaman
             -- Melee DPS
-            WARRIOR_Arms = "AW",            -- Arms Warrior
+            WARRIOR_ArmsFury = "AW",        -- Arms/Fury Warrior
             PALADIN_Retribution = "Ret",    -- Ret Paladin
             DEATHKNIGHT_Frost = "FDK",      -- Frost DK
+            DEATHKNIGHT_Unholy = "UDK",     -- Unholy DK
             ROGUE_All = "Rog",              -- Rogue
             DRUID_FeralCat = "FD",          -- Feral Druid (cat)
             SHAMAN_Enhancement = "Enh",     -- Enh Shaman
@@ -7097,8 +7135,8 @@ function GUI.CreateEnrollPopup()
         }
         local classShort = classShortCodes[class] or classDisplay
 
-        -- Build message with all stats
-        local msg = string.format("LFG %s - %s (%s) %s | GS:%d iL:%d Lv:%d {AIP:5.2}",
+        -- Build message with all stats (use - instead of | to avoid WoW escape code issues)
+        local msg = string.format("LFG %s - %s (%s) %s - GS:%d iL:%d Lv:%d {AIP:5.2}",
             raidKey, classShort, spec, role, gs, ilvl, level)
         if achieveLink ~= "" then
             msg = msg .. " " .. achieveLink

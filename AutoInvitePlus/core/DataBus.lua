@@ -13,12 +13,16 @@ local DB = AIP.DataBus
 DB.Config = {
     prefix = "AIP",                    -- Addon message prefix (max 16 chars)
     version = "1.0",                   -- Protocol version
-    channelName = "AIPNet",            -- Custom channel for cross-faction/realm
+    channelName = "AIPSync",           -- Custom channel for cross-guild communication
+    channelPassword = "aip335",        -- Password to keep channel semi-private
+    chatPrefix = "!A:",                -- Prefix for chat channel messages (short to save space)
     maxMessageLength = 255,            -- WoW chat limit
     eventTTL = 600,                    -- Events expire after 10 minutes
     pruneInterval = 60,                -- Prune every 60 seconds
     rateLimitInterval = 2,             -- Min seconds between broadcasts of same type
+    channelRateLimit = 5,              -- Min seconds between channel broadcasts (avoid spam)
     enabled = true,
+    useChannelFallback = true,         -- Use chat channel for cross-guild communication
 }
 
 -- ============================================================================
@@ -87,19 +91,22 @@ DB.EventTypes = {
 DB.State = {
     initialized = false,
     channelId = nil,                   -- Custom channel ID if joined
+    channelReady = false,              -- True when channel is confirmed joined
     subscribers = {},                  -- {eventType = {callback1, callback2, ...}}
     receivedEvents = {},               -- {senderId = {eventType = eventData}}
     lastBroadcast = {},                -- {eventType = timestamp} for rate limiting
+    lastChannelBroadcast = 0,          -- Timestamp of last channel message (separate rate limit)
     onlinePeers = {},                  -- {playerName = {version, lastSeen}}
     channelJoinAttempts = 0,           -- Backoff: number of failed join attempts
     lastChannelJoinAttempt = 0,        -- Backoff: time of last join attempt
 }
 
 -- ============================================================================
--- SERIALIZATION (Simple, WoW 3.3.5a compatible)
+-- SERIALIZATION (Simple, WoW 3.3.5a chat-safe)
+-- Uses ^ as escape character instead of \ (WoW chat rejects backslash escapes)
 -- ============================================================================
 
--- Encode a value to string
+-- Encode a value to string (chat-safe)
 local function EncodeValue(val)
     local t = type(val)
     if t == "nil" then
@@ -109,8 +116,8 @@ local function EncodeValue(val)
     elseif t == "number" then
         return "n" .. tostring(val)
     elseif t == "string" then
-        -- Escape special chars and wrap
-        local escaped = val:gsub("\\", "\\\\"):gsub("|", "\\p"):gsub("~", "\\t"):gsub("\n", "\\n")
+        -- Escape special chars using ^ (chat-safe, no backslash)
+        local escaped = val:gsub("%^", "^^"):gsub("|", "^P"):gsub("~", "^T"):gsub("\n", "^N")
         return "s" .. escaped
     elseif t == "table" then
         local parts = {}
@@ -168,7 +175,18 @@ local function DecodeValue(str, pos)
             local c = str:sub(i, i)
             if c == "~" then
                 break
+            elseif c == "^" and i < #str then
+                -- Chat-safe escape sequences using ^
+                local next = str:sub(i + 1, i + 1)
+                if next == "^" then result = result .. "^"
+                elseif next == "P" then result = result .. "|"
+                elseif next == "T" then result = result .. "~"
+                elseif next == "N" then result = result .. "\n"
+                else result = result .. next
+                end
+                i = i + 2
             elseif c == "\\" and i < #str then
+                -- Legacy backslash escapes (for backwards compatibility)
                 local next = str:sub(i + 1, i + 1)
                 if next == "\\" then result = result .. "\\"
                 elseif next == "p" then result = result .. "|"
@@ -224,7 +242,7 @@ end
 function DB.Serialize(event)
     if not event or not event.type then return nil end
 
-    -- Format: VERSION|TYPE|TIMESTAMP|DATA
+    -- Format: VERSION;TYPE;TIMESTAMP;DATA (using ; instead of | for chat safety)
     local parts = {
         DB.Config.version,
         event.type,
@@ -232,14 +250,20 @@ function DB.Serialize(event)
         EncodeValue(event.data or {}),
     }
 
-    return table.concat(parts, "|")
+    return table.concat(parts, ";")
 end
 
 -- Deserialize a string back to an event
 function DB.Deserialize(str, sender)
     if not str then return nil end
 
-    local version, eventType, timestamp, dataStr = strsplit("|", str, 4)
+    -- Try new format with ; separator first
+    local version, eventType, timestamp, dataStr = strsplit(";", str, 4)
+
+    -- Fallback to legacy | separator for backwards compatibility
+    if not eventType or eventType == "" then
+        version, eventType, timestamp, dataStr = strsplit("|", str, 4)
+    end
 
     if not version or not eventType then return nil end
 
@@ -407,10 +431,13 @@ function DB.Broadcast(event, target)
         sent = true
     end
 
-    -- Send to custom channel if joined
-    if DB.State.channelId then
-        SendAddonMessage(DB.Config.prefix, message, "CHANNEL", DB.State.channelId)
-        sent = true
+    -- Send via custom chat channel for cross-guild communication (3.3.5a compatible)
+    -- This uses regular chat messages with a prefix, not addon messages
+    if DB.Config.useChannelFallback and DB.State.channelReady then
+        local channelSent = DB.SendChannelMessage(message)
+        if channelSent then
+            sent = true
+        end
     end
 
     -- Send to specific target (whisper)
@@ -477,20 +504,17 @@ local function OnAddonMessage(prefix, message, channel, sender)
     StoreEvent(event)
     DispatchEvent(event)
 
-    -- Track peer for PING/PONG
+    -- Track peer for all event types (they're all addon users)
+    local peerVersion = event.data and event.data.version or event.version or "unknown"
+    DB.State.onlinePeers[sender] = {
+        version = peerVersion,
+        lastSeen = time(),
+    }
+
+    -- Respond to PING with PONG
     if event.type == "PING" then
-        DB.State.onlinePeers[sender] = {
-            version = event.data.version or "unknown",
-            lastSeen = time(),
-        }
-        -- Respond with PONG
         local pong = DB.CreateEvent("PONG", {version = AIP.Version or "5.0"})
         DB.Broadcast(pong, sender)
-    elseif event.type == "PONG" then
-        DB.State.onlinePeers[sender] = {
-            version = event.data.version or "unknown",
-            lastSeen = time(),
-        }
     end
 end
 
@@ -615,22 +639,41 @@ end
 -- ============================================================================
 
 -- Join the addon communication channel
+-- Uses regular chat channel (not addon messages) for cross-guild communication in 3.3.5a
 function DB.JoinChannel()
-    -- Try to join/create the custom channel
-    local id = GetChannelName(DB.Config.channelName)
-    if id == 0 then
-        JoinTemporaryChannel(DB.Config.channelName)
-        -- Get the ID after joining
-        id = GetChannelName(DB.Config.channelName)
-    end
+    if not DB.Config.useChannelFallback then return false end
 
-    if id > 0 then
+    -- Check if already joined
+    local id = GetChannelName(DB.Config.channelName)
+    if id and id > 0 then
         DB.State.channelId = id
-        AIP.Debug("DataBus: Joined channel " .. DB.Config.channelName .. " (id: " .. id .. ")")
+        DB.State.channelReady = true
+        AIP.Debug("DataBus: Already on channel " .. DB.Config.channelName .. " (id: " .. id .. ")")
         return true
     end
 
-    return false
+    -- Join with password to keep semi-private
+    JoinTemporaryChannel(DB.Config.channelName, DB.Config.channelPassword)
+
+    -- Schedule verification (JoinTemporaryChannel is async)
+    if AIP.Utils and AIP.Utils.DelayedCall then
+        AIP.Utils.DelayedCall(1, function()
+            local retryId = GetChannelName(DB.Config.channelName)
+            if retryId and retryId > 0 then
+                DB.State.channelId = retryId
+                DB.State.channelReady = true
+                DB.State.channelJoinAttempts = 0
+                AIP.Debug("DataBus: Joined channel " .. DB.Config.channelName .. " (id: " .. retryId .. ")")
+                -- Send initial ping after joining
+                DB.SendPing()
+            else
+                DB.State.channelJoinAttempts = (DB.State.channelJoinAttempts or 0) + 1
+                AIP.Debug("DataBus: Failed to join channel, attempt " .. DB.State.channelJoinAttempts)
+            end
+        end)
+    end
+
+    return false  -- Will be true after async verification
 end
 
 -- Leave the addon communication channel
@@ -638,7 +681,93 @@ function DB.LeaveChannel()
     if DB.State.channelId then
         LeaveChannelByName(DB.Config.channelName)
         DB.State.channelId = nil
+        DB.State.channelReady = false
     end
+end
+
+-- Send a message via the chat channel (for cross-guild communication)
+function DB.SendChannelMessage(message)
+    if not DB.Config.useChannelFallback then return false end
+    if not DB.State.channelReady or not DB.State.channelId then return false end
+
+    -- Rate limit channel messages more strictly to avoid spam
+    local now = GetTime()
+    if now - (DB.State.lastChannelBroadcast or 0) < DB.Config.channelRateLimit then
+        return false, "channel_rate_limited"
+    end
+    DB.State.lastChannelBroadcast = now
+
+    -- Prefix with our marker so we can identify addon messages
+    local fullMessage = DB.Config.chatPrefix .. message
+
+    -- Check length
+    if #fullMessage > DB.Config.maxMessageLength then
+        AIP.Debug("DataBus: Channel message too long")
+        return false, "message_too_long"
+    end
+
+    -- Send via chat channel
+    SendChatMessage(fullMessage, "CHANNEL", nil, DB.State.channelId)
+    return true
+end
+
+-- Send a PING to discover peers
+function DB.SendPing()
+    local ping = DB.CreateEvent("PING", {version = AIP.Version or "5.0"})
+    if ping then
+        DB.Broadcast(ping)
+    end
+end
+
+-- Handle incoming chat channel message (for cross-guild communication)
+local function OnChannelMessage(message, sender, _, _, _, _, _, _, channelName)
+    -- Check if this is our addon message (starts with our prefix)
+    if not message or not DB.Config.chatPrefix then return end
+    if not message:find("^" .. DB.Config.chatPrefix:gsub("([^%w])", "%%%1")) then return end
+
+    -- Check if it's from our channel
+    if channelName and not channelName:lower():find(DB.Config.channelName:lower()) then return end
+
+    -- Don't process our own messages
+    if sender == UnitName("player") then return end
+
+    -- Extract the actual message (remove prefix)
+    local addonMessage = message:sub(#DB.Config.chatPrefix + 1)
+    if not addonMessage or addonMessage == "" then return end
+
+    -- Process as if it were an addon message
+    local event = DB.Deserialize(addonMessage, sender)
+    if not event then
+        AIP.Debug("DataBus: Failed to deserialize channel message from " .. tostring(sender))
+        return
+    end
+
+    -- Store and dispatch
+    StoreEvent(event)
+    DispatchEvent(event)
+
+    -- Track peer
+    local peerVersion = event.data and event.data.version or event.version or "unknown"
+    DB.State.onlinePeers[sender] = {
+        version = peerVersion,
+        lastSeen = time(),
+    }
+
+    -- Respond to PING with PONG
+    if event.type == "PING" then
+        local pong = DB.CreateEvent("PONG", {version = AIP.Version or "5.0"})
+        DB.Broadcast(pong, sender)
+    end
+end
+
+-- Chat filter to hide our addon messages from chat frames
+local function ChatFilter(self, event, message, sender, ...)
+    if message and DB.Config.chatPrefix then
+        if message:find("^" .. DB.Config.chatPrefix:gsub("([^%w])", "%%%1")) then
+            return true  -- Hide this message
+        end
+    end
+    return false
 end
 
 -- ============================================================================
@@ -652,18 +781,24 @@ local function OnEvent(self, event, ...)
         local prefix, message, channel, sender = ...
         OnAddonMessage(prefix, message, channel, sender)
 
+    elseif event == "CHAT_MSG_CHANNEL" then
+        local message, sender, _, _, _, _, _, _, channelName = ...
+        OnChannelMessage(message, sender, nil, nil, nil, nil, nil, nil, channelName)
+
     elseif event == "PLAYER_LOGIN" then
-        -- Register addon prefix
+        -- Register addon prefix (if available in this client version)
         if RegisterAddonMessagePrefix then
             RegisterAddonMessagePrefix(DB.Config.prefix)
         end
 
-        -- Join custom channel after a short delay
+        -- Join custom channel for cross-guild communication
         AIP.Utils.DelayedCall(3, function()
             DB.JoinChannel()
-            -- Send initial ping
-            local ping = DB.CreateEvent("PING", {version = AIP.Version or "5.0"})
-            DB.Broadcast(ping)
+        end)
+
+        -- Send initial ping after channel has time to connect
+        AIP.Utils.DelayedCall(6, function()
+            DB.SendPing()
         end)
 
         DB.State.initialized = true
@@ -672,27 +807,42 @@ local function OnEvent(self, event, ...)
         DB.LeaveChannel()
 
     elseif event == "CHANNEL_UI_UPDATE" or event == "CHAT_MSG_CHANNEL_NOTICE" then
-        -- Channel state changed, try to rejoin if needed
-        if DB.State.initialized and not DB.State.channelId then
-            DB.JoinChannel()
+        -- Channel state may have changed, verify our channel
+        if DB.State.initialized and DB.Config.useChannelFallback then
+            local currentId = GetChannelName(DB.Config.channelName)
+            if currentId and currentId > 0 then
+                DB.State.channelId = currentId
+                DB.State.channelReady = true
+            else
+                DB.State.channelReady = false
+                -- Try to rejoin if lost
+                DB.JoinChannel()
+            end
         end
     end
 end
 
 eventFrame:RegisterEvent("CHAT_MSG_ADDON")
+eventFrame:RegisterEvent("CHAT_MSG_CHANNEL")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("PLAYER_LOGOUT")
 eventFrame:RegisterEvent("CHANNEL_UI_UPDATE")
 eventFrame:RegisterEvent("CHAT_MSG_CHANNEL_NOTICE")
 eventFrame:SetScript("OnEvent", OnEvent)
 
--- Periodic cleanup and channel health check
+-- Install chat filter to hide our messages (do this early)
+ChatFrame_AddMessageEventFilter("CHAT_MSG_CHANNEL", ChatFilter)
+
+-- Periodic cleanup, channel health check, and heartbeat
 local pruneElapsed = 0
+local heartbeatElapsed = 0
 local channelCheckElapsed = 0
-local CHANNEL_CHECK_INTERVAL = 30  -- Check every 30 seconds
+local HEARTBEAT_INTERVAL = 120     -- Send PING every 2 minutes to maintain peer awareness
+local CHANNEL_CHECK_INTERVAL = 30  -- Check channel health every 30 seconds
 
 eventFrame:SetScript("OnUpdate", function(self, elapsed)
     pruneElapsed = pruneElapsed + elapsed
+    heartbeatElapsed = heartbeatElapsed + elapsed
     channelCheckElapsed = channelCheckElapsed + elapsed
 
     -- Prune expired events
@@ -701,25 +851,31 @@ eventFrame:SetScript("OnUpdate", function(self, elapsed)
         DB.Prune()
     end
 
-    -- Ensure DataBus channel stays connected (always active regardless of settings)
+    -- Periodic heartbeat PING to maintain peer awareness
+    if heartbeatElapsed >= HEARTBEAT_INTERVAL then
+        heartbeatElapsed = 0
+        if DB.State.initialized and DB.Config.enabled then
+            DB.SendPing()
+        end
+    end
+
+    -- Channel health check
     if channelCheckElapsed >= CHANNEL_CHECK_INTERVAL then
         channelCheckElapsed = 0
-        if DB.State.initialized then
+        if DB.State.initialized and DB.Config.useChannelFallback then
             local currentId = GetChannelName(DB.Config.channelName)
-            if currentId == 0 or currentId ~= DB.State.channelId then
-                -- Channel lost, rejoin with exponential backoff
+            if not currentId or currentId == 0 then
+                -- Channel lost, try to rejoin with backoff
                 local now = time()
-                local backoffTime = math.min(300, 10 * (2 ^ DB.State.channelJoinAttempts))
-                if (now - DB.State.lastChannelJoinAttempt) >= backoffTime then
+                local backoffTime = math.min(300, 10 * (2 ^ (DB.State.channelJoinAttempts or 0)))
+                if (now - (DB.State.lastChannelJoinAttempt or 0)) >= backoffTime then
                     DB.State.lastChannelJoinAttempt = now
-                    if DB.JoinChannel() then
-                        DB.State.channelJoinAttempts = 0  -- Reset on success
-                    else
-                        DB.State.channelJoinAttempts = DB.State.channelJoinAttempts + 1
-                    end
+                    DB.JoinChannel()
                 end
-            else
-                -- Channel is connected, reset backoff
+            elseif currentId ~= DB.State.channelId then
+                -- Channel ID changed, update it
+                DB.State.channelId = currentId
+                DB.State.channelReady = true
                 DB.State.channelJoinAttempts = 0
             end
         end
@@ -772,7 +928,17 @@ end
 function DB.PrintStatus()
     AIP.Print("=== DataBus Status ===")
     AIP.Print("Enabled: " .. (DB.Config.enabled and "Yes" or "No"))
-    AIP.Print("Channel: " .. (DB.State.channelId and (DB.Config.channelName .. " #" .. DB.State.channelId) or "Not joined"))
+
+    -- Channel status
+    local channelStatus = "Disabled"
+    if DB.Config.useChannelFallback then
+        if DB.State.channelReady and DB.State.channelId then
+            channelStatus = DB.Config.channelName .. " (#" .. DB.State.channelId .. ") - Connected"
+        else
+            channelStatus = DB.Config.channelName .. " - Connecting..."
+        end
+    end
+    AIP.Print("Channel: " .. channelStatus)
     AIP.Print("Peers online: " .. DB.GetPeerCount())
     AIP.Print("LFM listings: " .. #DB.GetLFMListings())
     AIP.Print("LFG listings: " .. #DB.GetLFGListings())
@@ -801,9 +967,14 @@ function DB.SlashHandler(msg)
             end
         end
     elseif msg == "ping" then
-        local ping = DB.CreateEvent("PING", {version = AIP.Version or "5.0"})
-        DB.Broadcast(ping)
-        AIP.Print("Ping sent")
+        DB.SendPing()
+        local channels = {}
+        if IsInGuild() then table.insert(channels, "guild") end
+        if GetNumRaidMembers() > 0 then table.insert(channels, "raid") end
+        if GetNumPartyMembers() > 0 then table.insert(channels, "party") end
+        if DB.State.channelReady then table.insert(channels, DB.Config.channelName) end
+        local channelStr = #channels > 0 and table.concat(channels, ", ") or "none"
+        AIP.Print("Ping sent via: " .. channelStr)
     elseif msg == "enable" then
         DB.Config.enabled = true
         AIP.Print("DataBus enabled")

@@ -616,7 +616,7 @@ local function OnRosterUpdate()
 end
 
 -- Boss kill detection via combat log
-local function OnCombatLogEvent()
+local function OnCombatLogEvent(...)
     local timestamp, event, srcGUID, srcName, srcFlags, dstGUID, dstName, dstFlags = CombatLogGetCurrentEventInfo
         and CombatLogGetCurrentEventInfo()
         or select(1, ...)
