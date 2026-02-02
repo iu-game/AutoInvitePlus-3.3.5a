@@ -26,6 +26,10 @@ Parsers.GSPatterns = {
     "(%d%d%d%d)%s*%+%s*gs",
     -- With separators: "5,800 gs"
     "(%d[%d,]+)%s*gs",
+    -- AIP format: "5800+ iLvl" or "5800+ ilvl" (number before iLvl)
+    "(%d%d%d%d)%+?%s+i[lL]v[lL]",
+    -- Standalone 4-digit number followed by + (common LFM format)
+    "%]%s*(%d%d%d%d)%+",
 }
 
 -- ============================================================================

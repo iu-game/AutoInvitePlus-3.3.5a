@@ -186,12 +186,14 @@ function CS.AddPlayer(info)
         CS.PrunePlayers()
 
         -- Auto-queue new LFG players from chat that match our active LFM
+        -- Only if autoQueueLFG is enabled in settings
         -- (Skip DataBus since those are handled in OnDataBusLFG)
-        if info.isLFG and not info.isDataBus and CS.MatchesMyLFM(info) then
+        if AIP.db and AIP.db.autoQueueLFG and info.isLFG and not info.isDataBus and CS.MatchesMyLFM(info) then
             local GUI = AIP.CentralGUI or {}
             if GUI.MyGroup and AIP.AddToQueue then
                 local isBlacklisted = AIP.IsBlacklisted and AIP.IsBlacklisted(info.author)
-                if not isBlacklisted and not AIP.IsInQueue(info.author) then
+                local isInQueue = AIP.IsInQueue and AIP.IsInQueue(info.author)
+                if not isBlacklisted and not isInQueue then
                     AIP.AddToQueue(info.author, info.message, info.role, info.gs, info.class)
                     AIP.Print("|cFF00FF00Auto-queued|r " .. info.author .. " from chat (matched your LFM)")
                 end
@@ -224,24 +226,92 @@ function CS.MatchesMyLFM(lfgInfo)
 
     local myLFM = GUI.MyGroup
 
-    -- Check raid match
+    -- Check raid match - STRICT matching required
     local targetRaid = lfgInfo.raids and lfgInfo.raids[1] or lfgInfo.raid
     if not targetRaid then return false end
 
-    -- Match raid key (allow ICC to match ICC10N, ICC25H, etc.)
-    local myRaidBase = myLFM.raid:gsub("[0-9]+[NH]?$", "")
-    local theirRaidBase = targetRaid:gsub("[0-9]+[NH]?$", "")
-
-    if myRaidBase:lower() ~= theirRaidBase:lower() then
-        -- Also check exact match
-        if myLFM.raid:lower() ~= targetRaid:lower() then
-            return false
-        end
+    -- Require exact raid match (ICC25H must match ICC25H, not ICC10N or RS25H)
+    if myLFM.raid:lower() ~= targetRaid:lower() then
+        return false
     end
 
     -- Check GS requirement
     if myLFM.gsMin and myLFM.gsMin > 0 then
         if not lfgInfo.gs or lfgInfo.gs < myLFM.gsMin then
+            return false
+        end
+    end
+
+    -- Check iLvl requirement
+    if myLFM.ilvlMin and myLFM.ilvlMin > 0 then
+        if not lfgInfo.ilvl or lfgInfo.ilvl < myLFM.ilvlMin then
+            return false
+        end
+    end
+
+    -- Check role needs - only queue if we need their role
+    if lfgInfo.role and myLFM then
+        local role = lfgInfo.role:upper()
+        local needed = false
+
+        if role == "TANK" and myLFM.tanks then
+            needed = (myLFM.tanks.needed or 0) > (myLFM.tanks.current or 0)
+        elseif role == "HEALER" and myLFM.healers then
+            needed = (myLFM.healers.needed or 0) > (myLFM.healers.current or 0)
+        elseif (role == "MDPS" or role == "MELEE" or role == "DPS") and myLFM.mdps then
+            needed = (myLFM.mdps.needed or 0) > (myLFM.mdps.current or 0)
+        elseif (role == "RDPS" or role == "RANGED") and myLFM.rdps then
+            needed = (myLFM.rdps.needed or 0) > (myLFM.rdps.current or 0)
+        else
+            -- Unknown role or no role specified - allow if any DPS slot open
+            needed = ((myLFM.mdps and (myLFM.mdps.needed or 0) > (myLFM.mdps.current or 0)) or
+                     (myLFM.rdps and (myLFM.rdps.needed or 0) > (myLFM.rdps.current or 0)))
+        end
+
+        if not needed then
+            return false
+        end
+    end
+
+    -- Check class/spec requirements if roleSpecs defined
+    if myLFM.roleSpecs and lfgInfo.class then
+        local playerClass = lfgInfo.class:upper()
+        local playerRole = lfgInfo.role and lfgInfo.role:upper() or "DPS"
+
+        -- Determine which roles to check based on player's role
+        local rolesToCheck = {}
+        if playerRole == "TANK" then
+            rolesToCheck = {"TANK"}
+        elseif playerRole == "HEALER" then
+            rolesToCheck = {"HEALER"}
+        elseif playerRole == "MDPS" or playerRole == "MELEE" then
+            rolesToCheck = {"MDPS"}
+        elseif playerRole == "RDPS" or playerRole == "RANGED" then
+            rolesToCheck = {"RDPS"}
+        else
+            rolesToCheck = {"MDPS", "RDPS"}
+        end
+
+        -- Check if player's class is wanted for their role
+        local classWanted = false
+        for _, role in ipairs(rolesToCheck) do
+            local specs = myLFM.roleSpecs[role]
+            if specs and #specs > 0 then
+                for _, code in ipairs(specs) do
+                    local info = AIP.Parsers and AIP.Parsers.SpecCodeInfo and AIP.Parsers.SpecCodeInfo[code]
+                    if info and info.class == playerClass then
+                        classWanted = true
+                        break
+                    end
+                end
+            else
+                -- No spec requirements for this role, any class accepted
+                classWanted = true
+            end
+            if classWanted then break end
+        end
+
+        if not classWanted then
             return false
         end
     end
@@ -775,12 +845,13 @@ local function OnDataBusLFG(event)
     -- Add to players (same as regular chat)
     CS.AddPlayer(info)
 
-    -- Auto-queue if matches our active LFM
-    if CS.MatchesMyLFM(info) then
+    -- Auto-queue if autoQueueLFG is enabled and matches our active LFM
+    if AIP.db and AIP.db.autoQueueLFG and CS.MatchesMyLFM(info) then
         local GUI = AIP.CentralGUI or {}
         if GUI.MyGroup and AIP.AddToQueue then
             local isBlacklisted = AIP.IsBlacklisted and AIP.IsBlacklisted(info.author)
-            if not isBlacklisted and not AIP.IsInQueue(info.author) then
+            local isInQueue = AIP.IsInQueue and AIP.IsInQueue(info.author)
+            if not isBlacklisted and not isInQueue then
                 AIP.AddToQueue(info.author, info.message, info.role, info.gs, info.class)
                 AIP.Print("|cFF00FF00Auto-queued|r " .. info.author .. " (matched your LFM)")
             end

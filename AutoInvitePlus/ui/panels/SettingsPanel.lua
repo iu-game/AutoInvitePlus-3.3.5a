@@ -25,6 +25,7 @@ SP.Tooltips = {
     guildOnly = "Only accept invites from players in your guild.\n\n|cFF00FF00Enable when:|r You're running a guild-only event and want to filter out non-guildies automatically.\n\nPlayers not in your guild who whisper the trigger will be ignored.",
 
     useQueue = "When enabled, players who whisper you with trigger keywords will be added to the QUEUE for manual review instead of being auto-invited.\n\nThis works independently - you don't need to enable 'Enable Auto-Invite'.\n\nThe queue panel will automatically open when someone joins.\n\n|cFF00FF00Enable when:|r You want to review players before inviting (check GS, class, etc.).",
+    autoQueueLFG = "When enabled, players broadcasting LFG (Looking for Group) that match your active LFM listing will be automatically added to your queue.\n\n|cFFFFFF00Strict Matching:|r\n- Requires EXACT raid match (ICC25H LFG only matches ICC25H LFM)\n- Checks GearScore and iLvl requirements\n- Verifies role needs (won't queue healers if you have enough)\n- Respects class/spec preferences if set\n\n|cFFFF0000Disabled by default|r - LFG players will appear in the LFG browser tab for you to manually review and invite.",
 
     blacklistMode = "Controls how blacklisted players are handled:\n\n|cFFFFFFFFFlag Only:|r Shows blacklisted players in queue with a warning indicator. You can still manually invite them.\n\n|cFFFF4444Auto-Reject:|r Automatically rejects blacklisted players and sends them the rejection whisper.\n\n|cFF00FF00Tip:|r Use 'Flag Only' if you want to give players a second chance.",
 
@@ -355,6 +356,13 @@ function SP.Create(parent)
     frame.checks.useQueue = useQueueCheck
     local useQueueTooltip = CreateTooltipButton(content, "useQueue")
     useQueueTooltip:SetPoint("LEFT", useQueueLabel, "RIGHT", 5, 0)
+    y = y - 26
+
+    -- Auto-queue LFG players
+    local autoQueueLFGCheck, autoQueueLFGLabel = CreateCheckbox(content, 15, y, "autoQueueLFG", "Auto-queue LFG players matching your LFM")
+    frame.checks.autoQueueLFG = autoQueueLFGCheck
+    local autoQueueLFGTooltip = CreateTooltipButton(content, "autoQueueLFG")
+    autoQueueLFGTooltip:SetPoint("LEFT", autoQueueLFGLabel, "RIGHT", 5, 0)
     y = y - 26
 
     -- Blacklist mode

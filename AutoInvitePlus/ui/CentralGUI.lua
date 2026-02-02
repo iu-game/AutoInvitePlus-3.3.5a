@@ -1733,6 +1733,29 @@ function GUI.CreateBrowserTab(container, tabType)
         label:SetTextColor(0.8, 0.8, 0.8)
     end
 
+    -- Search box for queue
+    local queueSearchBox = CreateFrame("EditBox", "AIPQueueSearch", queueContent, "InputBoxTemplate")
+    queueSearchBox:SetSize(80, 16)
+    queueSearchBox:SetPoint("TOPRIGHT", -80, 0)
+    queueSearchBox:SetAutoFocus(false)
+    queueSearchBox:SetScript("OnTextChanged", function(self)
+        container.queueSearchFilter = self:GetText():lower()
+        GUI.UpdateQueuePanel(container)
+    end)
+    queueSearchBox:SetScript("OnEscapePressed", function(self)
+        self:SetText("")
+        self:ClearFocus()
+    end)
+    queueSearchBox:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Search Queue")
+        GameTooltip:AddLine("Filter by player name or message", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    queueSearchBox:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    container.queueSearchBox = queueSearchBox
+    container.queueSearchFilter = ""
+
     -- Add Player button for queue
     local addQueueBtn = CreateFrame("Button", nil, queueContent, "UIPanelButtonTemplate")
     addQueueBtn:SetSize(70, 18)
@@ -1949,6 +1972,27 @@ function GUI.CreateBrowserTab(container, tabType)
             GameTooltip:Show()
         end)
         row.remBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        -- Whisper button
+        row.whisperBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        row.whisperBtn:SetSize(22, 16)
+        row.whisperBtn:SetPoint("LEFT", 470, 0)
+        row.whisperBtn:SetText("W")
+        row.whisperBtn.index = i
+        row.whisperBtn:SetScript("OnClick", function(self)
+            local entry = self:GetParent().entryData
+            if entry and entry.name then
+                ChatFrame_OpenChat("/w " .. entry.name .. " ", DEFAULT_CHAT_FRAME)
+            end
+        end)
+        row.whisperBtn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine("Whisper")
+            GameTooltip:AddLine("Open whisper to this player", 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        row.whisperBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
         row:Hide()
         container.queueRows[i] = row
     end
@@ -1976,6 +2020,29 @@ function GUI.CreateBrowserTab(container, tabType)
         label:SetText(h.text)
         label:SetTextColor(0.8, 0.8, 0.8)
     end
+
+    -- Search box for LFG
+    local lfgSearchBox = CreateFrame("EditBox", "AIPLfgSearch", lfgContent, "InputBoxTemplate")
+    lfgSearchBox:SetSize(80, 16)
+    lfgSearchBox:SetPoint("TOPRIGHT", -5, 0)
+    lfgSearchBox:SetAutoFocus(false)
+    lfgSearchBox:SetScript("OnTextChanged", function(self)
+        container.lfgSearchFilter = self:GetText():lower()
+        GUI.UpdateQueuePanel(container)
+    end)
+    lfgSearchBox:SetScript("OnEscapePressed", function(self)
+        self:SetText("")
+        self:ClearFocus()
+    end)
+    lfgSearchBox:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Search LFG")
+        GameTooltip:AddLine("Filter by player name, spec, or raid", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    lfgSearchBox:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    container.lfgSearchBox = lfgSearchBox
+    container.lfgSearchFilter = ""
 
     -- LFG rows (enrollment broadcasts)
     container.lfgRows = {}
@@ -2224,6 +2291,29 @@ function GUI.CreateBrowserTab(container, tabType)
         label:SetTextColor(0.8, 0.8, 0.8)
     end
 
+    -- Search box for waitlist
+    local waitlistSearchBox = CreateFrame("EditBox", "AIPWaitlistSearch", waitlistContent, "InputBoxTemplate")
+    waitlistSearchBox:SetSize(80, 16)
+    waitlistSearchBox:SetPoint("TOPRIGHT", -80, 0)
+    waitlistSearchBox:SetAutoFocus(false)
+    waitlistSearchBox:SetScript("OnTextChanged", function(self)
+        container.waitlistSearchFilter = self:GetText():lower()
+        GUI.UpdateQueuePanel(container)
+    end)
+    waitlistSearchBox:SetScript("OnEscapePressed", function(self)
+        self:SetText("")
+        self:ClearFocus()
+    end)
+    waitlistSearchBox:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Search Waitlist")
+        GameTooltip:AddLine("Filter by player name, role, or note", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    waitlistSearchBox:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    container.waitlistSearchBox = waitlistSearchBox
+    container.waitlistSearchFilter = ""
+
     -- Add Player button for waitlist
     local addWaitlistBtn = CreateFrame("Button", nil, waitlistContent, "UIPanelButtonTemplate")
     addWaitlistBtn:SetSize(70, 18)
@@ -2371,6 +2461,27 @@ function GUI.CreateBrowserTab(container, tabType)
             GameTooltip:Show()
         end)
         row.remBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        -- Whisper button
+        row.whisperBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        row.whisperBtn:SetSize(22, 16)
+        row.whisperBtn:SetPoint("LEFT", 469, 0)
+        row.whisperBtn:SetText("W")
+        row.whisperBtn.index = i
+        row.whisperBtn:SetScript("OnClick", function(self)
+            local entries = AIP.db and AIP.db.waitlist or {}
+            local entry = entries[self.index]
+            if entry and entry.name then
+                ChatFrame_OpenChat("/w " .. entry.name .. " ", DEFAULT_CHAT_FRAME)
+            end
+        end)
+        row.whisperBtn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine("Whisper")
+            GameTooltip:AddLine("Open whisper to this player", 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        row.whisperBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
         -- Enable mouse for tooltips
         row:EnableMouse(true)
@@ -4101,6 +4212,48 @@ function GUI.UpdateQueuePanel(container)
         end
     end
 
+    -- Apply search filters
+    local queueSearchFilter = container.queueSearchFilter or ""
+    local lfgSearchFilter = container.lfgSearchFilter or ""
+    local waitlistSearchFilter = container.waitlistSearchFilter or ""
+
+    -- Store totals before filtering (for filtered/total display)
+    local totalQueue = #queueEntries
+    local totalLfg = #lfgEntries
+    local totalWaitlist = #(AIP.db and AIP.db.waitlist or {})
+
+    -- Filter queue entries
+    if queueSearchFilter ~= "" then
+        local filtered = {}
+        for _, entry in ipairs(queueEntries) do
+            local name = (entry.name or ""):lower()
+            local msg = (entry.message or ""):lower()
+            local class = (entry.class or ""):lower()
+            if name:find(queueSearchFilter, 1, true) or msg:find(queueSearchFilter, 1, true) or class:find(queueSearchFilter, 1, true) then
+                table.insert(filtered, entry)
+            end
+        end
+        queueEntries = filtered
+    end
+
+    -- Filter LFG entries
+    if lfgSearchFilter ~= "" then
+        local filtered = {}
+        for _, entry in ipairs(lfgEntries) do
+            local name = (entry.name or ""):lower()
+            local spec = (entry.spec or ""):lower()
+            local raid = (entry.raid or ""):lower()
+            local role = (entry.role or ""):lower()
+            local class = (entry.class or ""):lower()
+            if name:find(lfgSearchFilter, 1, true) or spec:find(lfgSearchFilter, 1, true) or
+               raid:find(lfgSearchFilter, 1, true) or role:find(lfgSearchFilter, 1, true) or
+               class:find(lfgSearchFilter, 1, true) then
+                table.insert(filtered, entry)
+            end
+        end
+        lfgEntries = filtered
+    end
+
     -- Update Queue rows (whisper requests)
     if container.queueRows then
         for i = 1, #container.queueRows do
@@ -4298,19 +4451,44 @@ function GUI.UpdateQueuePanel(container)
     end
 
     -- Update Waitlist rows
-    local waitlistEntries = AIP.db and AIP.db.waitlist or {}
+    local rawWaitlist = AIP.db and AIP.db.waitlist or {}
+    local waitlistEntries = {}
+
+    -- Build waitlist entries with original indices for filtering support
+    for origIdx, entry in ipairs(rawWaitlist) do
+        local wlEntry = {
+            entry = entry,
+            origIndex = origIdx,
+        }
+        if waitlistSearchFilter ~= "" then
+            local name = (entry.name or ""):lower()
+            local role = (entry.role or ""):lower()
+            local note = (entry.note or ""):lower()
+            local class = (entry.class or ""):lower()
+            if name:find(waitlistSearchFilter, 1, true) or role:find(waitlistSearchFilter, 1, true) or
+               note:find(waitlistSearchFilter, 1, true) or class:find(waitlistSearchFilter, 1, true) then
+                table.insert(waitlistEntries, wlEntry)
+            end
+        else
+            table.insert(waitlistEntries, wlEntry)
+        end
+    end
+
     if container.waitlistRows then
         for i = 1, #container.waitlistRows do
             local row = container.waitlistRows[i]
-            local entry = waitlistEntries[i]
+            local wlEntry = waitlistEntries[i]
+            local entry = wlEntry and wlEntry.entry or nil
+            local origIndex = wlEntry and wlEntry.origIndex or i
 
-            row.invBtn.index = i
-            row.upBtn.index = i
-            row.downBtn.index = i
-            row.remBtn.index = i
+            row.invBtn.index = origIndex
+            row.upBtn.index = origIndex
+            row.downBtn.index = origIndex
+            row.remBtn.index = origIndex
+            if row.whisperBtn then row.whisperBtn.index = origIndex end
 
             if entry then
-                row.numText:SetText(i)
+                row.numText:SetText(origIndex)
                 row.nameText:SetText(entry.name or "-")
 
                 -- Color role text
@@ -4333,15 +4511,29 @@ function GUI.UpdateQueuePanel(container)
         end
     end
 
-    -- Update tab button counts
+    -- Update tab button counts (show filtered/total when filter is active)
+    -- Note: totalQueue, totalLfg, totalWaitlist were calculated before filtering
+
     if container.queueTabBtn and container.queueTabBtn.text then
-        container.queueTabBtn.text:SetText("Queue (" .. #queueEntries .. ")")
+        if queueSearchFilter ~= "" then
+            container.queueTabBtn.text:SetText("Queue (" .. #queueEntries .. "/" .. totalQueue .. ")")
+        else
+            container.queueTabBtn.text:SetText("Queue (" .. #queueEntries .. ")")
+        end
     end
     if container.lfgTabBtn and container.lfgTabBtn.text then
-        container.lfgTabBtn.text:SetText("LFG (" .. #lfgEntries .. ")")
+        if lfgSearchFilter ~= "" then
+            container.lfgTabBtn.text:SetText("LFG (" .. #lfgEntries .. "/" .. totalLfg .. ")")
+        else
+            container.lfgTabBtn.text:SetText("LFG (" .. #lfgEntries .. ")")
+        end
     end
     if container.waitlistTabBtn and container.waitlistTabBtn.text then
-        container.waitlistTabBtn.text:SetText("Waitlist (" .. #waitlistEntries .. ")")
+        if waitlistSearchFilter ~= "" then
+            container.waitlistTabBtn.text:SetText("Waitlist (" .. #waitlistEntries .. "/" .. totalWaitlist .. ")")
+        else
+            container.waitlistTabBtn.text:SetText("Waitlist (" .. #waitlistEntries .. ")")
+        end
     end
 
     -- Update status

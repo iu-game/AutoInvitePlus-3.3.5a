@@ -27,6 +27,11 @@ local defaults = {
     guildOnly = false,
     useQueue = false,
 
+    -- Auto-queue LFG players that match your LFM listing
+    -- When enabled, players broadcasting LFG for your exact raid will be auto-queued
+    -- (respects GS, iLvl, role needs, and class/spec requirements)
+    autoQueueLFG = false,
+
     -- Player mode: "none", "lfm" (looking for members), "lfg" (looking for group)
     playerMode = "none",
 
@@ -619,6 +624,16 @@ local function ProcessMessage(author, message, channel)
 
     if not author or author == "" then return end
     if author:lower() == UnitName("player"):lower() then return end
+
+    -- Skip LFM messages - they contain trigger keywords as advertisement, not as request
+    -- Check for common LFM patterns to avoid adding raid leaders to queue
+    local msgLower = message:lower()
+    if msgLower:match("^lfm%s") or msgLower:match("%slfm%s") or
+       msgLower:match("lf%d+m") or msgLower:match('w/%s*"') or
+       msgLower:match("%[t:%d+/%d+") then
+        Debug("ProcessMessage: skipping LFM message from " .. author)
+        return
+    end
 
     -- Check if message contains trigger
     if not CheckTriggers(message) then
