@@ -9,32 +9,32 @@ A comprehensive raid organization suite for World of Warcraft 3.3.5a (WotLK) wit
 ### LFM Browser
 Browse and filter groups advertised in chat channels, organized by raid type with smart message parsing.
 
-![LFM Browser](screens/LFM.png)
+![LFM Browser](Screenshots/LFM.png)
 
 ### LFG Browser
 Find players looking for groups with class/spec detection and smart filtering.
 
-![LFG Browser](screens/LFG.png)
+![LFG Browser](Screenshots/LFG.png)
 
 ### Scanned Message Interpretation
 Smart parsing extracts raid type, requirements, GearScore, and "Looking For" specs from chat messages.
 
-![Message Interpretation](screens/scaned-lfm-interpretation.png)
+![Message Interpretation](Screenshots/scaned-lfm-interpretation.png)
 
 ### Raid Management
 Raid warnings, buff checker, MS/OS tracking, loot rules, and loot ban management.
 
-![Raid Management](screens/raid-mgmt.png)
+![Raid Management](Screenshots/raid-mgmt.png)
 
 ### Loot History
 Track loot drops per boss with winner assignment and export functionality.
 
-![Loot History](screens/loot-history.png)
+![Loot History](Screenshots/loot-history.png)
 
 ### Raid Promotion
 Quick promotion tools for raid assist and master looter assignment.
 
-![Raid Promotion](screens/raid-promotion.png)
+![Raid Promotion](Screenshots/raid-promotion.png)
 
 ---
 
