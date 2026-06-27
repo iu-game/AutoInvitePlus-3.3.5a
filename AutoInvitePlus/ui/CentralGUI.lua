@@ -3079,6 +3079,32 @@ function GUI.CreateCompositionTab(container)
     autoScanLabel:SetPoint("LEFT", autoScanCheck, "RIGHT", 0, 0)
     autoScanLabel:SetText("Auto")
 
+    -- Composition variation buttons (numbered alternates for the selected template)
+    local varLabel = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    varLabel:SetPoint("LEFT", autoScanLabel, "RIGHT", 12, 0)
+    varLabel:SetText("Comp:")
+    varLabel:SetTextColor(0.8, 0.8, 0.8)
+    container.variationLabel = varLabel
+    container.variationButtons = {}
+
+    -- Smart recommendations button
+    local recommendBtn = CreateFrame("Button", nil, container, "UIPanelButtonTemplate")
+    recommendBtn:SetSize(95, 22)
+    recommendBtn:SetText("Recommend")
+    recommendBtn:SetScript("OnClick", function() GUI.ShowRecommendations() end)
+    recommendBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Smart Recommendations", 1, 0.82, 0)
+        GameTooltip:AddLine("Analyzes the current raid against the selected", 1, 1, 1, true)
+        GameTooltip:AddLine("template/variation and suggests which classes to", 1, 1, 1, true)
+        GameTooltip:AddLine("recruit, prioritizing missing roles and raid buffs.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    recommendBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    container.recommendBtn = recommendBtn
+
+    GUI.RebuildVariationButtons(container)
+
     -- Helper to update template dropdown when category changes
     local function UpdateTemplateDropdown()
         UIDropDownMenu_Initialize(templateDropdown, function()
@@ -8167,6 +8193,129 @@ if AIP.TreeBrowser then
 end
 
 -- Update composition tab (RaidComp-style)
+-- Rebuild the numbered composition-variation buttons for the selected template.
+-- The active variation is highlighted; the Recommend button is re-anchored after
+-- the last visible variation button.
+function GUI.RebuildVariationButtons(container)
+    if not container or not container.variationButtons then return end
+    if not AIP.Composition then return end
+
+    local template = AIP.Composition.CurrentRaid.template
+    local variations = template and AIP.Composition.GetTemplateVariations(template) or {}
+    local activeIndex = AIP.Composition.CurrentRaid.variationIndex or 1
+    local buttons = container.variationButtons
+    local MAX_VAR_BTNS = 5
+
+    local anchor = container.variationLabel
+    for i = 1, MAX_VAR_BTNS do
+        local v = variations[i]
+        local btn = buttons[i]
+        if v then
+            if not btn then
+                btn = CreateFrame("Button", nil, container, "UIPanelButtonTemplate")
+                btn:SetSize(22, 22)
+                buttons[i] = btn
+            end
+            btn:ClearAllPoints()
+            if i == 1 then
+                btn:SetPoint("LEFT", container.variationLabel, "RIGHT", 4, 0)
+            else
+                btn:SetPoint("LEFT", buttons[i-1], "RIGHT", 2, 0)
+            end
+            btn:SetText(tostring(i))
+            btn.variationIndex = i
+            btn.variationData = v
+            btn:SetScript("OnClick", function(self)
+                AIP.Composition.SetVariation(self.variationIndex)
+                GUI.UpdateCompositionTab()
+            end)
+            btn:SetScript("OnEnter", function(self)
+                local vv = self.variationData
+                GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+                GameTooltip:AddLine(vv.name, 1, 0.82, 0)
+                GameTooltip:AddLine(string.format("%d Tank / %d Heal / %d DPS", vv.tanks, vv.healers, vv.dps), 1, 1, 1)
+                if vv.gs and vv.ilvl then
+                    GameTooltip:AddLine(string.format("GS %d-%d   (iLvl %d-%d)", vv.gs[1], vv.gs[2], vv.ilvl[1], vv.ilvl[2]), 0.5, 0.8, 1)
+                end
+                if vv.note then GameTooltip:AddLine(vv.note, 0.7, 0.7, 0.7, true) end
+                GameTooltip:Show()
+            end)
+            btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            if i == activeIndex then btn:LockHighlight() else btn:UnlockHighlight() end
+            btn:Show()
+            anchor = btn
+        elseif btn then
+            btn:Hide()
+        end
+    end
+
+    -- Dim the "Comp:" label when there is nothing to vary.
+    if container.variationLabel then
+        container.variationLabel:SetTextColor(#variations > 1 and 0.9 or 0.5,
+            #variations > 1 and 0.9 or 0.5, #variations > 1 and 0.9 or 0.5)
+    end
+
+    if container.recommendBtn then
+        container.recommendBtn:ClearAllPoints()
+        container.recommendBtn:SetPoint("LEFT", anchor, "RIGHT", 10, 0)
+    end
+end
+
+-- Show the recruitment recommendations in a movable popup.
+function GUI.ShowRecommendations()
+    if not AIP.Composition or not AIP.Composition.BuildRecommendationLines then return end
+    local lines = AIP.Composition.BuildRecommendationLines()
+    local text = table.concat(lines, "\n")
+
+    local popup = GUI.RecommendPopup
+    if not popup then
+        popup = CreateFrame("Frame", "AIPCompRecommendPopup", UIParent)
+        popup:SetSize(430, 330)
+        popup:SetPoint("CENTER")
+        popup:SetFrameStrata("DIALOG")
+        popup:SetMovable(true); popup:EnableMouse(true); popup:RegisterForDrag("LeftButton")
+        popup:SetScript("OnDragStart", popup.StartMoving)
+        popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
+        popup:SetBackdrop({
+            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            tile = true, tileSize = 32, edgeSize = 32,
+            insets = {left = 11, right = 12, top = 12, bottom = 11},
+        })
+
+        local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        title:SetPoint("TOP", 0, -14)
+        title:SetText("Recruitment Recommendations")
+        title:SetTextColor(1, 0.82, 0)
+
+        local close = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT", -6, -6)
+
+        local scroll = CreateFrame("ScrollFrame", "AIPCompRecScroll", popup, "UIPanelScrollFrameTemplate")
+        scroll:SetPoint("TOPLEFT", 16, -40)
+        scroll:SetPoint("BOTTOMRIGHT", -34, 16)
+        local content = CreateFrame("Frame", nil, scroll)
+        content:SetSize(370, 10)
+        scroll:SetScrollChild(content)
+
+        local body = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        body:SetPoint("TOPLEFT", 0, 0)
+        body:SetWidth(370)
+        body:SetJustifyH("LEFT")
+        body:SetJustifyV("TOP")
+        popup.body = body
+        popup.content = content
+
+        tinsert(UISpecialFrames, "AIPCompRecommendPopup")
+        GUI.RecommendPopup = popup
+    end
+
+    popup.body:SetText(text)
+    local h = (popup.body:GetStringHeight() or 100) + 10
+    popup.content:SetHeight(math.max(h, 10))
+    popup:Show()
+end
+
 function GUI.UpdateCompositionTab()
     local container = GUI.Frame.tabContents["composition"]
     if not container then return end
@@ -8181,10 +8330,15 @@ function GUI.UpdateCompositionTab()
     local status = AIP.Composition.GetCompositionStatus()
     local raid = AIP.Composition.CurrentRaid
 
-    -- Update template display
+    -- Update template display (name + active gear variation + GS range)
     if container.templateDisplay then
         if status then
-            container.templateDisplay:SetText(status.template)
+            local text = status.template
+            if status.variation then text = text .. " |cFF88CCFF[" .. status.variation .. "]|r" end
+            if status.gs then
+                text = text .. string.format(" |cFF888888GS %d-%d|r", status.gs[1], status.gs[2])
+            end
+            container.templateDisplay:SetText(text)
         else
             container.templateDisplay:SetText("No template selected (using current raid)")
         end
@@ -8246,6 +8400,9 @@ function GUI.UpdateCompositionTab()
 
     -- Update raid benefits stats panel
     GUI.UpdateRaidBenefits(container)
+
+    -- Keep the variation buttons in sync with the selected template
+    GUI.RebuildVariationButtons(container)
 end
 
 -- Select a tab
@@ -8415,13 +8572,21 @@ function GUI.Toggle()
             end
         end
 
-        -- Restore size if saved
-        if AIP.db and AIP.db.guiWidth and AIP.db.guiHeight then
+        -- Restore size if saved. A minimized window must come back at its
+        -- minimized height with the content still collapsed - otherwise it
+        -- reopens at full size with all panels hidden (a black empty window).
+        if GUI.IsMinimized then
+            GUI.Frame:SetHeight(GUI.Config.minimizedHeight)
+        elseif AIP.db and AIP.db.guiWidth and AIP.db.guiHeight then
             GUI.Frame:SetSize(AIP.db.guiWidth, AIP.db.guiHeight)
         end
 
         GUI.Frame:Show()
-        GUI.SelectTab(GUI.CurrentTab)
+        -- Only (re)select a tab when expanded; the tab panels live inside the
+        -- hidden content frame while minimized.
+        if not GUI.IsMinimized then
+            GUI.SelectTab(GUI.CurrentTab)
+        end
     end
 end
 
@@ -8432,6 +8597,11 @@ function GUI.Show(tabId)
     end
 
     GUI.Frame:Show()
+    -- Opening to a specific tab implies the user wants to see content, so expand
+    -- if the window was left minimized.
+    if GUI.IsMinimized then
+        GUI.ToggleMinimize()
+    end
     if tabId then
         GUI.SelectTab(tabId)
     else

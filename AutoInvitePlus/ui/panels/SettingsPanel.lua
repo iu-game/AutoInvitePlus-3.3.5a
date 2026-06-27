@@ -91,6 +91,10 @@ SP.Tooltips = {
 
     -- Section 10: Test Mode
     testMode = "Populate all panels with dummy test data to preview how the UI looks when filled.\n\n|cFF00FF00Use when:|r You want to see the layout with data without being in an actual raid.\n\n|cFFFFFFFFPopulate:|r Adds fake players, groups, loot, etc.\n|cFFFFFFFFClear:|r Removes all test data\n\n|cFFFFFF00Note:|r Test data is NOT saved. It's cleared on logout.",
+
+    debuffAnnounce = "Calls out important raid debuffs/curses on YOU to chat (default /say), with the stack count and a short note on what to do.\n\n|cFFFFFFFFExamples:|r\n- 'Necrotic Plague - run to adds + dispel me!'\n- 'Mutated Infection x3 - spread out + dispel me!'\n- 'Mystic Buffet x5 - LoS behind ice block!'\n\nOnly speaks on a new debuff or when its stack increases, and only while in a group.\n\n|cFF00FF00Enable when:|r You want to warn the raid/healers about debuffs you can't always see in time.",
+
+    mechanicAnnounce = "A lightweight automatic boss-mechanic announcer (a mini-DBM). It reacts to trackable in-game events:\n\n|cFFFFFFFFBoss spell casts|r - 'Defile - move out!', 'Frost Breath - LoS!', 'Rockets - move!'\n|cFFFFFFFFBoss health|r - 'Lich King at 35%!' (the target/focus boss)\n|cFFFFFFFFBoss emotes/yells|r - 'Festergut inhales - spores soon!'\n|cFFFFFFFFRaid health|r - 'Raid low - heal up!'\n|cFFFFFFFFCountdown bars|r - Bloodlust/Heroism duration + lockout, and signature boss abilities (drag the 'AIP Timers' anchor to position; /aip timertest to preview).\n\n|cFFFFFF00Channel:|r 'SELF' shows a center-screen heads-up only YOU see (recommended - no chat spam); SAY/Raid/RW broadcast it.\n\nNot a replacement for DBM timers, but a handy reactive callout layer.",
 }
 
 -- Helper: Fix UIDropDownMenu strata issues in WotLK
@@ -250,7 +254,7 @@ function SP.Create(parent)
     scrollFrame:SetPoint("BOTTOMRIGHT", -28, 5)
 
     local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetHeight(1500)  -- Height for all sections including test mode
+    content:SetHeight(1580)  -- Height for all sections including test mode
     scrollFrame:SetScrollChild(content)
 
     -- Dynamic width - initially set and updated on resize
@@ -786,8 +790,10 @@ function SP.Create(parent)
     y = y - 28
 
     local scanCheck = CreateCheckbox(content, 15, y, nil, "Enable chat scanning for LFM/LFG browser", function(self)
+        local checked = self:GetChecked() == 1 or self:GetChecked() == true
+        if AIP.db then AIP.db.chatScanEnabled = checked end  -- persist across sessions
         if AIP.LFMBrowser then
-            AIP.LFMBrowser.Config.enabled = self:GetChecked()
+            AIP.LFMBrowser.Config.enabled = checked
         end
     end)
     frame.checks.chatScan = scanCheck
@@ -1220,7 +1226,68 @@ function SP.Create(parent)
     local logCheck, logLabel = CreateCheckbox(content, 15, y - 26, "debugLogging", "Write debug log to file (/reload after enabling)")
     frame.checks.debugLogging = logCheck
 
-    y = y - 56
+    -- Self debuff/curse announcer
+    local debuffCheck, debuffLabel = CreateCheckbox(content, 15, y - 52, "debuffAnnounce", "Announce my raid debuffs (stacks + what to do)")
+    frame.checks.debuffAnnounce = debuffCheck
+    local debuffTooltip = CreateTooltipButton(content, "debuffAnnounce")
+    debuffTooltip:SetPoint("LEFT", debuffLabel, "RIGHT", 2, 0)
+
+    local debuffChanLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    debuffChanLabel:SetPoint("LEFT", debuffTooltip, "RIGHT", 10, 0)
+    debuffChanLabel:SetText("via")
+
+    local debuffChanDropdown = CreateFrame("Frame", "AIPDebuffChanDropdown", content, "UIDropDownMenuTemplate")
+    debuffChanDropdown:SetPoint("LEFT", debuffChanLabel, "RIGHT", -5, -2)
+    UIDropDownMenu_SetWidth(debuffChanDropdown, 60)
+    frame.debuffChanDropdown = debuffChanDropdown
+    local function DebuffChan_Init()
+        for _, ch in ipairs({"SAY", "YELL", "RAID", "PARTY"}) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = ch
+            info.value = ch
+            info.func = function()
+                if AIP.db then AIP.db.debuffAnnounceChannel = ch end
+                UIDropDownMenu_SetText(debuffChanDropdown, ch)
+            end
+            info.checked = (AIP.db and (AIP.db.debuffAnnounceChannel or "SAY") == ch)
+            UIDropDownMenu_AddButton(info)
+        end
+    end
+    UIDropDownMenu_Initialize(debuffChanDropdown, DebuffChan_Init)
+    FixDropdownStrata(debuffChanDropdown)
+
+    -- Auto mechanic announcer (mini-DBM)
+    local mechCheck, mechLabel = CreateCheckbox(content, 15, y - 78, "mechanicAnnounce", "Auto-announce boss mechanics (mini-DBM)")
+    frame.checks.mechanicAnnounce = mechCheck
+    local mechTooltip = CreateTooltipButton(content, "mechanicAnnounce")
+    mechTooltip:SetPoint("LEFT", mechLabel, "RIGHT", 2, 0)
+
+    local mechChanLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    mechChanLabel:SetPoint("LEFT", mechTooltip, "RIGHT", 10, 0)
+    mechChanLabel:SetText("via")
+
+    local mechChanDropdown = CreateFrame("Frame", "AIPMechChanDropdown", content, "UIDropDownMenuTemplate")
+    mechChanDropdown:SetPoint("LEFT", mechChanLabel, "RIGHT", -5, -2)
+    UIDropDownMenu_SetWidth(mechChanDropdown, 90)
+    frame.mechChanDropdown = mechChanDropdown
+    local mechChanText = {SELF = "Self (screen)", SAY = "Say", RAID = "Raid", RAID_WARNING = "RW"}
+    local function MechChan_Init()
+        for _, ch in ipairs({"SELF", "SAY", "RAID", "RAID_WARNING"}) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = mechChanText[ch]
+            info.value = ch
+            info.func = function()
+                if AIP.db then AIP.db.mechanicAnnounceChannel = ch end
+                UIDropDownMenu_SetText(mechChanDropdown, mechChanText[ch])
+            end
+            info.checked = (AIP.db and (AIP.db.mechanicAnnounceChannel or "SELF") == ch)
+            UIDropDownMenu_AddButton(info)
+        end
+    end
+    UIDropDownMenu_Initialize(mechChanDropdown, MechChan_Init)
+    FixDropdownStrata(mechChanDropdown)
+
+    y = y - 108
 
     -- Quick actions
     local quickLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1458,6 +1525,18 @@ function SP.Update()
     if SP.Frame.blModeDropdown then
         local modeText = (db.blacklistMode == "reject") and "Auto-Reject" or "Flag Only"
         UIDropDownMenu_SetText(SP.Frame.blModeDropdown, modeText)
+    end
+
+    -- Update debuff announcer channel dropdown
+    if SP.Frame.debuffChanDropdown then
+        UIDropDownMenu_SetText(SP.Frame.debuffChanDropdown, db.debuffAnnounceChannel or "SAY")
+    end
+
+    -- Update mechanic announcer channel dropdown
+    if SP.Frame.mechChanDropdown then
+        local mc = {SELF = "Self (screen)", SAY = "Say", RAID = "Raid", RAID_WARNING = "RW"}
+        local ch = db.mechanicAnnounceChannel or "SELF"
+        UIDropDownMenu_SetText(SP.Frame.mechChanDropdown, mc[ch] or ch)
     end
 
     -- Update auto-spam button

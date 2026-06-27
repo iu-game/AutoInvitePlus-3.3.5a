@@ -131,16 +131,26 @@ end
 -- BOSS KILL TRACKING
 -- ============================================================================
 
--- Add a boss kill to current session
-function RSM.AddBossKill(bossName, mode)
+-- Add a boss kill to current session.
+-- `zone` (optional): the boss's known instance zone. When supplied it overrides
+-- the session zone, which fixes sessions that auto-started elsewhere (e.g. a raid
+-- forming in Dalaran before zoning into Ruby Sanctum).
+function RSM.AddBossKill(bossName, mode, zone)
     local session = RSM.GetCurrentSession()
     if not session then
-        -- Auto-start session if in raid
+        -- Auto-start session if in a group (raid OR party, so 5-man dungeons count)
         local numRaid = GetNumRaidMembers() or 0
-        if numRaid > 0 then
-            session = RSM.StartSession()
+        local numParty = GetNumPartyMembers() or 0
+        if numRaid > 0 or numParty > 0 then
+            session = RSM.StartSession(zone)
         end
         if not session then return nil end
+    end
+
+    -- Correct the session zone from the authoritative boss-zone mapping.
+    if zone and zone ~= "" and session.zone ~= zone then
+        AIP.Debug("RaidSession: Corrected zone '" .. tostring(session.zone) .. "' -> '" .. zone .. "' from boss " .. bossName)
+        session.zone = zone
     end
 
     local bossId = #session.bosses + 1
@@ -357,6 +367,10 @@ function RSM.GetRaidSize()
     local numRaid = GetNumRaidMembers() or 0
     if numRaid > 0 then
         return numRaid <= 10 and 10 or 25
+    end
+    -- 5-man party (e.g. a heroic dungeon)
+    if (GetNumPartyMembers() or 0) > 0 then
+        return 5
     end
     return 0
 end
@@ -637,7 +651,7 @@ local function OnCombatLogEvent(...)
         -- Check if it's a boss
         local bossInfo = RSM.BossPatterns[dstName:lower()]
         if bossInfo then
-            RSM.AddBossKill(bossInfo.name, RSM.GetDifficultyMode())
+            RSM.AddBossKill(bossInfo.name, RSM.GetDifficultyMode(), bossInfo.zone)
         else
             -- Fallback: check unit classification if targetable
             local classification = UnitClassification("target")
@@ -652,17 +666,23 @@ end
 local function OnZoneChange()
     local session = RSM.GetCurrentSession()
     local currentZone = GetRealZoneText() or ""
-
-    -- If in raid and zone changed to different raid zone, might want to start new session
     local numRaid = GetNumRaidMembers() or 0
-    if numRaid > 0 then
-        if not session then
-            RSM.StartSession(currentZone)
-        elseif session.zone ~= currentZone then
-            -- Zone changed - update session zone
-            session.zone = currentZone
-            AIP.Debug("RaidSession: Zone changed to " .. currentZone)
-        end
+
+    -- In a raid with no active session yet: start one.
+    if numRaid > 0 and not session then
+        RSM.StartSession(currentZone)
+        return
+    end
+
+    -- Keep an active session's zone in sync once we are actually inside the
+    -- instance. Instance entry fires PLAYER_ENTERING_WORLD rather than
+    -- ZONE_CHANGED_NEW_AREA, so this handler also runs from that event - that is
+    -- what stops a session that auto-started in Dalaran from displaying "Dalaran".
+    -- IsInInstance() guards against overwriting the instance zone if a player
+    -- briefly steps back out to a city.
+    if session and currentZone ~= "" and session.zone ~= currentZone and IsInInstance() then
+        session.zone = currentZone
+        AIP.Debug("RaidSession: Zone updated to " .. currentZone)
     end
 end
 
@@ -686,6 +706,8 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         RSM.MigrateOldLootHistory()
         -- Check if we should resume a session
         OnRosterUpdate()
+        -- Instance transitions fire here (not ZONE_CHANGED_NEW_AREA), so sync zone
+        OnZoneChange()
     end
 end)
 

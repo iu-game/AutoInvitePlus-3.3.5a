@@ -562,6 +562,27 @@ function RT.CreateBar()
     edit:SetScript("OnLeave", function() GameTooltip:Hide() end)
     bar.editBtn = edit
 
+    -- Action row: persistent raid-tool shortcuts beneath the title.
+    local function actionBtn(text, w, tip, onClick)
+        local b = CreateFrame("Button", nil, bar, "UIPanelButtonTemplate")
+        b:SetSize(w, 18)
+        b:SetText(text)
+        b:SetScript("OnClick", onClick)
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:AddLine(tip, 1, 1, 1, true); GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        return b
+    end
+
+    local ready = actionBtn("Ready", 48, "Start a ready check", function() RT.StartReadyCheck() end)
+    ready:SetPoint("TOPLEFT", bar, "TOPLEFT", 8, -22)
+    local buffs = actionBtn("Buffs", 52, "Announce buff assignments - delegates one buff per same-class caster", function() RT.AnnounceBuffDelegation() end)
+    buffs:SetPoint("LEFT", ready, "RIGHT", 2, 0)
+    local roll = actionBtn("Roll", 44, "Open the Loot Roll window", function() RT.ToggleRollWindow() end)
+    roll:SetPoint("LEFT", buffs, "RIGHT", 2, 0)
+    bar.actionButtons = {ready, buffs, roll}
+
     bar.buttons = {}
     RT.Bar = bar
     return bar
@@ -579,7 +600,7 @@ function RT.RefreshBar()
             RT.Bar.buttons[i] = btn
         end
         btn:ClearAllPoints()
-        btn:SetPoint("TOP", RT.Bar, "TOP", 0, -22 - (i - 1) * BTN_SPACING)
+        btn:SetPoint("TOP", RT.Bar, "TOP", 0, -46 - (i - 1) * BTN_SPACING)
         btn:SetText(ann.label or ann.message or "?")
         btn:SetScript("OnClick", function() RT.Send(ann.message, ann.channel or "RAID_WARNING") end)
         btn:SetScript("OnEnter", function(self)
@@ -596,7 +617,8 @@ function RT.RefreshBar()
         if RT.Bar.buttons[i] then RT.Bar.buttons[i]:Hide() end
     end
 
-    RT.Bar:SetHeight(math.max(40, 24 + #anns * BTN_SPACING + 4))
+    -- 46px reserves the title + action row above the message buttons.
+    RT.Bar:SetHeight(math.max(58, 46 + #anns * BTN_SPACING + 6))
     RT.Bar:SetWidth(BTN_W + 16)
 end
 

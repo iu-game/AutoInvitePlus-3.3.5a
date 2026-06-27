@@ -4,7 +4,7 @@
 -- Refactored with DRY principle and OOP patterns
 
 local ADDON_NAME = "AutoInvitePlus"
-local VERSION = "5.5.0"
+local VERSION = "6.1.0"
 local DB_VERSION = 5  -- Increment when saved variables structure changes (5.5: raid sessions, 5.4: mdps/rdps split, 4: loot history retention)
 
 -- Create main addon namespace (may already exist from Utils.lua)
@@ -32,6 +32,10 @@ local defaults = {
     -- When enabled, players broadcasting LFG for your exact raid will be auto-queued
     -- (respects GS, iLvl, role needs, and class/spec requirements)
     autoQueueLFG = false,
+
+    -- LFM/LFG chat scanner
+    chatScanEnabled = true,         -- Persisted enable for the LFM/LFG browser scanner
+    cacheDuration = 15,             -- Minutes to keep scanned LFM/LFG entries (drives scanner prune)
 
     -- Player mode: "none", "lfm" (looking for members), "lfg" (looking for group)
     playerMode = "none",
@@ -151,6 +155,18 @@ local defaults = {
     floatingBarEnabled = false,     -- Show the floating announcement bar
     floatingBarPos = nil,           -- {point, relPoint, x, y}
     rollDuration = 10,              -- Roll countdown seconds
+
+    -- Self debuff/curse announcer: /say important raid debuffs on you (with stacks)
+    -- and a short note on what to do about them.
+    debuffAnnounce = false,
+    debuffAnnounceChannel = "SAY",
+
+    -- Auto mechanic announcer: short call-outs for boss casts, boss health
+    -- milestones, boss emotes/yells, and low raid health. Default "SELF" shows a
+    -- personal center-screen heads-up (no raid-chat spam).
+    mechanicAnnounce = false,
+    mechanicAnnounceChannel = "SELF",
+    timerBarPos = nil,              -- {point, relPoint, x, y} for the countdown timer bars
 
     -- Loot History (v5.3)
     lootHistory = {},               -- Historical loot drops (legacy, migrated to raidSessions)
@@ -1155,6 +1171,12 @@ local function OnEvent(self, event, ...)
 
             AIP.db = AutoInvitePlusDB
 
+            -- Apply the persisted chat-scanner enable to the live scanner config
+            -- (the scanner's CS.Config.enabled is otherwise session-only).
+            if AIP.LFMBrowser and AIP.LFMBrowser.Config and AIP.db.chatScanEnabled ~= nil then
+                AIP.LFMBrowser.Config.enabled = AIP.db.chatScanEnabled
+            end
+
             -- Mark a new session in the persistent log (stored in db.debugLog)
             if AIP.Log then
                 AIP.Log("===== SESSION START v" .. VERSION .. " @ " .. date("%Y-%m-%d %H:%M:%S") .. " =====")
@@ -1468,6 +1490,19 @@ local function SlashHandler(msg)
         if AIP.RaidTools then AIP.RaidTools.AnnounceReserved() end
     elseif cmd == "bar" or cmd == "announcebar" then
         if AIP.RaidTools then AIP.RaidTools.ToggleBar() end
+    elseif cmd == "readycheck" or cmd == "rc" then
+        if AIP.RaidTools then AIP.RaidTools.StartReadyCheck() end
+    elseif cmd == "buffs" or cmd == "delegate" then
+        if AIP.RaidTools then AIP.RaidTools.AnnounceBuffDelegation() end
+    elseif cmd == "timertest" then
+        if not (AIP.db and AIP.db.mechanicAnnounce) then
+            Print("Enable 'Auto-announce boss mechanics' in Settings first.")
+        elseif AIP.RaidTools and AIP.RaidTools.StartTimer then
+            AIP.RaidTools.StartTimer("lust", "Bloodlust", 40, 0.2, 0.9, 0.3)
+            AIP.RaidTools.StartTimer("sated", "Sated (lockout)", 600, 1, 0.3, 0.3)
+            AIP.RaidTools.StartTimer("demo", "Defile (demo)", 10, 1, 0.6, 0.1, "~Defile soon!")
+            Print("Started demo timer bars (drag the 'AIP Timers' anchor to position).")
+        end
 
     -- Status
     elseif cmd == "status" then
@@ -1498,8 +1533,16 @@ local function SlashHandler(msg)
         Print("  /aip lfg - LFG players browser")
         Print("|cFFFFFF00Raid Organization:|r")
         Print("  /aip comp - Raid composition advisor")
+        Print("  /aip comp recommend - Suggest classes to recruit")
         Print("  /aip roster - Roster manager (save/load)")
         Print("  /aip waitlist - Waitlist management")
+        Print("|cFFFFFF00Raid Tools:|r")
+        Print("  /aip bar - Toggle the floating announcement bar")
+        Print("  /aip roll [item] - Start a roll / toggle roll window")
+        Print("  /aip rw - Announce reserved loot")
+        Print("  /aip rc - Start a ready check")
+        Print("  /aip buffs - Announce buff assignments")
+        Print("  /aip timertest - Preview countdown timer bars")
         Print("|cFFFFFF00Utilities:|r")
         Print("  /aip lockouts - Your raid lockouts")
         Print("  /aip summons - Summon status")

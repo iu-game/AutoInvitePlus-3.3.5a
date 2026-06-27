@@ -237,10 +237,17 @@ function LH.Create(parent)
     local raidsPanel = LH.CreatePanelFrame(frame, "Raids", PANEL_WIDTH_THIRD, TOP_ROW_HEIGHT)
     raidsPanel:SetPoint("TOPLEFT", PANEL_PADDING, y)
 
-    -- Raids list header
-    local raidsHeader = raidsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    raidsHeader:SetPoint("TOPLEFT", 8, -25)
-    raidsHeader:SetText("|cFFFFCC00#|r | |cFFFFCC00Date|r | |cFFFFCC00Raid/Dungeon|r")
+    -- Raids list header (per-column FontStrings, repositioned in ResizePanels)
+    frame.raidHeaders = {}
+    frame.raidHeaders.num = raidsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.raidHeaders.num:SetPoint("TOPLEFT", 8, -25)
+    frame.raidHeaders.num:SetText("|cFFFFCC00#|r")
+    frame.raidHeaders.date = raidsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.raidHeaders.date:SetPoint("TOPLEFT", 30, -25)
+    frame.raidHeaders.date:SetText("|cFFFFCC00Date|r")
+    frame.raidHeaders.zone = raidsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.raidHeaders.zone:SetPoint("TOPLEFT", 88, -25)
+    frame.raidHeaders.zone:SetText("|cFFFFCC00Raid/Dungeon|r")
 
     -- Raids scroll
     local raidsScroll = CreateFrame("ScrollFrame", "AIPRaidsScroll", raidsPanel, "FauxScrollFrameTemplate")
@@ -302,9 +309,16 @@ function LH.Create(parent)
     local bossesPanel = LH.CreatePanelFrame(frame, "Bosses", PANEL_WIDTH_THIRD, TOP_ROW_HEIGHT)
     bossesPanel:SetPoint("TOPLEFT", raidsPanel, "TOPRIGHT", PANEL_PADDING, 0)
 
-    local bossesHeader = bossesPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    bossesHeader:SetPoint("TOPLEFT", 8, -25)
-    bossesHeader:SetText("|cFFFFCC00#|r | |cFFFFCC00Boss Name|r | |cFFFFCC00Time|r")
+    frame.bossHeaders = {}
+    frame.bossHeaders.num = bossesPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.bossHeaders.num:SetPoint("TOPLEFT", 8, -25)
+    frame.bossHeaders.num:SetText("|cFFFFCC00#|r")
+    frame.bossHeaders.name = bossesPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.bossHeaders.name:SetPoint("TOPLEFT", 30, -25)
+    frame.bossHeaders.name:SetText("|cFFFFCC00Boss Name|r")
+    frame.bossHeaders.time = bossesPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.bossHeaders.time:SetPoint("TOPLEFT", 130, -25)
+    frame.bossHeaders.time:SetText("|cFFFFCC00Time|r")
 
     local bossesScroll = CreateFrame("ScrollFrame", "AIPBossesScroll", bossesPanel, "FauxScrollFrameTemplate")
     bossesScroll:SetPoint("TOPLEFT", 5, -40)
@@ -401,9 +415,16 @@ function LH.Create(parent)
     local raidAttPanel = LH.CreatePanelFrame(frame, "Raid Attendees", PANEL_WIDTH_HALF, BOTTOM_ROW_HEIGHT)
     raidAttPanel:SetPoint("TOPLEFT", PANEL_PADDING, bottomY)
 
-    local raidAttHeader = raidAttPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    raidAttHeader:SetPoint("TOPLEFT", 8, -25)
-    raidAttHeader:SetText("|cFFFFCC00Name|r | |cFFFFCC00Join|r | |cFFFFCC00Leave|r")
+    frame.raidAttHeaders = {}
+    frame.raidAttHeaders.name = raidAttPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.raidAttHeaders.name:SetPoint("TOPLEFT", 10, -25)
+    frame.raidAttHeaders.name:SetText("|cFFFFCC00Name|r")
+    frame.raidAttHeaders.join = raidAttPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.raidAttHeaders.join:SetPoint("TOPLEFT", 95, -25)
+    frame.raidAttHeaders.join:SetText("|cFFFFCC00Join|r")
+    frame.raidAttHeaders.leave = raidAttPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.raidAttHeaders.leave:SetPoint("TOPLEFT", 150, -25)
+    frame.raidAttHeaders.leave:SetText("|cFFFFCC00Leave|r")
 
     local raidAttScroll = CreateFrame("ScrollFrame", "AIPRaidAttScroll", raidAttPanel, "FauxScrollFrameTemplate")
     raidAttScroll:SetPoint("TOPLEFT", 5, -40)
@@ -738,6 +759,16 @@ function LH.Create(parent)
             end
         end
 
+        -- Align Raids headers with their columns (rows anchor at panel x=5)
+        if frame.raidHeaders then
+            frame.raidHeaders.num:ClearAllPoints()
+            frame.raidHeaders.num:SetPoint("TOPLEFT", raidsPanel, "TOPLEFT", 8, -25)
+            frame.raidHeaders.date:ClearAllPoints()
+            frame.raidHeaders.date:SetPoint("TOPLEFT", raidsPanel, "TOPLEFT", 5 + raidsNumW + 3, -25)
+            frame.raidHeaders.zone:ClearAllPoints()
+            frame.raidHeaders.zone:SetPoint("TOPLEFT", raidsPanel, "TOPLEFT", 5 + raidsNumW + raidsDateW + 6, -25)
+        end
+
         -- Bosses panel columns (3 columns: #, Name, Time)
         -- Proportions: 12%, 58%, 30%
         local bossNumW = math.floor(topRowWidth * 0.12)
@@ -755,6 +786,16 @@ function LH.Create(parent)
                 row.timeText:SetPoint("LEFT", bossNumW + bossNameW + 6, 0)
                 row.timeText:SetWidth(bossTimeW)
             end
+        end
+
+        -- Align Bosses headers with their columns
+        if frame.bossHeaders then
+            frame.bossHeaders.num:ClearAllPoints()
+            frame.bossHeaders.num:SetPoint("TOPLEFT", bossesPanel, "TOPLEFT", 8, -25)
+            frame.bossHeaders.name:ClearAllPoints()
+            frame.bossHeaders.name:SetPoint("TOPLEFT", bossesPanel, "TOPLEFT", 5 + bossNumW + 3, -25)
+            frame.bossHeaders.time:ClearAllPoints()
+            frame.bossHeaders.time:SetPoint("TOPLEFT", bossesPanel, "TOPLEFT", 5 + bossNumW + bossNameW + 6, -25)
         end
 
         -- Boss Attendees panel (1 column: Name - 100%)
@@ -783,6 +824,16 @@ function LH.Create(parent)
                 row.leaveText:SetPoint("LEFT", attNameW + attJoinW + 10, 0)
                 row.leaveText:SetWidth(attLeaveW)
             end
+        end
+
+        -- Align Raid Attendees headers with their columns (name col anchors at panel x=10)
+        if frame.raidAttHeaders then
+            frame.raidAttHeaders.name:ClearAllPoints()
+            frame.raidAttHeaders.name:SetPoint("TOPLEFT", raidAttPanel, "TOPLEFT", 10, -25)
+            frame.raidAttHeaders.join:ClearAllPoints()
+            frame.raidAttHeaders.join:SetPoint("TOPLEFT", raidAttPanel, "TOPLEFT", 5 + attNameW + 5, -25)
+            frame.raidAttHeaders.leave:ClearAllPoints()
+            frame.raidAttHeaders.leave:SetPoint("TOPLEFT", raidAttPanel, "TOPLEFT", 5 + attNameW + attJoinW + 10, -25)
         end
 
         -- Loot panel columns (4 columns: Icon+Item, Source, Winner, Time)

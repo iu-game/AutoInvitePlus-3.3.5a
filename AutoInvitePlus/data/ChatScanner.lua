@@ -323,9 +323,18 @@ end
 -- PRUNING (Remove expired entries)
 -- ============================================================================
 
+-- Entry lifetime in seconds, driven by the user's "Cache Duration" setting
+-- (minutes), falling back to the built-in default.
+function CS.GetExpiry()
+    if AIP.db and AIP.db.cacheDuration and AIP.db.cacheDuration > 0 then
+        return AIP.db.cacheDuration * 60
+    end
+    return CS.Config.expiryTime
+end
+
 function CS.PruneGroups()
     local now = time()
-    local expiry = CS.Config.expiryTime
+    local expiry = CS.GetExpiry()
 
     -- Remove expired
     for leader, info in pairs(CS.Groups) do
@@ -355,7 +364,7 @@ end
 
 function CS.PrunePlayers()
     local now = time()
-    local expiry = CS.Config.expiryTime
+    local expiry = CS.GetExpiry()
 
     -- Remove expired
     for name, info in pairs(CS.Players) do

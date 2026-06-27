@@ -231,6 +231,144 @@ Comp.RaidBosses = {
             "The Lich King",
         },
     },
+
+    -- ========================================================================
+    -- WotLK 5-man dungeons (boss names match the unit that dies, for detection)
+    -- ========================================================================
+    ["UK"] = {
+        name = "Utgarde Keep",
+        zone = "Utgarde Keep",
+        bosses = {
+            "Prince Keleseth",
+            "Skarvald the Constructor",
+            "Dalronn the Controller",
+            "Ingvar the Plunderer",
+        },
+    },
+    ["UP"] = {
+        name = "Utgarde Pinnacle",
+        zone = "Utgarde Pinnacle",
+        bosses = {
+            "Svala Sorrowgrave",
+            "Gortok Palehoof",
+            "Skadi the Ruthless",
+            "King Ymiron",
+        },
+    },
+    ["NEX"] = {
+        name = "The Nexus",
+        zone = "The Nexus",
+        bosses = {
+            "Grand Magus Telestra",
+            "Anomalus",
+            "Ormorok the Tree-Shaper",
+            "Keristrasza",
+        },
+    },
+    ["OCC"] = {
+        name = "The Oculus",
+        zone = "The Oculus",
+        bosses = {
+            "Drakos the Interrogator",
+            "Varos Cloudstrider",
+            "Mage-Lord Urom",
+            "Ley-Guardian Eregos",
+        },
+    },
+    ["AN"] = {
+        name = "Azjol-Nerub",
+        zone = "Azjol-Nerub",
+        bosses = {
+            "Krik'thir the Gatewatcher",
+            "Hadronox",
+            "Anub'arak",
+        },
+    },
+    ["OK"] = {
+        name = "Ahn'kahet: The Old Kingdom",
+        zone = "Ahn'kahet: The Old Kingdom",
+        bosses = {
+            "Elder Nadox",
+            "Prince Taldaram",
+            "Jedoga Shadowseeker",
+            "Amanitar",
+            "Herald Volazj",
+        },
+    },
+    ["DTK"] = {
+        name = "Drak'Tharon Keep",
+        zone = "Drak'Tharon Keep",
+        bosses = {
+            "Trollgore",
+            "Novos the Summoner",
+            "King Dred",
+            "The Prophet Tharon'ja",
+        },
+    },
+    ["GUN"] = {
+        name = "Gundrak",
+        zone = "Gundrak",
+        bosses = {
+            "Slad'ran",
+            "Drakkari Colossus",
+            "Moorabi",
+            "Eck the Ferocious",
+            "Gal'darah",
+        },
+    },
+    ["HOS"] = {
+        name = "Halls of Stone",
+        zone = "Halls of Stone",
+        bosses = {
+            "Krystallus",
+            "Maiden of Grief",
+            "Sjonnir The Ironshaper",
+        },
+    },
+    ["HOL"] = {
+        name = "Halls of Lightning",
+        zone = "Halls of Lightning",
+        bosses = {
+            "General Bjarngrim",
+            "Volkhan",
+            "Ionar",
+            "Loken",
+        },
+    },
+    ["VH"] = {
+        name = "The Violet Hold",
+        zone = "The Violet Hold",
+        bosses = {
+            "Erekem",
+            "Moragg",
+            "Ichoron",
+            "Xevozz",
+            "Lavanthor",
+            "Zuramat the Obliterator",
+            "Cyanigosa",
+        },
+    },
+    ["COS"] = {
+        name = "The Culling of Stratholme",
+        zone = "The Culling of Stratholme",
+        bosses = {
+            "Meathook",
+            "Salramm the Fleshcrafter",
+            "Chrono-Lord Epoch",
+            "Infinite Corruptor",
+            "Mal'Ganis",
+        },
+    },
+    ["TOC5"] = {
+        name = "Trial of the Champion",
+        zone = "Trial of the Champion",
+        bosses = {
+            "Grand Champions",
+            "Eadric the Pure",
+            "Argent Confessor Paletress",
+            "The Black Knight",
+        },
+    },
 }
 
 -- Helper to get boss list for current zone (prioritizes current zone)
@@ -292,15 +430,10 @@ Comp.RaidTemplates = {
         shortName = "ICC25",
         category = "WOTLK",
         size = 25,
-        tanks = 3,
-        healers = 6,
-        dps = 16,
+        tanks = 2,
+        healers = 4,
+        dps = 19,
         minGS = 5200,
-        recommended = {
-            {role = "TANK", note = "Main Tank"},
-            {role = "TANK", note = "Off Tank 1"},
-            {role = "TANK", note = "Off Tank 2 (for adds)"},
-        },
         requiredBuffs = {"Replenishment", "Bloodlust/Heroism", "Battle Shout", "Blessing of Kings", "Gift of the Wild"},
     },
     ["ICC10HC"] = {
@@ -321,8 +454,8 @@ Comp.RaidTemplates = {
         category = "WOTLK",
         size = 25,
         tanks = 3,
-        healers = 7,
-        dps = 15,
+        healers = 4,
+        dps = 18,
         minGS = 6000,
         recommended = {},
         requiredBuffs = {"Replenishment", "Bloodlust/Heroism", "Battle Shout", "Blessing of Kings"},
@@ -345,9 +478,9 @@ Comp.RaidTemplates = {
         shortName = "RS25",
         category = "WOTLK",
         size = 25,
-        tanks = 3,
-        healers = 6,
-        dps = 16,
+        tanks = 2,
+        healers = 4,
+        dps = 19,
         minGS = 5800,
         requiredBuffs = {"Replenishment", "Bloodlust/Heroism"},
     },
@@ -368,8 +501,8 @@ Comp.RaidTemplates = {
         category = "WOTLK",
         size = 25,
         tanks = 3,
-        healers = 7,
-        dps = 15,
+        healers = 4,
+        dps = 18,
         minGS = 6000,
         requiredBuffs = {"Replenishment", "Bloodlust/Heroism"},
     },
@@ -392,8 +525,8 @@ Comp.RaidTemplates = {
         category = "WOTLK",
         size = 25,
         tanks = 2,
-        healers = 5,
-        dps = 18,
+        healers = 4,
+        dps = 19,
         minGS = 4800,
         requiredBuffs = {"Replenishment", "Bloodlust/Heroism"},
     },
@@ -413,9 +546,9 @@ Comp.RaidTemplates = {
         shortName = "TOGC25",
         category = "WOTLK",
         size = 25,
-        tanks = 2,
-        healers = 6,
-        dps = 17,
+        tanks = 3,
+        healers = 4,
+        dps = 18,
         minGS = 5500,
         requiredBuffs = {"Replenishment", "Bloodlust/Heroism"},
     },
@@ -438,8 +571,8 @@ Comp.RaidTemplates = {
         category = "WOTLK",
         size = 25,
         tanks = 3,
-        healers = 6,
-        dps = 16,
+        healers = 4,
+        dps = 18,
         minGS = 4500,
         requiredBuffs = {"Replenishment", "Bloodlust/Heroism"},
     },
@@ -461,9 +594,9 @@ Comp.RaidTemplates = {
         shortName = "NAXX25",
         category = "WOTLK",
         size = 25,
-        tanks = 3,
-        healers = 6,
-        dps = 16,
+        tanks = 2,
+        healers = 4,
+        dps = 19,
         minGS = 4000,
         requiredBuffs = {},
     },
@@ -485,8 +618,8 @@ Comp.RaidTemplates = {
         shortName = "EOE25",
         category = "WOTLK",
         size = 25,
-        tanks = 1,
-        healers = 5,
+        tanks = 2,
+        healers = 4,
         dps = 19,
         minGS = 4200,
         requiredBuffs = {},
@@ -520,8 +653,8 @@ Comp.RaidTemplates = {
         shortName = "OS25",
         category = "WOTLK",
         size = 25,
-        tanks = 1,
-        healers = 5,
+        tanks = 2,
+        healers = 4,
         dps = 19,
         minGS = 3800,
         requiredBuffs = {},
@@ -532,8 +665,8 @@ Comp.RaidTemplates = {
         category = "WOTLK",
         size = 25,
         tanks = 3,
-        healers = 7,
-        dps = 15,
+        healers = 4,
+        dps = 18,
         minGS = 4800,
         requiredBuffs = {"Bloodlust/Heroism"},
     },
@@ -556,8 +689,8 @@ Comp.RaidTemplates = {
         category = "WOTLK",
         size = 25,
         tanks = 2,
-        healers = 5,
-        dps = 18,
+        healers = 4,
+        dps = 19,
         minGS = 4500,
         requiredBuffs = {},
     },
@@ -578,8 +711,8 @@ Comp.RaidTemplates = {
         category = "WOTLK",
         size = 25,
         tanks = 2,
-        healers = 5,
-        dps = 18,
+        healers = 4,
+        dps = 19,
         minGS = 4500,
         requiredBuffs = {},
     },
@@ -651,9 +784,9 @@ Comp.RaidTemplates = {
         shortName = "SWP",
         category = "TBC",
         size = 25,
-        tanks = 3,
-        healers = 7,
-        dps = 15,
+        tanks = 2,
+        healers = 4,
+        dps = 19,
         requiredBuffs = {"Bloodlust/Heroism"},
     },
     ["BT"] = {
@@ -661,9 +794,9 @@ Comp.RaidTemplates = {
         shortName = "BT",
         category = "TBC",
         size = 25,
-        tanks = 3,
-        healers = 7,
-        dps = 15,
+        tanks = 2,
+        healers = 4,
+        dps = 19,
         requiredBuffs = {"Bloodlust/Heroism"},
     },
     ["HYJAL"] = {
@@ -671,9 +804,9 @@ Comp.RaidTemplates = {
         shortName = "HYJAL",
         category = "TBC",
         size = 25,
-        tanks = 3,
-        healers = 7,
-        dps = 15,
+        tanks = 2,
+        healers = 4,
+        dps = 19,
         requiredBuffs = {"Bloodlust/Heroism"},
     },
     ["TK"] = {
@@ -681,9 +814,9 @@ Comp.RaidTemplates = {
         shortName = "TK",
         category = "TBC",
         size = 25,
-        tanks = 3,
-        healers = 6,
-        dps = 16,
+        tanks = 2,
+        healers = 4,
+        dps = 19,
         requiredBuffs = {"Bloodlust/Heroism"},
     },
     ["SSC"] = {
@@ -691,9 +824,9 @@ Comp.RaidTemplates = {
         shortName = "SSC",
         category = "TBC",
         size = 25,
-        tanks = 3,
-        healers = 6,
-        dps = 16,
+        tanks = 2,
+        healers = 4,
+        dps = 19,
         requiredBuffs = {"Bloodlust/Heroism"},
     },
     ["GRUUL"] = {
@@ -702,8 +835,8 @@ Comp.RaidTemplates = {
         category = "TBC",
         size = 25,
         tanks = 2,
-        healers = 6,
-        dps = 17,
+        healers = 4,
+        dps = 19,
         requiredBuffs = {},
     },
     ["MAG"] = {
@@ -712,8 +845,8 @@ Comp.RaidTemplates = {
         category = "TBC",
         size = 25,
         tanks = 2,
-        healers = 6,
-        dps = 17,
+        healers = 4,
+        dps = 19,
         requiredBuffs = {},
     },
     ["KARA"] = {
@@ -745,9 +878,9 @@ Comp.RaidTemplates = {
         shortName = "MC",
         category = "CLASSIC",
         size = 40,
-        tanks = 4,
-        healers = 10,
-        dps = 26,
+        tanks = 2,
+        healers = 4,
+        dps = 34,
         requiredBuffs = {},
     },
     ["BWL"] = {
@@ -755,9 +888,9 @@ Comp.RaidTemplates = {
         shortName = "BWL",
         category = "CLASSIC",
         size = 40,
-        tanks = 4,
-        healers = 12,
-        dps = 24,
+        tanks = 2,
+        healers = 4,
+        dps = 34,
         requiredBuffs = {},
     },
     ["AQ40"] = {
@@ -765,9 +898,9 @@ Comp.RaidTemplates = {
         shortName = "AQ40",
         category = "CLASSIC",
         size = 40,
-        tanks = 4,
-        healers = 12,
-        dps = 24,
+        tanks = 2,
+        healers = 4,
+        dps = 34,
         requiredBuffs = {},
     },
     ["AQ20"] = {
@@ -776,8 +909,8 @@ Comp.RaidTemplates = {
         category = "CLASSIC",
         size = 20,
         tanks = 2,
-        healers = 5,
-        dps = 13,
+        healers = 4,
+        dps = 14,
         requiredBuffs = {},
     },
     ["NAXX40"] = {
@@ -785,9 +918,9 @@ Comp.RaidTemplates = {
         shortName = "NAXX40",
         category = "CLASSIC",
         size = 40,
-        tanks = 4,
-        healers = 12,
-        dps = 24,
+        tanks = 2,
+        healers = 4,
+        dps = 34,
         requiredBuffs = {},
     },
     ["ONY40"] = {
@@ -796,8 +929,8 @@ Comp.RaidTemplates = {
         category = "CLASSIC",
         size = 40,
         tanks = 2,
-        healers = 10,
-        dps = 28,
+        healers = 4,
+        dps = 34,
         requiredBuffs = {},
     },
     ["ZG"] = {
@@ -806,8 +939,8 @@ Comp.RaidTemplates = {
         category = "CLASSIC",
         size = 20,
         tanks = 2,
-        healers = 5,
-        dps = 13,
+        healers = 4,
+        dps = 14,
         requiredBuffs = {},
     },
 
@@ -842,8 +975,8 @@ Comp.RaidTemplates = {
         category = "WEEKLY",
         size = 25,
         tanks = 2,
-        healers = 5,
-        dps = 18,
+        healers = 4,
+        dps = 19,
         minGS = 4000,
         requiredBuffs = {},
     },
@@ -1922,6 +2055,8 @@ Comp.RaidBuffs = {
 -- Current raid state
 Comp.CurrentRaid = {
     template = nil,
+    variation = nil,       -- optional {tanks, healers, dps, name} override of template targets
+    variationIndex = 1,    -- 1 = Standard (template default)
     members = {},  -- {name, class, role, spec, gs}
     roleCounts = {TANK = 0, HEALER = 0, DPS = 0},
     classCounts = {},
@@ -2478,38 +2613,478 @@ function Comp.GetMissingBuffs()
     return missing
 end
 
--- Get composition status vs template
+-- ============================================================================
+-- TEMPLATE VARIATIONS (alternate role splits for the same instance)
+-- ============================================================================
+
+-- Friendly, properly-spaced class name for display
+function Comp.ClassDisplayName(class)
+    if class == "DEATHKNIGHT" then return "Death Knight" end
+    return class:sub(1, 1) .. class:sub(2):lower()
+end
+
+-- ============================================================================
+-- CONTENT TIERS — GearScore / item-level ranges per progression tier.
+-- Grounded in WotLK 3.3.5a (Warmane-style) PUG requirements and tier item levels:
+--   T7 Naxx/OS/EoE iLvl 187-226, T8 Ulduar 200-245, T9 ToC/ToGC 219-258,
+--   T10 ICC/RS normal 245-264 / heroic 264-284. GS thresholds from Warmane PUGs
+--   (ToC ~4.8-5.5k, ICC10 ~5.5-5.8k, ICC25 ~5.8-6.0k).
+-- ============================================================================
+Comp.ContentTiers = {
+    T7   = {gs = {2700, 3800}, ilvl = {187, 226}, label = "T7 (Naxx / OS / EoE)"},
+    T8   = {gs = {3600, 4600}, ilvl = {200, 245}, label = "T8 (Ulduar)"},
+    T9   = {gs = {4500, 5400}, ilvl = {219, 258}, label = "T9 (ToC / ToGC / Onyxia)"},
+    T10N = {gs = {5200, 5900}, ilvl = {245, 264}, label = "T10 Normal (ICC / RS)"},
+    T10H = {gs = {5800, 6500}, ilvl = {264, 284}, label = "T10 Heroic (ICC / RS HC)"},
+    HC5  = {gs = {2800, 4500}, ilvl = {180, 232}, label = "Heroic 5-man"},
+    TBC  = {gs = {1800, 3500}, ilvl = {141, 164}, label = "TBC (level-80 farm)"},
+    CLASSIC = {gs = {1000, 2500}, ilvl = {66, 92}, label = "Classic (level-80 farm)"},
+}
+
+-- Explicit tier per WotLK raid (same category, different tiers). Everything else
+-- resolves by category in GetTierInfo.
+Comp.TemplateTier = {
+    ICC10 = "T10N", ICC25 = "T10N", ICC10HC = "T10H", ICC25HC = "T10H",
+    RS10 = "T10N", RS25 = "T10N", RS10HC = "T10H", RS25HC = "T10H",
+    TOC10 = "T9", TOC25 = "T9", TOGC10 = "T9", TOGC25 = "T9",
+    ULDUAR10 = "T8", ULDUAR25 = "T8",
+    NAXX10 = "T7", NAXX25 = "T7", EOE10 = "T7", EOE25 = "T7",
+    OS10_0D = "T7", OS10_3D = "T7", OS25_0D = "T7", OS25_3D = "T7",
+    VOA10 = "T9", VOA25 = "T9", ONYXIA10 = "T9", ONYXIA25 = "T9",
+    WEEKLY_RAID = "T10N", WG_WEEKLY = "T9", DAILY_HEROIC = "HC5",
+}
+
+function Comp.GetTierInfo(templateKey)
+    local key = Comp.TemplateTier[templateKey]
+    if not key then
+        local t = Comp.RaidTemplates[templateKey]
+        local cat = t and t.category
+        if cat == "WOTLK_DUNGEON" then key = "HC5"
+        elseif cat == "TBC" then key = "TBC"
+        elseif cat == "CLASSIC" then key = "CLASSIC"
+        else key = "T10N" end
+    end
+    return Comp.ContentTiers[key] or Comp.ContentTiers.T10N
+end
+
+-- ============================================================================
+-- MANDATORY BUFFS & CLASSES (deep-researched WotLK raid requirements).
+-- Buffs/utility barely change per instance, so these apply to every WotLK raid;
+-- 5-mans only really care about Heroism + CC.
+-- ============================================================================
+Comp.CoreRaidBuffs = {
+    "Bloodlust/Heroism", "Replenishment", "Blessing of Kings", "Gift of the Wild",
+    "Power Word: Fortitude", "Arcane Intellect", "Battle Shout",
+}
+
+Comp.WotlkCoreClasses = {
+    {class = "SHAMAN",      required = true,  reason = "Bloodlust/Heroism + totems - every raid needs one"},
+    {class = "PALADIN",     required = true,  reason = "Blessing of Kings/Might; strongest tank & healer"},
+    {class = "DEATHKNIGHT", required = false, reason = "Horn of Winter, Imp. Icy Talons, Ebon Plague (Unholy)"},
+    {class = "DRUID",       required = false, reason = "Innervate, Battle Rez, Mark of the Wild, +crit (Moonkin)"},
+    {class = "PRIEST",      required = false, reason = "Fortitude, Hymn of Hope; Shadow gives Replenishment"},
+    {class = "WARRIOR",     required = false, reason = "Sunder Armor, Commanding/Battle Shout"},
+    {class = "MAGE",        required = false, reason = "Arcane Intellect, Focus Magic, mana + portals"},
+    {class = "WARLOCK",     required = false, reason = "Curse of Elements, Soulstone, Imp. buffs"},
+}
+
+-- Mandatory buffs for a template (core WotLK raid set merged with the template's
+-- own requiredBuffs). 5-man dungeons return their own list only.
+function Comp.GetMandatoryBuffs(templateKey)
+    local t = Comp.RaidTemplates[templateKey]
+    if not t then return {} end
+    if (t.size or 0) <= 5 then return t.requiredBuffs or {} end
+    local out, seen = {}, {}
+    local function add(b) if b and not seen[b] then seen[b] = true; out[#out+1] = b end end
+    for _, b in ipairs(Comp.CoreRaidBuffs) do add(b) end
+    for _, b in ipairs(t.requiredBuffs or {}) do add(b) end
+    return out
+end
+
+-- Mandatory/recommended classes for a template.
+function Comp.GetMandatoryClasses(templateKey)
+    local t = Comp.RaidTemplates[templateKey]
+    if t and (t.size or 0) <= 5 then
+        return {{class = "SHAMAN", required = false, reason = "Heroism/Bloodlust is huge even in 5-mans"}}
+    end
+    return Comp.WotlkCoreClasses
+end
+
+-- Return the role targets currently in effect (selected gear variation, or the
+-- template default before a variation is chosen).
+function Comp.GetActiveTargets()
+    local template = Comp.CurrentRaid.template
+    local t = template and Comp.RaidTemplates[template]
+    if not t then return nil end
+    local v = Comp.CurrentRaid.variation
+    local size = t.size or ((t.tanks or 0) + (t.healers or 0) + (t.dps or 0))
+    local tier = Comp.GetTierInfo(template)
+    if v then
+        return {tanks = v.tanks, healers = v.healers, dps = v.dps, size = size, name = t.name,
+                minGS = t.minGS, variation = v.name, gs = v.gs, ilvl = v.ilvl, tierLabel = tier.label}
+    end
+    return {tanks = t.tanks, healers = t.healers, dps = t.dps, size = size, name = t.name,
+            minGS = t.minGS, gs = tier.gs, ilvl = tier.ilvl, tierLabel = tier.label}
+end
+
+-- Gear-tiered composition variations. Healers scale INVERSELY with gear: an
+-- undergeared roster brings an extra healer (lower GS band), a geared farm roster
+-- drops a healer for more DPS (higher GS band). Each variation carries its own
+-- GearScore and item-level range so raid leaders can recruit to the right gear.
+function Comp.GetTemplateVariations(templateKey)
+    local t = Comp.RaidTemplates[templateKey]
+    if not t then return {} end
+    local size = t.size or ((t.tanks or 0) + (t.healers or 0) + (t.dps or 0))
+    local tanks = t.tanks or (size >= 10 and 2 or 1)
+    local isHeroic = templateKey:find("HC") ~= nil or templateKey:find("TOGC") ~= nil
+
+    -- Ordered undergeared -> geared (healers descending). GS bands are assigned
+    -- low -> high across this list.
+    local plan
+    if size <= 5 then
+        plan = {{"Comfort", 2}, {"Standard", 1}}
+    elseif size <= 10 then
+        plan = isHeroic and {{"Standard", 3}, {"Farm", 2}} or {{"Safe", 3}, {"Standard", 2}}
+    elseif size <= 25 then
+        plan = {{"Entry", 6}, {"Standard", 5}, {"Farm", 4}}
+    else
+        plan = {{"Entry", 5}, {"Standard", 4}, {"Farm", 3}}  -- 40-man (level-80 farm)
+    end
+
+    local notes = {
+        Comfort = "Extra healer for lower gear or harder heroics",
+        Safe = "Undergeared / progression - extra healer",
+        Entry = "Undergeared / first clears - extra healer",
+        Standard = "Typical clear setup",
+        Farm = "Overgeared farm - drop a healer for more DPS",
+    }
+
+    local tier = Comp.GetTierInfo(templateKey)
+    local glo, ghi = tier.gs[1], tier.gs[2]
+    local ilo, ihi = tier.ilvl[1], tier.ilvl[2]
+    local n = #plan
+
+    local variations, seen = {}, {}
+    for i, entry in ipairs(plan) do
+        local name, healers = entry[1], entry[2]
+        local dps = size - tanks - healers
+        if dps >= 0 and not seen[healers] then
+            seen[healers] = true
+            local gsLo = math.floor(glo + (ghi - glo) * (i - 1) / n)
+            local gsHi = (i == n) and ghi or math.floor(glo + (ghi - glo) * i / n)
+            local ilLo = math.floor(ilo + (ihi - ilo) * (i - 1) / n)
+            local ilHi = (i == n) and ihi or math.floor(ilo + (ihi - ilo) * i / n)
+            table.insert(variations, {
+                name = name, tanks = tanks, healers = healers, dps = dps,
+                gs = {gsLo, gsHi}, ilvl = {ilLo, ilHi}, note = notes[name],
+            })
+        end
+    end
+    return variations
+end
+
+-- Index of the default ("Standard") variation, falling back to the first.
+function Comp.GetDefaultVariationIndex(templateKey)
+    local vars = Comp.GetTemplateVariations(templateKey)
+    for i, v in ipairs(vars) do
+        if v.name == "Standard" then return i end
+    end
+    return 1
+end
+
+-- Apply variation by index (1-based).
+function Comp.SetVariation(index)
+    local template = Comp.CurrentRaid.template
+    if not template then return false end
+    local vars = Comp.GetTemplateVariations(template)
+    local v = vars[index]
+    if not v then return false end
+    Comp.CurrentRaid.variationIndex = index
+    Comp.CurrentRaid.variation = {
+        tanks = v.tanks, healers = v.healers, dps = v.dps,
+        name = v.name, gs = v.gs, ilvl = v.ilvl,
+    }
+    return true
+end
+
+-- Get composition status vs template (honors the active gear variation)
 function Comp.GetCompositionStatus()
     local template = Comp.CurrentRaid.template
     if not template then
         return nil
     end
 
-    local templateData = Comp.RaidTemplates[template]
-    if not templateData then return nil end
+    local targets = Comp.GetActiveTargets()
+    if not targets then return nil end
 
     local status = {
-        template = templateData.name,
-        size = {current = #Comp.CurrentRaid.members, needed = templateData.size},
-        tanks = {current = Comp.CurrentRaid.roleCounts.TANK, needed = templateData.tanks},
-        healers = {current = Comp.CurrentRaid.roleCounts.HEALER, needed = templateData.healers},
-        dps = {current = Comp.CurrentRaid.roleCounts.DPS, needed = templateData.dps},
+        template = targets.name,
+        variation = targets.variation,
+        size = {current = #Comp.CurrentRaid.members, needed = targets.size},
+        tanks = {current = Comp.CurrentRaid.roleCounts.TANK, needed = targets.tanks},
+        healers = {current = Comp.CurrentRaid.roleCounts.HEALER, needed = targets.healers},
+        dps = {current = Comp.CurrentRaid.roleCounts.DPS, needed = targets.dps},
         missingBuffs = Comp.GetMissingBuffs(),
-        minGS = templateData.minGS,
+        minGS = targets.minGS,
+        gs = targets.gs,
+        ilvl = targets.ilvl,
+        tierLabel = targets.tierLabel,
     }
 
     return status
 end
 
--- Set current raid template
+-- Set current raid template (auto-selects the Standard gear variation)
 function Comp.SetTemplate(templateKey)
     if Comp.RaidTemplates[templateKey] then
         Comp.CurrentRaid.template = templateKey
+        local def = Comp.GetDefaultVariationIndex(templateKey)
+        Comp.CurrentRaid.variationIndex = def
+        local v = Comp.GetTemplateVariations(templateKey)[def]
+        Comp.CurrentRaid.variation = v and {
+            tanks = v.tanks, healers = v.healers, dps = v.dps,
+            name = v.name, gs = v.gs, ilvl = v.ilvl,
+        } or nil
         Comp.ScanRaid()
         AIP.Print("Raid template set to: " .. Comp.RaidTemplates[templateKey].name)
         return true
     end
     return false
+end
+
+-- ============================================================================
+-- SMART RECOMMENDATIONS
+-- Compares the current raid against the active targets and works out which
+-- roles/classes to recruit, intelligently coupling role gaps with missing raid
+-- buffs (e.g. an open DPS slot that also brings Replenishment) and flagging
+-- buffs that no current or recommended member can provide.
+-- ============================================================================
+function Comp.GetRecommendations()
+    Comp.ScanRaid()
+
+    local targets = Comp.GetActiveTargets()
+    if not targets then
+        return {ok = false, message = "Select a template first to get recommendations."}
+    end
+
+    local raid = Comp.CurrentRaid
+    local rec = {
+        ok = true,
+        templateName = targets.name,
+        variation = targets.variation,
+        targets = targets,
+        current = {
+            TANK = raid.roleCounts.TANK, HEALER = raid.roleCounts.HEALER,
+            DPS = raid.roleCounts.DPS, size = #raid.members,
+        },
+        slots = {},      -- recruit suggestions, one per open slot
+        buffSwaps = {},  -- still-missing buffs with no provider after recruiting
+    }
+
+    local tankGap   = math.max(0, (targets.tanks or 0)   - raid.roleCounts.TANK)
+    local healerGap = math.max(0, (targets.healers or 0) - raid.roleCounts.HEALER)
+    local dpsGap    = math.max(0, (targets.dps or 0)     - raid.roleCounts.DPS)
+    rec.gaps = {TANK = tankGap, HEALER = healerGap, DPS = dpsGap}
+    rec.full = (tankGap + healerGap + dpsGap) == 0
+
+    -- Build the list of buffs we still want a provider for: template-required
+    -- buffs plus globally-important buffs, skipping ones already covered (incl.
+    -- via an available alternate).
+    local wantBuffs, seenBuff = {}, {}
+    local function wantBuff(name)
+        if seenBuff[name] then return end
+        local info = Comp.RaidBuffs[name]
+        if not info then return end
+        if raid.buffsAvailable[name] then return end
+        if info.alternatesWith then
+            for _, alt in ipairs(info.alternatesWith) do
+                if raid.buffsAvailable[alt] then return end
+            end
+        end
+        seenBuff[name] = true
+        table.insert(wantBuffs, name)
+    end
+    local tdata = Comp.RaidTemplates[raid.template]
+    if tdata and tdata.requiredBuffs then
+        for _, b in ipairs(tdata.requiredBuffs) do wantBuff(b) end
+    end
+    for name, info in pairs(Comp.RaidBuffs) do
+        if info.important then wantBuff(name) end
+    end
+
+    -- Track buffs claimed by a recommended slot so we don't double-count them.
+    local claimed = {}
+    local function firstWantedBuffForClass(class)
+        for _, bname in ipairs(wantBuffs) do
+            if not claimed[bname] then
+                local info = Comp.RaidBuffs[bname]
+                if info then
+                    for _, c in ipairs(info.classes) do
+                        if c == class then return bname end
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
+    -- Choose the best class for an open role slot: prefer one that also covers a
+    -- still-missing buff; otherwise pick the least-represented eligible class so
+    -- the raid stays class-diverse.
+    local function pickRoleClass(role)
+        local candidates = Comp.GetClassesForRole(role)
+        for _, class in ipairs(candidates) do
+            local bname = firstWantedBuffForClass(class)
+            if bname then
+                claimed[bname] = true
+                return class, bname
+            end
+        end
+        local minCount, minClass
+        for _, class in ipairs(candidates) do
+            local c = raid.classCounts[class] or 0
+            if minCount == nil or c < minCount then minCount = c; minClass = class end
+        end
+        return minClass, nil
+    end
+
+    local function addSlots(role, n)
+        for _ = 1, n do
+            local class, buff = pickRoleClass(role)
+            table.insert(rec.slots, {role = role, class = class, buff = buff})
+        end
+    end
+    addSlots("TANK", tankGap)
+    addSlots("HEALER", healerGap)
+    addSlots("DPS", dpsGap)
+
+    -- Any wanted buffs still unclaimed → no current or recommended member brings
+    -- them. Surface as swap/priority suggestions.
+    for _, bname in ipairs(wantBuffs) do
+        if not claimed[bname] then
+            local info = Comp.RaidBuffs[bname]
+            table.insert(rec.buffSwaps, {buff = bname, classes = info.classes, specs = info.specs})
+        end
+    end
+
+    return rec
+end
+
+-- Render recommendations as a list of display lines (colored), reusable by the
+-- UI popup and the slash command.
+function Comp.BuildRecommendationLines()
+    local rec = Comp.GetRecommendations()
+    local lines = {}
+    if not rec.ok then
+        table.insert(lines, rec.message)
+        return lines, rec
+    end
+
+    local t = rec.targets
+    local hdr = "|cFFFFCC00" .. rec.templateName .. "|r"
+    if rec.variation then hdr = hdr .. "  |cFF88CCFF(" .. rec.variation .. ")|r" end
+    table.insert(lines, hdr)
+    table.insert(lines, string.format("Current: %dT / %dH / %dD   (%d/%d)",
+        rec.current.TANK, rec.current.HEALER, rec.current.DPS, rec.current.size, t.size))
+    table.insert(lines, string.format("Target:  %dT / %dH / %dD",
+        t.tanks or 0, t.healers or 0, t.dps or 0))
+    if t.gs and t.ilvl then
+        table.insert(lines, string.format("Gear:    |cFF88CCFFGS %d-%d|r  (iLvl %d-%d)%s",
+            t.gs[1], t.gs[2], t.ilvl[1], t.ilvl[2],
+            t.tierLabel and ("  |cFF888888" .. t.tierLabel .. "|r") or ""))
+    end
+    table.insert(lines, " ")
+
+    local function classesText(classes)
+        local parts = {}
+        for _, c in ipairs(classes) do table.insert(parts, Comp.ColoredClassName(c)) end
+        return table.concat(parts, " / ")
+    end
+
+    if #rec.slots > 0 then
+        table.insert(lines, "|cFF00FF00Recruit " .. #rec.slots .. " more:|r")
+        for _, s in ipairs(rec.slots) do
+            local classText = s.class and Comp.ColoredClassName(s.class) or "any class"
+            local line = " - " .. s.role .. ": " .. classText
+            if s.buff then
+                line = line .. "  |cFFAAAAAA(brings " .. s.buff .. ")|r"
+            else
+                line = line .. "  |cFFAAAAAA(raid balance)|r"
+            end
+            table.insert(lines, line)
+        end
+    else
+        table.insert(lines, "|cFF00FF00Roles are full for this target.|r")
+    end
+
+    if #rec.buffSwaps > 0 then
+        table.insert(lines, " ")
+        table.insert(lines, "|cFFFF8800Missing buffs (no provider in raid):|r")
+        for _, b in ipairs(rec.buffSwaps) do
+            local line = " - " .. b.buff .. " -> " .. classesText(b.classes)
+            if b.specs then line = line .. " |cFF888888(" .. table.concat(b.specs, "/") .. ")|r" end
+            table.insert(lines, line)
+        end
+        if rec.full then
+            table.insert(lines, "|cFF888888Raid is full - consider swapping a slot for one of the above.|r")
+        end
+    end
+
+    -- Core class coverage (mandatory utility classes for WotLK raids)
+    local templateKey = Comp.CurrentRaid.template
+    local coreClasses = Comp.GetMandatoryClasses(templateKey)
+    if #coreClasses > 0 then
+        local missingReq, missingRec, present = {}, {}, {}
+        for _, c in ipairs(coreClasses) do
+            if (Comp.CurrentRaid.classCounts[c.class] or 0) > 0 then
+                table.insert(present, Comp.ColoredClassName(c.class))
+            elseif c.required then
+                table.insert(missingReq, c)
+            else
+                table.insert(missingRec, c)
+            end
+        end
+        table.insert(lines, " ")
+        table.insert(lines, "|cFFFFCC00Core classes:|r")
+        for _, c in ipairs(missingReq) do
+            table.insert(lines, " - |cFFFF3333MISSING|r " .. Comp.ColoredClassName(c.class)
+                .. " |cFF888888- " .. c.reason .. "|r")
+        end
+        if #missingRec > 0 then
+            local names = {}
+            for _, c in ipairs(missingRec) do table.insert(names, Comp.ColoredClassName(c.class)) end
+            table.insert(lines, " - |cFFFFAA00Recommended:|r " .. table.concat(names, " / "))
+        end
+        if #present > 0 then
+            table.insert(lines, " - |cFF00FF00Have:|r " .. table.concat(present, " / "))
+        end
+    end
+
+    -- Mandatory buff coverage (concise core-buff view)
+    local mb = Comp.GetMandatoryBuffs(templateKey)
+    if #mb > 0 then
+        local missing = {}
+        for _, b in ipairs(mb) do
+            if not Comp.CurrentRaid.buffsAvailable[b] then
+                local info = Comp.RaidBuffs[b]
+                local alt = false
+                if info and info.alternatesWith then
+                    for _, a in ipairs(info.alternatesWith) do
+                        if Comp.CurrentRaid.buffsAvailable[a] then alt = true; break end
+                    end
+                end
+                if not alt then table.insert(missing, b) end
+            end
+        end
+        table.insert(lines, " ")
+        if #missing > 0 then
+            table.insert(lines, "|cFFFF8800Mandatory buffs missing:|r " .. table.concat(missing, ", "))
+        else
+            table.insert(lines, "|cFF00FF00All mandatory buffs covered.|r")
+        end
+    end
+
+    return lines, rec
 end
 
 -- Get list of classes that can fill a role
@@ -2603,12 +3178,17 @@ function Comp.SlashHandler(msg)
             local status = available and "|cFF00FF00YES|r" or "|cFFFF0000NO|r"
             AIP.Print("  " .. buffName .. ": " .. status)
         end
+    elseif msg == "recommend" or msg == "rec" then
+        AIP.Print("=== Recommendations ===")
+        local lines = Comp.BuildRecommendationLines()
+        for _, line in ipairs(lines) do AIP.Print(line) end
     else
         AIP.Print("Composition commands:")
         AIP.Print("  /aip comp - Show current composition")
         AIP.Print("  /aip comp templates - List raid templates")
         AIP.Print("  /aip comp set ICC10 - Set raid template")
         AIP.Print("  /aip comp buffs - Show buff coverage")
+        AIP.Print("  /aip comp recommend - Suggest classes to recruit")
     end
 end
 

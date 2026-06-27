@@ -128,6 +128,9 @@ RM.RaidBuffs = {
     {
         name = "Intellect",
         pattern = "Arcane Intellect",
+        -- Group cast (Mage) applies an aura named "Arcane Brilliance", not
+        -- "Arcane Intellect", so it must be matched explicitly or it reads as missing.
+        altPatterns = {"Arcane Brilliance"},
         provider = "MAGE",
         spellName = "Arcane Brilliance",
         priority = 4,
@@ -135,6 +138,9 @@ RM.RaidBuffs = {
     {
         name = "Spirit",
         pattern = "Divine Spirit",
+        -- Group cast (Priest) applies an aura named "Prayer of Spirit", not
+        -- "Divine Spirit", so it must be matched explicitly or it reads as missing.
+        altPatterns = {"Prayer of Spirit"},
         provider = "PRIEST",
         spellName = "Prayer of Spirit",
         priority = 5,

@@ -66,6 +66,7 @@ local RAIDS = {
     {key = "RS25H", name = "Ruby Sanctum 25 Heroic", size = 25},
     {key = "VoA25", name = "Vault of Archavon 25", size = 25},
     {key = "Ony25", name = "Onyxia's Lair 25", size = 25},
+    {key = "POS5", name = "Pit of Saron", size = 5},  -- 5-man dungeon (verifies dungeon boss population)
 }
 
 local BOSS_NAMES = {
@@ -75,6 +76,7 @@ local BOSS_NAMES = {
     TOC = {"Northrend Beasts", "Lord Jaraxxus", "Faction Champions", "Twin Val'kyr", "Anub'arak"},
     RS = {"Baltharus", "Saviana", "Zarithrian", "Halion"},
     VoA = {"Archavon", "Emalon", "Koralon", "Toravon"},
+    POS = {"Forgemaster Garfrost", "Ick & Krick", "Scourgelord Tyrannus"},
 }
 
 local LOOT_ITEMS = {
@@ -150,9 +152,11 @@ function TD.GenerateLFMGroups(count)
                 raid.key, tanksNeeded, healersNeeded, dpsNeeded, gsMin),
             gsMin = gsMin,
             ilvlMin = math.floor(gsMin / 24),
-            tanks = {current = math.random(0, tanksNeeded - 1), needed = tanksNeeded},
-            healers = {current = math.random(0, healersNeeded - 1), needed = healersNeeded},
-            dps = {current = math.random(0, dpsNeeded - 5), needed = dpsNeeded},
+            -- math.max guards against small raids (e.g. 5-man) where these
+            -- intervals would otherwise go negative and error out math.random.
+            tanks = {current = math.random(0, math.max(0, tanksNeeded - 1)), needed = tanksNeeded},
+            healers = {current = math.random(0, math.max(0, healersNeeded - 1)), needed = healersNeeded},
+            dps = {current = math.random(0, math.max(0, dpsNeeded - 5)), needed = dpsNeeded},
             time = time() - math.random(0, 600),  -- Within last 10 minutes
             isOwn = false,
             inviteKeyword = "inv",
