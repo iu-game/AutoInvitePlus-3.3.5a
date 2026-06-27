@@ -620,8 +620,16 @@ end
 
 -- Clear test data only (restore originals)
 function TD.ClearTestData()
+    -- Demo timer bars from /aip timertest are runtime UI, not DB test data, so
+    -- clear them here regardless of whether DB test data is loaded.
+    local clearedBars = false
+    if AIP.RaidTools and AIP.RaidTools.timers and next(AIP.RaidTools.timers) then
+        AIP.RaidTools.ClearAllTimers()
+        clearedBars = true
+    end
+
     if not TD.testDataActive then
-        AIP.Print("|cFFFFFF00No test data active.|r")
+        AIP.Print(clearedBars and "Timer bars cleared." or "|cFFFFFF00No test data active.|r")
         return
     end
 

@@ -4,7 +4,7 @@
 -- Refactored with DRY principle and OOP patterns
 
 local ADDON_NAME = "AutoInvitePlus"
-local VERSION = "6.1.0"
+local VERSION = "6.1.1"
 local DB_VERSION = 5  -- Increment when saved variables structure changes (5.5: raid sessions, 5.4: mdps/rdps split, 4: loot history retention)
 
 -- Create main addon namespace (may already exist from Utils.lua)
@@ -1495,13 +1495,18 @@ local function SlashHandler(msg)
     elseif cmd == "buffs" or cmd == "delegate" then
         if AIP.RaidTools then AIP.RaidTools.AnnounceBuffDelegation() end
     elseif cmd == "timertest" then
-        if not (AIP.db and AIP.db.mechanicAnnounce) then
+        -- Toggle: if demo bars are showing (or "clear"/"off" given), clear them.
+        local RT = AIP.RaidTools
+        if RT and (rest == "clear" or rest == "off" or (RT.timers and next(RT.timers))) then
+            if RT.ClearAllTimers then RT.ClearAllTimers() end
+            Print("Timer bars cleared.")
+        elseif not (AIP.db and AIP.db.mechanicAnnounce) then
             Print("Enable 'Auto-announce boss mechanics' in Settings first.")
-        elseif AIP.RaidTools and AIP.RaidTools.StartTimer then
-            AIP.RaidTools.StartTimer("lust", "Bloodlust", 40, 0.2, 0.9, 0.3)
-            AIP.RaidTools.StartTimer("sated", "Sated (lockout)", 600, 1, 0.3, 0.3)
-            AIP.RaidTools.StartTimer("demo", "Defile (demo)", 10, 1, 0.6, 0.1, "~Defile soon!")
-            Print("Started demo timer bars (drag the 'AIP Timers' anchor to position).")
+        elseif RT and RT.StartTimer then
+            RT.StartTimer("lust", "Bloodlust", 40, 0.2, 0.9, 0.3, nil, "Interface\\Icons\\Spell_Nature_BloodLust")
+            RT.StartTimer("sated", "Sated (lockout)", 600, 1, 0.3, 0.3, nil, "Interface\\Icons\\Spell_Nature_BloodLust")
+            RT.StartTimer("t:demo", "Defile (demo)", 18, 1, 0.6, 0.1, "~Defile soon!", "Interface\\Icons\\Spell_Shadow_DeathAndDecay")
+            Print("Started demo timer bars (drag the 'AIP Timers' anchor). Run /aip timertest again to clear.")
         end
 
     -- Status

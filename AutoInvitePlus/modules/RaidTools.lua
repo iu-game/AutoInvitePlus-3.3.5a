@@ -349,11 +349,13 @@ RT.KnownDebuffs = {
 RT.debuffState = {}  -- name -> {stacks, t}
 local DEBUFF_MIN_INTERVAL = 2  -- seconds between re-announces of the same debuff
 
+-- Intuitive dispel call-out: the action verb plus which classes can remove it.
 local function debuffDispelVerb(dtype)
-    if dtype == "Curse" then return "decurse me!"
-    elseif dtype == "Poison" then return "cleanse me!"
-    elseif dtype == "Disease" then return "cure me!"
-    else return "dispel me!" end
+    if dtype == "Curse" then return "DECURSE me! (Mage/Druid)"
+    elseif dtype == "Poison" then return "CLEANSE me! (Pala/Druid/Sham)"
+    elseif dtype == "Disease" then return "CURE me! (Pala/Priest)"
+    elseif dtype == "Magic" then return "DISPEL me! (Priest/Pala)"
+    else return "DISPEL me!" end
 end
 
 function RT.SayDebuff(name, stacks, action, channel)
@@ -609,8 +611,8 @@ function RT.OnMechanicCombatLog(...)
     if sub == "SPELL_AURA_APPLIED" then
         local sName = select(10, ...)
         if sName and RT.LustSpells[sName] then
-            RT.StartTimer("lust", sName, 40, 0.2, 0.9, 0.3)
-            RT.StartTimer("sated", "Sated (lockout)", 600, 1, 0.3, 0.3)
+            RT.StartTimer("lust", sName, 40, 0.2, 0.9, 0.3, nil, "Interface\\Icons\\Spell_Nature_BloodLust")
+            RT.StartTimer("sated", "Sated (lockout)", 600, 1, 0.3, 0.3, nil, "Interface\\Icons\\Spell_Nature_BloodLust")
             return
         end
     end
@@ -699,20 +701,47 @@ function RT.CheckRaidHealth()
     end
 end
 
+-- Called on leaving combat (PLAYER_REGEN_ENABLED). The boss-ability recast timers
+-- keep counting toward a "next cast" that will never happen once the boss is dead,
+-- firing their ~5s pre-warnings after the fight - this stops that. Bloodlust/Sated
+-- bars (not prefixed "t:") are left alone.
+function RT.ClearMechanicState()
+    if RT.timers then
+        for key in pairs(RT.timers) do
+            if tostring(key):find("^t:") then RT.timers[key] = nil end
+        end
+    end
+    RT.mechLast = {}
+    RT.bossHpSeen = {}
+    RT.lastRaidHealthWarn = 0
+end
+
 -- ============================================================================
 -- COUNTDOWN TIMER BARS  (Bloodlust + signature boss abilities)
 -- A small, movable stack of shrinking bars. RT.StartTimer(key, label, seconds,
 -- r,g,b[, prewarn]) starts/restarts a bar; a pre-warning is emitted ~5s out.
 -- ============================================================================
 
-local TIMER_BAR_W, TIMER_BAR_H, TIMER_MAX = 200, 18, 6
-RT.timers = {}  -- key -> {label, expire, duration, r, g, b, prewarn, warned}
+local TIMER_BAR_W, TIMER_BAR_H, TIMER_MAX, TIMER_GAP = 230, 22, 7, 3
+local TIMER_ICON_FALLBACK = "Interface\\Icons\\INV_Misc_PocketWatch_01"
+RT.timers = {}  -- key -> {label, expire, duration, r, g, b, prewarn, warned, icon}
+
+-- Compact, glanceable time text: "10:00" for >=1 min, whole seconds 10-59,
+-- one decimal under 10s (so the final countdown reads clearly).
+local function fmtTimer(s)
+    if s >= 60 then
+        return string.format("%d:%02d", math.floor(s / 60), math.floor(s % 60))
+    elseif s >= 10 then
+        return string.format("%d", math.floor(s + 0.5))
+    end
+    return string.format("%.1f", s)
+end
 
 function RT.CreateTimerAnchor()
     if RT.TimerAnchor then return RT.TimerAnchor end
 
     local f = CreateFrame("Frame", "AIPTimerAnchor", UIParent)
-    f:SetSize(TIMER_BAR_W, TIMER_BAR_H)
+    f:SetSize(TIMER_BAR_W + TIMER_BAR_H, TIMER_BAR_H)
     f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving)
     f:SetScript("OnDragStop", function(self)
@@ -727,7 +756,7 @@ function RT.CreateTimerAnchor()
     else f:SetPoint("CENTER", UIParent, "CENTER", -320, 120) end
 
     local handle = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    handle:SetPoint("BOTTOMLEFT", f, "TOPLEFT", 2, 2)
+    handle:SetPoint("BOTTOMLEFT", f, "TOPLEFT", 2, 3)
     handle:SetText("|cFF888888AIP Timers (drag)|r")
     f.handle = handle
 
@@ -737,7 +766,7 @@ function RT.CreateTimerAnchor()
     -- costs nothing while idle (StartTimer re-shows it).
     f:SetScript("OnUpdate", function(self, e)
         self.acc = (self.acc or 0) + e
-        if self.acc < 0.1 then return end
+        if self.acc < 0.04 then return end
         self.acc = 0
         local now = GetTime()
 
@@ -757,14 +786,28 @@ function RT.CreateTimerAnchor()
             local bar = self.bars[i]
             if item then
                 bar = RT.AcquireTimerBar(i)
-                bar:SetMinMaxValues(0, item.t.duration)
-                bar:SetValue(item.rem)
-                bar:SetStatusBarColor(item.t.r, item.t.g, item.t.b)
-                bar.label:SetText(item.t.label)
-                bar.time:SetText(string.format("%.0f", item.rem))
-                if item.t.prewarn and not item.t.warned and item.rem <= 5 then
-                    item.t.warned = true
-                    RT.EmitMechanic(item.t.prewarn)
+                local t, rem = item.t, item.rem
+                local frac = (t.duration > 0) and (rem / t.duration) or 0
+                bar:SetMinMaxValues(0, t.duration)
+                bar:SetValue(rem)
+                bar:SetStatusBarColor(t.r, t.g, t.b)
+                bar.icon:SetTexture(t.icon or TIMER_ICON_FALLBACK)
+                bar.label:SetText(t.label)
+                bar.time:SetText(fmtTimer(rem))
+
+                -- Urgency: time text whitens -> yellow -> red as it runs out.
+                if rem <= 5 then bar.time:SetTextColor(1, 0.2, 0.2)
+                elseif rem <= 10 then bar.time:SetTextColor(1, 0.9, 0.2)
+                else bar.time:SetTextColor(1, 1, 1) end
+
+                -- Spark rides the leading edge of the fill.
+                bar.spark:ClearAllPoints()
+                bar.spark:SetPoint("CENTER", bar, "LEFT", frac * TIMER_BAR_W, 0)
+                if frac > 0.02 and frac < 0.99 then bar.spark:Show() else bar.spark:Hide() end
+
+                if t.prewarn and not t.warned and rem <= 5 then
+                    t.warned = true
+                    RT.EmitMechanic(t.prewarn)
                 end
                 bar:Show()
             elseif bar then
@@ -786,25 +829,62 @@ function RT.AcquireTimerBar(i)
         bar = CreateFrame("StatusBar", nil, f)
         bar:SetSize(TIMER_BAR_W, TIMER_BAR_H)
         bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-        bar:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -(i - 1) * (TIMER_BAR_H + 2))
+        -- Leave room for the icon on the left so bars line up under the handle.
+        bar:SetPoint("TOPLEFT", f, "TOPLEFT", TIMER_BAR_H + 1, -(i - 1) * (TIMER_BAR_H + TIMER_GAP))
+
         local bg = bar:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints(); bg:SetTexture(0, 0, 0, 0.55)
+        bg:SetAllPoints(); bg:SetTexture(0, 0, 0, 0.65)
+        bar:SetBackdrop({edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1})
+        bar:SetBackdropBorderColor(0, 0, 0, 0.9)
+
+        -- Square spell icon flush to the bar's left, just outside it.
+        local icon = bar:CreateTexture(nil, "OVERLAY")
+        icon:SetSize(TIMER_BAR_H, TIMER_BAR_H)
+        icon:SetPoint("RIGHT", bar, "LEFT", -1, 0)
+        icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)  -- trim the default icon border
+        bar.icon = icon
+
+        -- Spark glow on the leading edge.
+        local spark = bar:CreateTexture(nil, "OVERLAY")
+        spark:SetTexture("Interface\\CastingBar\\UI-CastingBar-Spark")
+        spark:SetBlendMode("ADD")
+        spark:SetSize(14, TIMER_BAR_H * 2.1)
+        bar.spark = spark
+
         bar.label = bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        bar.label:SetPoint("LEFT", 4, 0)
-        bar.time = bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        bar.label:SetPoint("LEFT", 5, 0)
+        bar.label:SetPoint("RIGHT", bar, "RIGHT", -38, 0)
+        bar.label:SetJustifyH("LEFT")
+        bar.label:SetShadowOffset(1, -1); bar.label:SetShadowColor(0, 0, 0, 1)
+
+        bar.time = bar:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         bar.time:SetPoint("RIGHT", -4, 0)
+        bar.time:SetShadowOffset(1, -1); bar.time:SetShadowColor(0, 0, 0, 1)
+
         f.bars[i] = bar
     end
     return bar
 end
 
+-- Remove every active timer bar and hide the anchor (used by /aip timertest
+-- toggle and /aip cleartest; ClearMechanicState only drops the "t:" recast bars).
+function RT.ClearAllTimers()
+    RT.timers = {}
+    if RT.TimerAnchor then RT.TimerAnchor:Hide() end
+end
+
 -- Start (or restart) a countdown bar. Gated by the mechanic-announcer toggle.
-function RT.StartTimer(key, label, duration, r, g, b, prewarn)
+-- `icon` is optional; otherwise we try the spell's own icon, then a clock.
+function RT.StartTimer(key, label, duration, r, g, b, prewarn, icon)
     if not (AIP.db and AIP.db.mechanicAnnounce) then return end
     if not duration or duration <= 0 then return end
+    if not icon then
+        icon = select(3, GetSpellInfo(label))  -- nil for non-player spells; that's fine
+    end
     RT.timers[key] = {
         label = label, expire = GetTime() + duration, duration = duration,
         r = r or 0.2, g = g or 0.6, b = b or 1, prewarn = prewarn, warned = false,
+        icon = icon,
     }
     RT.CreateTimerAnchor():Show()
 end

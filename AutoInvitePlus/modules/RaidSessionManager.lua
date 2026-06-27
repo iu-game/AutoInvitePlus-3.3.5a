@@ -12,6 +12,13 @@ local RSM = AIP.RaidSession
 -- Boss name patterns for detection (combat log)
 RSM.BossPatterns = {}
 
+-- Multi-unit encounters: the unit that dies differs from the encounter/loot name.
+RSM.BossAliases = {
+    ["prince valanar"]  = {name = "Blood Prince Council", zone = "Icecrown Citadel"},
+    ["prince keleseth"] = {name = "Blood Prince Council", zone = "Icecrown Citadel"},
+    ["prince taldaram"] = {name = "Blood Prince Council", zone = "Icecrown Citadel"},
+}
+
 -- Build boss patterns from RaidComposition data
 local function BuildBossPatterns()
     if not AIP.Composition or not AIP.Composition.RaidBosses then return end
@@ -22,6 +29,12 @@ local function BuildBossPatterns()
                 raid = raidKey,
                 zone = raidData.zone,
             }
+        end
+    end
+    -- Merge multi-unit aliases (don't overwrite a real boss entry).
+    for unitName, info in pairs(RSM.BossAliases) do
+        if not RSM.BossPatterns[unitName] then
+            RSM.BossPatterns[unitName] = {name = info.name, zone = info.zone}
         end
     end
 end
@@ -153,6 +166,13 @@ function RSM.AddBossKill(bossName, mode, zone)
         session.zone = zone
     end
 
+    -- Dedup: a single UNIT_DIED can fire more than once for a boss corpse; ignore
+    -- a repeat of the same boss recorded moments ago.
+    local prev = session.bosses[#session.bosses]
+    if prev and prev.name == bossName and prev.killTime and (time() - prev.killTime) < 60 then
+        return prev
+    end
+
     local bossId = #session.bosses + 1
     local attendees = RSM.GetCurrentRosterNames()
 
@@ -279,39 +299,47 @@ end
 -- LOOT TRACKING
 -- ============================================================================
 
--- Add loot to current session
+-- Loot is attributed to the most recently killed boss within this window. Loot
+-- is distributed within minutes of a kill, so a generous window is safe; trash
+-- cleared between bosses falls outside it and stays "Trash".
+RSM.LOOT_WINDOW = 600  -- seconds (10 minutes)
+
+-- Add loot to current session.
+-- Source is determined authoritatively from the boss-kill list (3.3.5a has no
+-- loot-source API), NOT from the unreliable yell/target heuristic that the caller
+-- previously passed in (which latched onto trash NPCs like "Sindragosa's Ward").
 function RSM.AddLoot(itemLink, looter, source)
     local session = RSM.GetCurrentSession()
     if not session then return nil end
 
     local itemName, _, itemQuality, itemLevel = GetItemInfo(itemLink)
     if not itemName then
-        -- Item info not cached, will be handled by pending system
+        -- Item info not cached yet; the pending system retries.
         return nil
     end
 
-    -- Check quality threshold
-    local threshold = AIP.db and AIP.db.lootTrackThreshold or 2
+    -- Quality threshold (skip junk)
+    local threshold = (AIP.db and AIP.db.lootTrackThreshold) or 2
     if itemQuality and itemQuality < threshold then return nil end
 
-    local itemId = itemLink:match("item:(%d+)")
+    -- Emblems are currency, not gear - they only clutter the loot history.
+    if itemName:find("^Emblem of") then return nil end
 
-    -- Find matching boss
-    local bossId = nil
-    if source and #session.bosses > 0 then
-        -- Match to most recent boss with similar name
-        for i = #session.bosses, 1, -1 do
-            local boss = session.bosses[i]
-            if boss.name:lower():find(source:lower(), 1, true) or
-               source:lower():find(boss.name:lower(), 1, true) then
-                bossId = boss.id
-                break
-            end
+    local itemId = itemLink:match("item:(%d+)")
+    local now = time()
+
+    -- Attribute to the most recent boss kill within the window.
+    local bossId, bossName = nil, nil
+    if #session.bosses > 0 then
+        local lastBoss = session.bosses[#session.bosses]
+        if lastBoss.killTime and (now - lastBoss.killTime) <= RSM.LOOT_WINDOW then
+            bossId, bossName = lastBoss.id, lastBoss.name
         end
-        -- If no match, assign to most recent boss
-        if not bossId and #session.bosses > 0 then
-            bossId = session.bosses[#session.bosses].id
-        end
+    end
+    -- Only genuine boss loot (rare+) is filed under a boss; lower-quality trash
+    -- drops that happen to fall in the window stay under "Trash".
+    if bossId and (itemQuality or 0) < 3 then
+        bossId, bossName = nil, nil
     end
 
     local entry = {
@@ -322,12 +350,12 @@ function RSM.AddLoot(itemLink, looter, source)
         itemLevel = itemLevel or 0,
         bossId = bossId,
         winner = looter or "Unknown",
-        timestamp = time(),
-        source = source or "Unknown",
+        timestamp = now,
+        source = bossName or "Trash",
     }
 
     table.insert(session.loot, entry)
-    AIP.Debug("RaidSession: Loot recorded - " .. itemName .. " to " .. (looter or "Unknown"))
+    AIP.Debug("RaidSession: Loot - " .. itemName .. " -> " .. (bossName or "Trash") .. " (" .. (looter or "?") .. ")")
 
     -- Notify UI to refresh
     if AIP.Panels and AIP.Panels.LootHistory and AIP.Panels.LootHistory.RefreshAll then
@@ -417,6 +445,36 @@ end
 -- ============================================================================
 -- MIGRATION FROM OLD LOOT HISTORY
 -- ============================================================================
+
+-- One-time cleanup of historical loot whose source came from the old (buggy)
+-- yell heuristic. Canonicalizes known-boss names (e.g. "Prince Valanar" ->
+-- "Blood Prince Council") and relabels non-boss sources ("Sindragosa's Ward",
+-- "High Overlord Saurfang", ...) to "Trash". Only relabels - never deletes loot.
+function RSM.MigrateLootSources()
+    if not AIP.db or AIP.db.lootSourcesMigrated then return end
+    if next(RSM.BossPatterns) == nil then BuildBossPatterns() end
+
+    local sessions = AIP.db.raidSessions
+    local fixed = 0
+    if sessions then
+        for _, session in ipairs(sessions) do
+            for _, entry in ipairs(session.loot or {}) do
+                local key = entry.source and entry.source:lower()
+                local info = key and RSM.BossPatterns[key]
+                if info then
+                    if entry.source ~= info.name then entry.source = info.name; fixed = fixed + 1 end
+                elseif entry.source and entry.source ~= "Trash" then
+                    entry.source = "Trash"
+                    entry.bossId = nil
+                    fixed = fixed + 1
+                end
+            end
+        end
+    end
+
+    AIP.db.lootSourcesMigrated = true
+    if fixed > 0 then AIP.Debug("RaidSession: cleaned " .. fixed .. " historical loot sources") end
+end
 
 function RSM.MigrateOldLootHistory()
     if not AIP.db then return end
@@ -629,36 +687,25 @@ local function OnRosterUpdate()
     end
 end
 
--- Boss kill detection via combat log
+-- Boss kill detection via combat log.
+-- 3.3.5a has no CombatLogGetCurrentEventInfo; the raw payload reaches us as the
+-- vararg: timestamp(1), subevent(2), srcGUID(3), srcName(4), srcFlags(5),
+-- dstGUID(6), dstName(7), dstFlags(8), ...  (The previous code mis-parsed this,
+-- so UNIT_DIED never matched and no boss kills were ever recorded.)
 local function OnCombatLogEvent(...)
-    local timestamp, event, srcGUID, srcName, srcFlags, dstGUID, dstName, dstFlags = CombatLogGetCurrentEventInfo
-        and CombatLogGetCurrentEventInfo()
-        or select(1, ...)
+    local subevent = select(2, ...)
+    if subevent ~= "UNIT_DIED" then return end
+    local dstName = select(7, ...)
+    if not dstName then return end
 
-    -- WotLK uses different argument order
-    if not event then
-        timestamp, event, srcGUID, srcName, srcFlags, dstGUID, dstName, dstFlags =
-            select(2, ...), select(3, ...), select(4, ...), select(5, ...),
-            select(6, ...), select(7, ...), select(8, ...), select(9, ...)
+    -- Build patterns if needed
+    if next(RSM.BossPatterns) == nil then
+        BuildBossPatterns()
     end
 
-    if event == "UNIT_DIED" and dstName then
-        -- Build patterns if needed
-        if next(RSM.BossPatterns) == nil then
-            BuildBossPatterns()
-        end
-
-        -- Check if it's a boss
-        local bossInfo = RSM.BossPatterns[dstName:lower()]
-        if bossInfo then
-            RSM.AddBossKill(bossInfo.name, RSM.GetDifficultyMode(), bossInfo.zone)
-        else
-            -- Fallback: check unit classification if targetable
-            local classification = UnitClassification("target")
-            if classification == "worldboss" or classification == "rareelite" then
-                RSM.AddBossKill(dstName, RSM.GetDifficultyMode())
-            end
-        end
+    local bossInfo = RSM.BossPatterns[dstName:lower()]
+    if bossInfo then
+        RSM.AddBossKill(bossInfo.name, RSM.GetDifficultyMode(), bossInfo.zone)
     end
 end
 
@@ -704,6 +751,8 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         BuildBossPatterns()
         -- Run migration if needed
         RSM.MigrateOldLootHistory()
+        -- Clean up historical loot sources from the old yell-based attribution.
+        RSM.MigrateLootSources()
         -- Check if we should resume a session
         OnRosterUpdate()
         -- Instance transitions fire here (not ZONE_CHANGED_NEW_AREA), so sync zone

@@ -15,6 +15,7 @@ frame:RegisterEvent("CHAT_MSG_RAID_BOSS_EMOTE")
 frame:RegisterEvent("CHAT_MSG_MONSTER_EMOTE")
 frame:RegisterEvent("CHAT_MSG_MONSTER_YELL")
 frame:RegisterEvent("UNIT_HEALTH")
+frame:RegisterEvent("PLAYER_REGEN_ENABLED")  -- leaving combat: clear stale mechanic timers
 frame.expElapsed = 0
 frame.rhElapsed = 0
 frame:SetScript("OnEvent", function(self, event, ...)
@@ -31,6 +32,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
         if RT.OnMechanicEmote then RT.OnMechanicEmote(...) end
     elseif event == "UNIT_HEALTH" then
         if RT.OnMechanicHealth then RT.OnMechanicHealth(...) end
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        if RT.ClearMechanicState then RT.ClearMechanicState() end
     end
 end)
 

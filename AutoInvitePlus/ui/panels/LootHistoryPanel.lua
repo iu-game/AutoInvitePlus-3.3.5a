@@ -1658,9 +1658,18 @@ lootFrame:SetScript("OnEvent", function(self, event, ...)
         end
         return
     end
+    -- Only accept a source that is an actual known boss. Trash, adds and intro
+    -- NPCs also yell (e.g. "Sindragosa's Ward", "High Overlord Saurfang") and used
+    -- to poison the attribution. The authoritative source is the boss-kill list in
+    -- RaidSessionManager; this is only a weak fallback for the legacy history.
+    local function isKnownBoss(name)
+        return name and AIP.RaidSession and AIP.RaidSession.BossPatterns
+            and AIP.RaidSession.BossPatterns[name:lower()] ~= nil
+    end
+
     if event == "CHAT_MSG_MONSTER_YELL" then
         local _, sender = ...
-        if sender then
+        if isKnownBoss(sender) then
             lastSource = sender
             lastSourceTime = time()
         end
@@ -1670,8 +1679,7 @@ lootFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_TARGET_CHANGED" then
         if UnitExists("target") and UnitIsDead("target") then
             local name = UnitName("target")
-            local classification = UnitClassification("target")
-            if name and (classification == "worldboss" or classification == "rareelite" or classification == "elite") then
+            if isKnownBoss(name) then
                 lastSource = name
                 lastSourceTime = time()
             end
@@ -1689,16 +1697,20 @@ lootFrame:SetScript("OnEvent", function(self, event, ...)
         local itemLink = message:match("|c%x+|Hitem:[^|]+|h%[[^%]]+%]|h|r")
         if not itemLink then return end
 
-        local looter = nil
-        if message:find("You receive loot") then
+        local looter
+        if message:find("You receive") then
             looter = UnitName("player")
         else
-            looter = message:match("^(%S+) receive") or message:match("^(%S+) won")
+            looter = message:match("^(%S+) receives") or message:match("^(%S+) receive")
+                or message:match("^(%S+) wins") or message:match("^(%S+) won")
         end
         looter = looter or "Unknown"
 
+        -- Source is now resolved authoritatively by RaidSessionManager from the
+        -- boss-kill list; lastSource is only a known-boss fallback for the legacy
+        -- history within a tight window.
         local source = "Trash"
-        if lastSource and lastSourceTime and (time() - lastSourceTime) < 120 then
+        if lastSource and lastSourceTime and (time() - lastSourceTime) < 90 then
             source = lastSource
         end
 
