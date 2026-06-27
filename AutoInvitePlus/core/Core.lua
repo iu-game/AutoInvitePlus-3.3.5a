@@ -4,12 +4,16 @@
 -- Refactored with DRY principle and OOP patterns
 
 local ADDON_NAME = "AutoInvitePlus"
-local VERSION = "6.1.1"
+local VERSION = "6.1.2"
 local DB_VERSION = 5  -- Increment when saved variables structure changes (5.5: raid sessions, 5.4: mdps/rdps split, 4: loot history retention)
 
 -- Create main addon namespace (may already exist from Utils.lua)
 AutoInvitePlus = AutoInvitePlus or {}
 local AIP = AutoInvitePlus
+
+-- Expose the running version so the DataBus broadcasts it to peers (used by the
+-- update checker to detect newer releases other AIP users are running).
+AIP.Version = VERSION
 
 -- Store version info
 AIP.Version = VERSION
@@ -1509,6 +1513,9 @@ local function SlashHandler(msg)
             Print("Started demo timer bars (drag the 'AIP Timers' anchor). Run /aip timertest again to clear.")
         end
 
+    elseif cmd == "update" or cmd == "updates" then
+        if AIP.Updater then AIP.Updater.SlashHandler() end
+
     -- Status
     elseif cmd == "status" then
         Print("=== AutoInvite Plus Status ===")
@@ -1554,6 +1561,7 @@ local function SlashHandler(msg)
         Print("  /aip gs <name> - Check GearScore")
         Print("  /aip rb import - Import from Blizzard Raid Browser")
         Print("  /aip status - Current status")
+        Print("  /aip update - Check for a newer release")
         Print("|cFFFFFF00DataBus (Addon Network):|r")
         Print("  /aip databus - Show network status")
         Print("  /aip databus peers - List online addon users")

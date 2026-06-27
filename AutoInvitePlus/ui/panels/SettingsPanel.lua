@@ -11,6 +11,19 @@ SP.Frame = nil
 SP.AutoSpamActive = false
 SP.AutoSpamTimer = nil
 
+-- Update-section helpers with fallbacks so the version + releases link always
+-- show, even if the Updater module hasn't loaded yet (a freshly-added file needs
+-- a full game restart, not just /reload, to load).
+local FALLBACK_RELEASES_URL = "https://github.com/iu-game/AutoInvitePlus-3.3.5a/releases"
+local function CurrentVersion()
+    return (AIP.Updater and AIP.Updater.Current())
+        or (GetAddOnMetadata and GetAddOnMetadata("AutoInvitePlus", "Version"))
+        or AIP.Version or "?"
+end
+local function ReleasesURL()
+    return (AIP.Updater and AIP.Updater.RELEASES_URL) or FALLBACK_RELEASES_URL
+end
+
 -- Tooltip definitions - Comprehensive help for all settings
 SP.Tooltips = {
     -- Section 1: Auto-Invite System
@@ -254,7 +267,7 @@ function SP.Create(parent)
     scrollFrame:SetPoint("BOTTOMRIGHT", -28, 5)
 
     local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetHeight(1580)  -- Height for all sections including test mode
+    content:SetHeight(1710)  -- Height for all sections including test mode
     scrollFrame:SetScrollChild(content)
 
     -- Dynamic width - initially set and updated on resize
@@ -282,6 +295,52 @@ function SP.Create(parent)
 
     local y = -10
     frame.checks = {}
+
+    -- ========================================================================
+    -- UPDATES  (peer-version check; WoW addons can't download their own code)
+    -- ========================================================================
+    CreateSectionHeader(content, 5, y, "U", "UPDATES")
+    y = y - 26
+
+    local updVer = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    updVer:SetPoint("TOPLEFT", 15, y)
+    updVer:SetText("Installed: |cFFFFFFFFv" .. CurrentVersion() .. "|r")
+    frame.updateVer = updVer
+
+    local checkBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    checkBtn:SetSize(90, 20)
+    checkBtn:SetPoint("LEFT", updVer, "RIGHT", 14, 0)
+    checkBtn:SetText("Check Now")
+    checkBtn:SetScript("OnClick", function()
+        if AIP.Updater then AIP.Updater.CheckNow() end
+        SP.RefreshUpdateStatus()
+    end)
+    y = y - 22
+
+    local updStatus = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    updStatus:SetPoint("TOPLEFT", 15, y)
+    updStatus:SetText("")
+    frame.updateStatus = updStatus
+    y = y - 22
+
+    local relLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    relLabel:SetPoint("TOPLEFT", 15, y)
+    relLabel:SetText("Releases:")
+    local relInput, relContainer = CreateStyledEditBox(content, 330, 16, false)
+    relContainer:SetPoint("LEFT", relLabel, "RIGHT", 6, 0)
+    relInput:SetText(ReleasesURL())
+    relInput:SetScript("OnEditFocusLost", function(self)
+        self:SetText(ReleasesURL())  -- keep the link stable
+    end)
+    frame.relInput = relInput
+    y = y - 20
+
+    local updNote = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    updNote:SetPoint("TOPLEFT", 15, y)
+    updNote:SetWidth(560)
+    updNote:SetJustifyH("LEFT")
+    updNote:SetText("|cFF888888Click the link to select it, copy (Ctrl+C), download the latest zip and replace the AutoInvitePlus folder, then /reload. Addons can't auto-download.|r")
+    y = y - 34
 
     -- ========================================================================
     -- [1] AUTO-INVITE SYSTEM
@@ -1431,6 +1490,29 @@ function SP.UpdateAutoSpamStatus()
 end
 
 -- Update the settings panel
+-- Refresh the Updates section (installed version + new-release status).
+function SP.RefreshUpdateStatus()
+    if not SP.Frame then return end
+    if SP.Frame.updateVer then
+        SP.Frame.updateVer:SetText("Installed: |cFFFFFFFFv" .. CurrentVersion() .. "|r")
+    end
+    if SP.Frame.relInput then SP.Frame.relInput:SetText(ReleasesURL()) end
+    if SP.Frame.updateStatus then
+        local U = AIP.Updater
+        if not U then
+            -- New file not loaded by /reload; a full restart enables peer checks.
+            SP.Frame.updateStatus:SetText("|cFFFFAA00Fully restart the game (not just /reload) to enable update checks.|r")
+        else
+            local avail, latest = U.IsUpdateAvailable()
+            if avail then
+                SP.Frame.updateStatus:SetText("|cFF00FF00New version available: v" .. latest .. "|r  -  download below")
+            else
+                SP.Frame.updateStatus:SetText("|cFF888888Up to date (no newer version seen from other users).|r")
+            end
+        end
+    end
+end
+
 function SP.Update()
     if not SP.Frame or not AIP.db then return end
 
@@ -1544,6 +1626,9 @@ function SP.Update()
         SP.Frame.autoSpamBtn:SetText(SP.AutoSpamActive and "Stop Auto-Spam" or "Start Auto-Spam")
     end
     SP.UpdateAutoSpamStatus()
+
+    -- Update the Updates section (installed version + new-release status)
+    SP.RefreshUpdateStatus()
 
     -- Update opacity sliders (values are in 0-100 range)
     if SP.Frame.opacitySlider then
