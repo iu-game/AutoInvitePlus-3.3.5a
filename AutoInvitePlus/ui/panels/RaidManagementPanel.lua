@@ -843,7 +843,7 @@ function RM.Create(parent)
     scrollFrame:SetPoint("BOTTOMRIGHT", -28, 5)
 
     local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetHeight(1100)
+    content:SetHeight(1450)  -- extended for the Raid Tools section
     scrollFrame:SetScrollChild(content)
 
     -- Dynamic width tracking
@@ -950,6 +950,7 @@ function RM.Create(parent)
     nameInput:SetAutoFocus(false)
     nameInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     nameInput:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(nameInput) end
     content.nameInput = nameInput
 
     local msgLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1095,6 +1096,15 @@ function RM.Create(parent)
     lootBanFrame:SetBackdropBorderColor(0.4, 0.4, 0.4)
     content.lootBanFrame = lootBanFrame
 
+    -- Only a few rows fit in the fixed-height box, so allow wheel paging through
+    -- the full ban list (entries beyond the visible rows were previously unreachable).
+    content.lootBanOffset = 0
+    lootBanFrame:EnableMouseWheel(true)
+    lootBanFrame:SetScript("OnMouseWheel", function(self, delta)
+        content.lootBanOffset = (content.lootBanOffset or 0) - delta
+        RM.RefreshLootBanDisplay(content)
+    end)
+
     -- Loot ban header
     local lbPlayerHeader = lootBanFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     lbPlayerHeader:SetPoint("TOPLEFT", 6, -4)
@@ -1220,10 +1230,16 @@ function RM.Create(parent)
     buffTableBg:SetBackdropBorderColor(0.4, 0.4, 0.4)
     content.buffTableBg = buffTableBg
 
-    -- Buff table headers - proportional columns
+    -- Reflow buff columns whenever the (elastic) table width changes.
+    buffTableBg:HookScript("OnSizeChanged", function()
+        RM.LayoutBuffColumns(content)
+    end)
+
+    -- Buff table headers - proportional columns (positions set by RM.LayoutBuffColumns)
     local buffColWidths = {100, 70, 45, 45}  -- Player, Class, Food, Flask (Missing Buffs fills rest)
     local buffHeaders = {"Player", "Class", "Food", "Flask", "Missing Buffs"}
     local headerX = 8
+    content.buffHeaderLabels = {}
     for i, header in ipairs(buffHeaders) do
         local headerText = buffTableBg:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         headerText:SetPoint("TOPLEFT", headerX, -6)
@@ -1237,6 +1253,7 @@ function RM.Create(parent)
         headerText:SetText(header)
         headerText:SetTextColor(1, 0.82, 0)
         headerText:SetJustifyH("LEFT")
+        content.buffHeaderLabels[i] = headerText
     end
     content.buffColWidths = buffColWidths
 
@@ -1378,10 +1395,16 @@ function RM.Create(parent)
     msTableBg:SetBackdropBorderColor(0.4, 0.4, 0.4)
     content.msTableBg = msTableBg
 
-    -- MS/OS table headers - proportional columns
+    -- Reflow MS/OS columns whenever the (elastic) table width changes.
+    msTableBg:HookScript("OnSizeChanged", function()
+        RM.LayoutMSColumns(content)
+    end)
+
+    -- MS/OS table headers - proportional columns (positions set by RM.LayoutMSColumns)
     local msColWidths = {120, 80, 120, 120}  -- Player, Class, Main Spec, Off Spec (Status fills rest)
     local msHeaders = {"Player", "Class", "Main Spec", "Off Spec", "Status"}
     headerX = 8
+    content.msHeaderLabels = {}
     for i, header in ipairs(msHeaders) do
         local headerText = msTableBg:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         headerText:SetPoint("TOPLEFT", headerX, -6)
@@ -1395,6 +1418,7 @@ function RM.Create(parent)
         headerText:SetText(header)
         headerText:SetTextColor(1, 0.82, 0)
         headerText:SetJustifyH("LEFT")
+        content.msHeaderLabels[i] = headerText
     end
     content.msColWidths = msColWidths
 
@@ -1468,6 +1492,96 @@ function RM.Create(parent)
     msEmptyText:SetText("|cFF888888Click 'Scan Raid' to detect specs...|r")
     content.msEmptyText = msEmptyText
 
+    -- ========================================================================
+    -- RAID TOOLS: announcement bar, roll, /RW loot (anchored below MS/OS)
+    -- ========================================================================
+    local rtHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    rtHeader:SetPoint("TOPLEFT", msTableBg, "BOTTOMLEFT", 0, -18)
+    rtHeader:SetText("Raid Tools")
+    rtHeader:SetTextColor(1, 0.82, 0)
+
+    -- Floating bar toggle
+    local barCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
+    barCheck:SetSize(22, 22)
+    barCheck:SetPoint("TOPLEFT", rtHeader, "BOTTOMLEFT", 0, -6)
+    barCheck:SetChecked(AIP.db and AIP.db.floatingBarEnabled)
+    local barLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    barLabel:SetPoint("LEFT", barCheck, "RIGHT", 2, 0)
+    barLabel:SetText("Show floating announcement bar (always visible while enabled)")
+    barCheck:SetScript("OnClick", function(self)
+        if AIP.db then AIP.db.floatingBarEnabled = self:GetChecked() and true or false end
+        if AIP.RaidTools then AIP.RaidTools.UpdateBar() end
+    end)
+
+    -- Loot roll: open the dedicated roll window (item list, capture, winners)
+    local rollWinBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    rollWinBtn:SetSize(150, 22)
+    rollWinBtn:SetPoint("TOPLEFT", barCheck, "BOTTOMLEFT", 2, -12)
+    rollWinBtn:SetText("Open Roll Window")
+    rollWinBtn:SetScript("OnClick", function()
+        if AIP.RaidTools and AIP.RaidTools.ToggleRollWindow then AIP.RaidTools.ToggleRollWindow() end
+    end)
+    rollWinBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Loot Roll Window", 1, 0.82, 0)
+        GameTooltip:AddLine("Lists items dropped in the current raid, runs /roll", 1, 1, 1, true)
+        GameTooltip:AddLine("with a countdown, captures rolls, shows winners.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    rollWinBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    local durLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    durLabel:SetPoint("LEFT", rollWinBtn, "RIGHT", 14, 0)
+    durLabel:SetText("Roll timer (sec):")
+    local rollDurInput = CreateFrame("EditBox", nil, content, "InputBoxTemplate")
+    rollDurInput:SetSize(40, 18)
+    rollDurInput:SetPoint("LEFT", durLabel, "RIGHT", 8, 0)
+    rollDurInput:SetAutoFocus(false)
+    rollDurInput:SetNumeric(true)
+    rollDurInput:SetText(tostring((AIP.db and AIP.db.rollDuration) or 10))
+    rollDurInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    rollDurInput:SetScript("OnTextChanged", function(self)
+        local v = tonumber(self:GetText())
+        if v and AIP.db then AIP.db.rollDuration = math.max(3, math.min(60, v)) end
+    end)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(rollDurInput) end
+
+    -- /RW reserved announce
+    local rwBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    rwBtn:SetSize(150, 22)
+    rwBtn:SetPoint("TOPLEFT", rollWinBtn, "BOTTOMLEFT", 0, -10)
+    rwBtn:SetText("/RW Reserved Items")
+    rwBtn:SetScript("OnClick", function()
+        if AIP.RaidTools then AIP.RaidTools.AnnounceReserved() end
+    end)
+
+    -- Floating-bar buttons: friendly row editor (opens a dedicated window)
+    local annLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    annLabel:SetPoint("TOPLEFT", rwBtn, "BOTTOMLEFT", 0, -14)
+    annLabel:SetText("Floating bar buttons:")
+
+    local cfgBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    cfgBtn:SetSize(180, 22)
+    cfgBtn:SetPoint("LEFT", annLabel, "RIGHT", 10, 0)
+    cfgBtn:SetText("Configure Bar Buttons...")
+    cfgBtn:SetScript("OnClick", function()
+        if AIP.RaidTools and AIP.RaidTools.ToggleAnnounceConfig then
+            AIP.RaidTools.ToggleAnnounceConfig()
+        end
+    end)
+    cfgBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Configure Floating Bar Buttons", 1, 0.82, 0)
+        GameTooltip:AddLine("Add/edit/remove the announcement buttons with", 1, 1, 1, true)
+        GameTooltip:AddLine("a simple label / message / channel editor.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    cfgBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    local annHint = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    annHint:SetPoint("TOPLEFT", annLabel, "BOTTOMLEFT", 0, -8)
+    annHint:SetText("Buttons appear on the movable floating bar (enable the checkbox above). You can also click |cFFFFD700+|r on the bar itself to edit them.")
+
     RM.Frame = frame
     RM.Content = content
 
@@ -1487,8 +1601,161 @@ function RM.Create(parent)
 end
 
 -- ============================================================================
+-- DYNAMIC COLUMN LAYOUT (fit table columns to the elastic table width)
+-- ============================================================================
+
+-- Generic column fitter. Re-anchors every header label and every pooled row
+-- cell so the columns fill the table width and reflow on resize.
+--   driveFrame : the elastic table background (anchored TOPLEFT + RIGHT, so its
+--                GetWidth() is reliable - never read width from a SetSize'd frame)
+--   headers    : ordered array of header FontStrings (parented to driveFrame)
+--   rows       : array of pooled row frames (anchored TOPLEFT 5 / RIGHT -30)
+--   cols       : ordered array of column specs:
+--                  { key = "<row cell field>", fixed = N }     -- fixed pixel width
+--                  { key = "<row cell field>", weight = W }     -- flexible share
+--                  optional right = true to flush a fixed column to the row's right
+function RM.LayoutColumns(driveFrame, headers, rows, cols)
+    if not driveFrame or not cols then return end
+
+    local W = driveFrame:GetWidth()
+    if not W or W < 50 then return end
+
+    -- These constants mirror the anchors used when the rows/headers were built.
+    local SCROLL_RESERVE = 30  -- row RIGHT anchor is bg RIGHT -30 (scrollbar gutter)
+    local ROW_LEFT = 5         -- row TOPLEFT x within the background frame
+    local LEFT_INSET = 3       -- first cell's LEFT offset inside the row
+    local RIGHT_INSET = 5      -- last cell's RIGHT inset inside the row
+
+    local rowWidth = W - ROW_LEFT - SCROLL_RESERVE
+    local usable = rowWidth - LEFT_INSET - RIGHT_INSET
+    if usable < 50 then return end
+
+    -- Sum fixed widths and flexible weights.
+    local sumFixed, sumWeight = 0, 0
+    for _, c in ipairs(cols) do
+        if c.fixed then
+            sumFixed = sumFixed + c.fixed
+        else
+            sumWeight = sumWeight + (c.weight or 1)
+        end
+    end
+
+    local flexTotal = usable - sumFixed
+    if flexTotal < 0 then flexTotal = 0 end
+
+    -- Resolve each column's width.
+    local widths = {}
+    for i, c in ipairs(cols) do
+        if c.fixed then
+            widths[i] = c.fixed
+        elseif sumWeight > 0 then
+            widths[i] = flexTotal * (c.weight or 1) / sumWeight
+        else
+            widths[i] = 0
+        end
+    end
+
+    -- Walk left to right, positioning headers and row cells. (x is a plain local,
+    -- not a loop control variable, so reassigning it is allowed.)
+    local x = LEFT_INSET
+    for i, c in ipairs(cols) do
+        local cw = widths[i]
+
+        local h = headers and headers[i]
+        if h then
+            h:ClearAllPoints()
+            h:SetPoint("TOPLEFT", driveFrame, "TOPLEFT", ROW_LEFT + x, -6)
+            h:SetWidth(cw)
+        end
+
+        for _, row in ipairs(rows) do
+            local cell = row[c.key]
+            if cell then
+                cell:ClearAllPoints()
+                if c.right then
+                    -- Flush a fixed column to the row's right edge so it never
+                    -- drifts or overlaps the column to its left.
+                    cell:SetPoint("RIGHT", row, "RIGHT", -RIGHT_INSET, 0)
+                else
+                    cell:SetPoint("LEFT", row, "LEFT", x, 0)
+                end
+                cell:SetWidth(cw)
+            end
+        end
+
+        x = x + cw
+    end
+end
+
+-- Column specs (fixed vs flexible). Longest-text columns get the larger weight.
+RM.BuffColumnSpec = {
+    { key = "nameText",    weight = 2 },   -- Player (flexible)
+    { key = "classText",   fixed = 70 },   -- Class (fixed)
+    { key = "foodText",    fixed = 45 },   -- Food (fixed status)
+    { key = "flaskText",   fixed = 45 },   -- Flask (fixed status)
+    { key = "missingText", weight = 3 },   -- Missing Buffs (flexible, widest)
+}
+
+RM.MSColumnSpec = {
+    { key = "nameText",   weight = 2 },              -- Player (flexible)
+    { key = "classText",  fixed = 80 },              -- Class (fixed)
+    { key = "msText",     weight = 2 },              -- Main Spec (flexible)
+    { key = "osText",     weight = 2 },              -- Off Spec (flexible)
+    { key = "statusText", fixed = 110, right = true },-- Status (fixed, right-flush)
+}
+
+function RM.LayoutBuffColumns(content)
+    content = content or RM.Content
+    if not content or not content.buffTableBg or not content.buffRows then return end
+    RM.LayoutColumns(content.buffTableBg, content.buffHeaderLabels, content.buffRows, RM.BuffColumnSpec)
+end
+
+function RM.LayoutMSColumns(content)
+    content = content or RM.Content
+    if not content or not content.msTableBg or not content.msRows then return end
+    RM.LayoutColumns(content.msTableBg, content.msHeaderLabels, content.msRows, RM.MSColumnSpec)
+end
+
+-- ============================================================================
 -- REFRESH FUNCTIONS
 -- ============================================================================
+
+-- Populate the announcements editor from db.customAnnouncements
+function RM.RefreshAnnouncements(content)
+    content = content or RM.Content
+    if not content or not content.annInput then return end
+    local list = (AIP.db and AIP.db.customAnnouncements) or {}
+    local lines = {}
+    for _, a in ipairs(list) do
+        lines[#lines + 1] = (a.label or "") .. " | " .. (a.message or "") .. " | " .. (a.channel or "RAID_WARNING")
+    end
+    content.annInput:SetText(table.concat(lines, "\n"))
+end
+
+-- Parse the editor text back into db.customAnnouncements and refresh the bar
+function RM.SaveAnnouncements(content)
+    content = content or RM.Content
+    if not content or not content.annInput then return end
+    local text = content.annInput:GetText() or ""
+    local valid = { RAID_WARNING = true, RAID = true, PARTY = true, SAY = true, YELL = true, GUILD = true }
+    local list = {}
+    for line in text:gmatch("[^\r\n]+") do
+        -- Try "Label | Message | Channel", then "Label | Message"
+        local label, message, channel = line:match("^%s*(.-)%s*|%s*(.-)%s*|%s*(.-)%s*$")
+        if not label then
+            label, message = line:match("^%s*(.-)%s*|%s*(.-)%s*$")
+            channel = "RAID_WARNING"
+        end
+        if label and message and message ~= "" then
+            channel = (channel or "RAID_WARNING"):upper()
+            if not valid[channel] then channel = "RAID_WARNING" end
+            table.insert(list, { label = label, message = message, channel = channel })
+        end
+    end
+    if AIP.db then AIP.db.customAnnouncements = list end
+    if AIP.RaidTools and AIP.RaidTools.RefreshBar then AIP.RaidTools.RefreshBar() end
+    AIP.Print("Saved " .. #list .. " announcement(s).")
+end
 
 function RM.RefreshTemplateList(content, scrollFrame)
     content = content or RM.Content
@@ -1525,6 +1792,9 @@ end
 function RM.RefreshBuffTable(content)
     content = content or RM.Content
     if not content or not content.buffRows then return end
+
+    -- Fit columns to the current table width before drawing the rows.
+    RM.LayoutBuffColumns(content)
 
     local data = RM.BuffCheckData or {}
     local offset = content.buffTableScroll and FauxScrollFrame_GetOffset(content.buffTableScroll) or 0
@@ -1615,6 +1885,9 @@ end
 function RM.RefreshMSTable(content)
     content = content or RM.Content
     if not content or not content.msRows then return end
+
+    -- Fit columns to the current table width before drawing the rows.
+    RM.LayoutMSColumns(content)
 
     -- Build sorted list from tracking data
     local data = {}
@@ -1733,13 +2006,30 @@ function RM.RefreshLootBanDisplay(content)
     if not content or not content.lootBanRows then return end
 
     local data = AIP.db and AIP.db.lootBans or {}
+    local numRows = #content.lootBanRows
+
+    -- Clamp the scroll offset to valid range
+    local maxOffset = math.max(0, #data - numRows)
+    local offset = content.lootBanOffset or 0
+    if offset > maxOffset then offset = maxOffset end
+    if offset < 0 then offset = 0 end
+    content.lootBanOffset = offset
+
+    -- Show total count on the label so hidden entries are discoverable
+    if content.lootBanLabel then
+        if #data > numRows then
+            content.lootBanLabel:SetText("Loot Bans: (" .. #data .. ", scroll)")
+        else
+            content.lootBanLabel:SetText("Loot Bans:")
+        end
+    end
 
     for i, row in ipairs(content.lootBanRows) do
-        local entry = data[i]
+        local entry = data[offset + i]
         if entry then
             row.playerText:SetText(entry.player or "")
             row.bossText:SetText(entry.boss or "")
-            row.dataIndex = i
+            row.dataIndex = offset + i
             row.deleteBtn:Show()
             row:Show()
         else
@@ -2167,6 +2457,7 @@ function RM.ShowLootBanAddPopup(prefilledPlayer)
         customPlayerInput:SetPoint("TOPLEFT", 75, y - 20)
         customPlayerInput:SetAutoFocus(false)
         customPlayerInput:Hide()
+        if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(customPlayerInput) end
         popup.customPlayerInput = customPlayerInput
 
         y = y - 45
@@ -2196,6 +2487,7 @@ function RM.ShowLootBanAddPopup(prefilledPlayer)
         customBossInput:SetPoint("TOPLEFT", 75, y - 20)
         customBossInput:SetAutoFocus(false)
         customBossInput:Hide()
+        if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(customBossInput) end
         popup.customBossInput = customBossInput
 
         -- Buttons
@@ -2391,7 +2683,7 @@ bossEventFrame:SetScript("OnEvent", function(self, event, timestamp, subevent, s
     if subevent == "UNIT_DIED" and dstName then
         -- Check if it's a known boss
         for _, bossName in ipairs(RM.BossList) do
-            if bossName ~= "(None)" and bossName ~= "<Custom Boss>" and dstName:find(bossName) then
+            if bossName ~= "(None)" and bossName ~= "<Custom Boss>" and dstName:find(bossName, 1, true) then
                 RM.CurrentBoss = bossName
                 if AIP.Debug then AIP.Debug("Boss killed: " .. bossName .. " - tracking for loot ban warnings") end
                 break

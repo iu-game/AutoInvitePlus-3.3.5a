@@ -1143,7 +1143,7 @@ function SP.Create(parent)
     clearDataBtn:SetScript("OnClick", function()
         StaticPopupDialogs["AIP_CLEAR_DATA"] = {
             text = "FULL RESET: Clear ALL AutoInvite+ data?\n\n|cFFFF4444This will remove:|r\n- All settings\n- Blacklist\n- Favorites\n- Queue & Waitlist\n- Loot history\n- Raid sessions\n- Saved templates\n\nThe addon will reload as if freshly installed.",
-            button1 = "Yes, Reset Everything",
+            button1 = "Reset",
             button2 = "Cancel",
             OnAccept = function()
                 -- Clear the entire saved variables
@@ -1184,7 +1184,7 @@ function SP.Create(parent)
             OnAccept = function()
                 -- Only reset settings, keep data lists
                 local savedBlacklist = AIP.db.blacklist
-                local savedFavorites = AIP.db.favorites
+                local savedFavorites = AIP.db.whitelist  -- favorites are stored in `whitelist`
                 local savedQueue = AIP.db.queue
                 local savedWaitlist = AIP.db.waitlist
                 local savedLootHistory = AIP.db.lootHistory
@@ -1199,7 +1199,7 @@ function SP.Create(parent)
 
                 -- Restore data lists
                 AIP.db.blacklist = savedBlacklist or {}
-                AIP.db.favorites = savedFavorites or {}
+                AIP.db.whitelist = savedFavorites or {}
                 AIP.db.queue = savedQueue or {}
                 AIP.db.waitlist = savedWaitlist or {}
                 AIP.db.lootHistory = savedLootHistory or {}
@@ -1216,7 +1216,11 @@ function SP.Create(parent)
         }
         StaticPopup_Show("AIP_RESET_DEFAULTS")
     end)
-    y = y - 30
+    -- Persistent debug logging toggle (writes to db.debugLog; read with /aip log)
+    local logCheck, logLabel = CreateCheckbox(content, 15, y - 26, "debugLogging", "Write debug log to file (/reload after enabling)")
+    frame.checks.debugLogging = logCheck
+
+    y = y - 56
 
     -- Quick actions
     local quickLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1262,8 +1266,12 @@ function SP.Create(parent)
     populateTestBtn:SetPoint("TOPLEFT", 15, y)
     populateTestBtn:SetText("Populate Test Data")
     populateTestBtn:SetScript("OnClick", function()
-        SP.PopulateTestData()
-        AIP.Print("|cFF00FF00Test data populated!|r Check all tabs.")
+        -- Use the same comprehensive generator as /aip testdata (all tabs).
+        if AIP.TestData and AIP.TestData.LoadTestData then
+            AIP.TestData.LoadTestData()
+        else
+            SP.PopulateTestData()
+        end
     end)
 
     local clearTestBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
@@ -1271,8 +1279,12 @@ function SP.Create(parent)
     clearTestBtn:SetPoint("LEFT", populateTestBtn, "RIGHT", 10, 0)
     clearTestBtn:SetText("Clear Test Data")
     clearTestBtn:SetScript("OnClick", function()
-        SP.ClearTestData()
-        AIP.Print("|cFFFF6666Test data cleared!|r")
+        -- Use the same clear path as /aip cleartest (all tabs).
+        if AIP.TestData and AIP.TestData.ClearTestData then
+            AIP.TestData.ClearTestData()
+        else
+            SP.ClearTestData()
+        end
     end)
 
     SP.Frame = frame

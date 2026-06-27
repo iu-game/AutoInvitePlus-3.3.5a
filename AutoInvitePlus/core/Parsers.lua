@@ -492,6 +492,31 @@ function Parsers.IsLFM(message)
     return false
 end
 
+-- Check if a message is a guild recruitment / promotion (not a real raid LFM).
+-- These advertise a guild rather than a specific group, e.g.
+--   "PvE Guild <Untergotten Memories> is recruiting active new members!"
+function Parsers.IsGuildRecruitment(message)
+    if not message then return false end
+    local msg = message:lower()
+
+    -- Strong, explicit phrases
+    if msg:find("now recruiting", 1, true) or msg:find("guild recruiting", 1, true)
+       or msg:find("join our guild", 1, true) or msg:find("guild is recruiting", 1, true)
+       or msg:find("is recruiting", 1, true) then
+        return true
+    end
+
+    -- "recruit" anywhere, when it's clearly about a guild (the word "guild" or a
+    -- <GuildName> tag appears). Covers recruiting / recruitment / recruits.
+    if msg:find("recruit", 1, true) then
+        if msg:find("guild", 1, true) or msg:find("<", 1, true) then
+            return true
+        end
+    end
+
+    return false
+end
+
 -- ============================================================================
 -- UNIFIED CHAT MESSAGE PARSER
 -- ============================================================================
@@ -739,6 +764,7 @@ function Parsers.ParseChatMessage(message, author, channel)
         -- Message type
         isLFG = Parsers.IsLFG(message),
         isLFM = Parsers.IsLFM(message),
+        isRecruitment = Parsers.IsGuildRecruitment(message),
 
         -- Detected content
         raid = nil,

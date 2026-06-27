@@ -517,6 +517,7 @@ function Roster.CreateUI()
     saveNameInput:SetSize(150, 20)
     saveNameInput:SetPoint("LEFT", saveNameLabel, "RIGHT", 10, 0)
     saveNameInput:SetAutoFocus(false)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(saveNameInput) end
 
     local saveBtn = CreateFrame("Button", nil, tab1, "UIPanelButtonTemplate")
     saveBtn:SetSize(100, 22)
@@ -588,6 +589,7 @@ function Roster.CreateUI()
     waitNameInput:SetSize(100, 20)
     waitNameInput:SetPoint("LEFT", waitAddLabel, "RIGHT", 10, 0)
     waitNameInput:SetAutoFocus(false)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(waitNameInput) end
 
     local waitAddBtn = CreateFrame("Button", nil, tab2, "UIPanelButtonTemplate")
     waitAddBtn:SetSize(50, 22)
@@ -660,6 +662,7 @@ function Roster.CreateUI()
     notesNameInput:SetSize(120, 20)
     notesNameInput:SetPoint("LEFT", notesLabel, "RIGHT", 10, 0)
     notesNameInput:SetAutoFocus(false)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(notesNameInput) end
 
     local notesSearchBtn = CreateFrame("Button", nil, tab3, "UIPanelButtonTemplate")
     notesSearchBtn:SetSize(60, 22)
@@ -674,6 +677,7 @@ function Roster.CreateUI()
     noteInput:SetSize(350, 20)
     noteInput:SetPoint("LEFT", noteLabel, "RIGHT", 10, 0)
     noteInput:SetAutoFocus(false)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(noteInput) end
 
     local noteSaveBtn = CreateFrame("Button", nil, tab3, "UIPanelButtonTemplate")
     noteSaveBtn:SetSize(50, 22)

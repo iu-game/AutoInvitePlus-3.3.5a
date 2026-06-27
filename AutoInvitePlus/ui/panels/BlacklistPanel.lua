@@ -9,9 +9,100 @@ local BP = AIP.Panels.Blacklist
 -- Panel state
 BP.Frame = nil
 BP.Rows = {}
-BP.RowsVisible = 14
+BP.MAX_ROWS = 40      -- pooled row count; how many actually show adapts to height
+BP.ROW_HEIGHT = 22    -- row spacing used for layout + FauxScrollFrame stepping
+BP.RowsVisible = 14   -- legacy/fallback; real count computed live in BP.VisibleCount
 BP.SearchFilter = ""
 BP.SourceFilter = "all"
+
+-- Compute how many rows fit the elastic scroll frame. The scroll frame is
+-- anchored on all four sides (never SetSize'd), so its GetHeight is the real,
+-- live height of the panel area -- unlike a SetSize'd frame which forever
+-- reports its stale initial height. Clamped to [1, MAX_ROWS].
+function BP.VisibleCount()
+    local sf = BP.Frame and BP.Frame.scrollFrame
+    local h = (sf and sf:GetHeight()) or 0
+    local n = math.floor(h / BP.ROW_HEIGHT)
+    if n < 1 then n = 1 end
+    if n > BP.MAX_ROWS then n = BP.MAX_ROWS end
+    return n
+end
+
+-- Reflow columns to fit the current panel width. Driven off the elastic scroll
+-- frame's live GetWidth (never a SetSize'd frame). Column order: Player | Date |
+-- Reason | Source | Actions. Fixed columns: Date, Source, and the right-side
+-- Edit/Remove action block (flush right). Flexible columns: player Name and Reason,
+-- sharing the leftover width by weight (Name 30% / Reason 70%). Header labels are
+-- re-anchored to match, and keep their own row below the add/search strip.
+function BP.LayoutColumns()
+    local f = BP.Frame
+    if not f or not f.scrollFrame then return end
+    local W = f.scrollFrame:GetWidth() or 0
+    if W < 50 then return end
+
+    -- Each row is anchored TOPLEFT scroll+10 and RIGHT scroll-5, so the usable
+    -- row width is the scroll width minus those insets.
+    local rowW = W - 15
+    if rowW < 50 then return end
+
+    local GAP = 10
+    local rightPad = 4
+    local actionsW = 58   -- Edit(35) + 3 gap + Remove(20)
+    local dateW = 80
+    local sourceW = 70
+
+    local flex = rowW - dateW - sourceW - actionsW - GAP * 4 - rightPad
+    if flex < 120 then flex = 120 end
+    local nameW = math.floor(flex * 0.30)
+    local reasonW = flex - nameW
+
+    local nameX = 0
+    local dateX = nameX + nameW + GAP
+    local reasonX = dateX + dateW + GAP
+    local sourceX = reasonX + reasonW + GAP
+    local actionsX = sourceX + sourceW + GAP  -- left edge of the action block
+
+    for i = 1, #BP.Rows do
+        local row = BP.Rows[i]
+        if row then
+            row.nameText:ClearAllPoints()
+            row.nameText:SetPoint("LEFT", row, "LEFT", nameX, 0)
+            row.nameText:SetWidth(nameW)
+
+            row.dateText:ClearAllPoints()
+            row.dateText:SetPoint("LEFT", row, "LEFT", dateX, 0)
+            row.dateText:SetWidth(dateW)
+
+            row.reasonText:ClearAllPoints()
+            row.reasonText:SetPoint("LEFT", row, "LEFT", reasonX, 0)
+            row.reasonText:SetWidth(reasonW)
+
+            row.sourceText:ClearAllPoints()
+            row.sourceText:SetPoint("LEFT", row, "LEFT", sourceX, 0)
+            row.sourceText:SetWidth(sourceW)
+
+            -- Action buttons flush to the row's right edge
+            row.remBtn:ClearAllPoints()
+            row.remBtn:SetPoint("RIGHT", row, "RIGHT", -rightPad, 0)
+            row.editBtn:ClearAllPoints()
+            row.editBtn:SetPoint("RIGHT", row.remBtn, "LEFT", -3, 0)
+        end
+    end
+
+    -- Re-align header labels (stored in order: Player, Date, Reason, Source, Actions)
+    local left = f.colLeft or 15
+    local hy = f.headerY or 0
+    local hx = {nameX, dateX, reasonX, sourceX, actionsX}
+    if f.blHeaders then
+        for i = 1, #f.blHeaders do
+            local hdr = f.blHeaders[i]
+            if hdr and hx[i] then
+                hdr:ClearAllPoints()
+                hdr:SetPoint("TOPLEFT", left + hx[i], hy)
+            end
+        end
+    end
+end
 
 -- Helper: Fix UIDropDownMenu strata issues in WotLK
 local function FixDropdownStrata(dropdown)
@@ -65,6 +156,7 @@ function BP.Create(parent)
         self:SetText("")
         self:ClearFocus()
     end)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(searchBox) end
     frame.searchBox = searchBox
 
     local filterLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -179,6 +271,7 @@ function BP.Create(parent)
     nameInput:SetSize(100, 20)
     nameInput:SetPoint("LEFT", addLabel, "RIGHT", 5, 0)
     nameInput:SetAutoFocus(false)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(nameInput) end
     frame.nameInput = nameInput
 
     local namePlaceholder = nameInput:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -197,6 +290,7 @@ function BP.Create(parent)
     reasonInput:SetSize(200, 20)
     reasonInput:SetPoint("LEFT", nameInput, "RIGHT", 5, 0)
     reasonInput:SetAutoFocus(false)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(reasonInput) end
     frame.reasonInput = reasonInput
 
     local reasonPlaceholder = reasonInput:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -255,7 +349,9 @@ function BP.Create(parent)
     end)
     y = y - 30
 
-    -- Column headers
+    -- Column headers. Re-anchored by BP.LayoutColumns to track the dynamic
+    -- column positions; this row sits below the add/search strip so the columns
+    -- never overlap those controls.
     local headers = {
         {text = "Player", width = 110, x = 15},
         {text = "Date Added", width = 85, x = 130},
@@ -264,14 +360,21 @@ function BP.Create(parent)
         {text = "Actions", width = 80, x = 500},
     }
 
-    for _, h in ipairs(headers) do
+    frame.blHeaders = {}
+    for hi = 1, #headers do
+        local h = headers[hi]
         local header = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         header:SetPoint("TOPLEFT", h.x, y)
         header:SetWidth(h.width)
         header:SetJustifyH("LEFT")
         header:SetText(h.text)
         header:SetTextColor(1, 0.82, 0)
+        frame.blHeaders[hi] = header
     end
+    -- Save geometry so BP.LayoutColumns can realign headers. colLeft is the X
+    -- (in frame coords) of each row's left edge (scroll left @5 + row inset @10).
+    frame.headerY = y
+    frame.colLeft = 15
     y = y - 18
 
     -- Divider line
@@ -291,11 +394,13 @@ function BP.Create(parent)
     end)
     frame.scrollFrame = scrollFrame
 
-    -- Create row buttons
-    for i = 1, BP.RowsVisible do
+    -- Create a generous row pool; the number shown adapts to the scroll height
+    -- (computed live in BP.VisibleCount / BP.Update).
+    for i = 1, BP.MAX_ROWS do
         local row = CreateFrame("Frame", nil, frame)
         row:SetSize(580, 22)
-        row:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 10, -((i - 1) * 22))
+        row:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 10, -((i - 1) * BP.ROW_HEIGHT))
+        row:SetPoint("RIGHT", scrollFrame, "RIGHT", -5, 0)  -- track panel width on resize
 
         -- Highlight
         local highlight = row:CreateTexture(nil, "HIGHLIGHT")
@@ -375,6 +480,13 @@ function BP.Create(parent)
         row:Hide()
         BP.Rows[i] = row
     end
+
+    -- Re-fill the list whenever the scroll area resizes. BP.Update recomputes
+    -- the visible row count from the live scroll height, so rows always grow to
+    -- fill the panel and never overflow past it.
+    scrollFrame:SetScript("OnSizeChanged", function(self)
+        BP.Update()
+    end)
 
     -- Empty state message
     local emptyText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -487,14 +599,23 @@ function BP.Update()
         end
     end
 
-    FauxScrollFrame_Update(BP.Frame.scrollFrame, numEntries, BP.RowsVisible, 22)
+    -- Recompute visible rows from the live (elastic) scroll height every refresh,
+    -- so the list fills the panel on tab-switch and resize, and never overflows.
+    local vis = BP.VisibleCount()
+    BP.RowsVisible = vis  -- keep field in sync for any external readers
+
+    -- Reflow columns to the current width every refresh (runs on tab-switch and
+    -- on the scroll frame's OnSizeChanged, so columns track the panel width).
+    BP.LayoutColumns()
+
+    FauxScrollFrame_Update(BP.Frame.scrollFrame, numEntries, vis, BP.ROW_HEIGHT)
     local offset = FauxScrollFrame_GetOffset(BP.Frame.scrollFrame)
 
-    for i = 1, BP.RowsVisible do
+    for i = 1, #BP.Rows do
         local row = BP.Rows[i]
         local index = offset + i
 
-        if index <= numEntries then
+        if i <= vis and index <= numEntries then
             local entry = entries[index]
             row.playerName = entry.name
 
@@ -544,6 +665,7 @@ function BP.Update()
 
             row:Show()
         else
+            row.playerName = nil
             row:Hide()
         end
     end
@@ -694,7 +816,10 @@ function BP.ShowExportPopup()
     end
 
     -- Update stats
-    local count, sources = AIP.GetBlacklistStats and AIP.GetBlacklistStats() or 0, {}
+    local count, sources = 0, {}
+    if AIP.GetBlacklistStats then
+        count, sources = AIP.GetBlacklistStats()
+    end
     local sourceStr = ""
     for src, cnt in pairs(sources) do
         sourceStr = sourceStr .. src .. ":" .. cnt .. " "

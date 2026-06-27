@@ -9,10 +9,83 @@ local FP = AIP.Panels.Favorites
 -- Panel state
 FP.Frame = nil
 FP.Rows = {}
-FP.RowsVisible = 15  -- Increased for larger scroll area
+FP.MAX_ROWS = 40      -- pooled row count; how many actually show adapts to height
+FP.ROW_HEIGHT = 26    -- row spacing used for layout + FauxScrollFrame stepping
+FP.RowsVisible = 15   -- legacy/fallback; real count computed live in FP.VisibleCount
 FP.SearchFilter = ""
 FP.SourceFilter = "all"
 FP.ScrollOffset = 0
+
+-- Compute how many rows fit the elastic scroll frame. The scroll frame is
+-- anchored on all four sides (never SetSize'd), so its GetHeight is the real,
+-- live height of the panel area -- unlike a SetSize'd frame which forever
+-- reports its stale initial height. Clamped to [1, MAX_ROWS].
+function FP.VisibleCount()
+    local sf = FP.Frame and FP.Frame.scrollFrame
+    local h = (sf and sf:GetHeight()) or 0
+    local n = math.floor(h / FP.ROW_HEIGHT)
+    if n < 1 then n = 1 end
+    if n > FP.MAX_ROWS then n = FP.MAX_ROWS end
+    return n
+end
+
+-- Reflow columns to fit the current panel width. Driven off the elastic scroll
+-- frame's live GetWidth (never a SetSize'd frame). Fixed columns: Source and the
+-- right-side Edit/Remove action block. Flexible columns: player Name and Note,
+-- sharing the leftover middle width by weight (Name 38% / Note 62%). Header labels
+-- are re-anchored to the same X so they stay aligned, and they keep their own
+-- dedicated row below the search/add strip (no overlap with controls).
+function FP.LayoutColumns()
+    local f = FP.Frame
+    if not f or not f.scrollFrame then return end
+    local W = f.scrollFrame:GetWidth() or 0
+    if W < 50 then return end
+
+    local GAP = 10
+    local rightPad = 4
+    local actionsW = 70   -- Edit(40) + 5 gap + Remove(25)
+    local sourceW = 80
+
+    local flex = W - actionsW - sourceW - GAP * 3 - rightPad
+    if flex < 120 then flex = 120 end
+    local nameW = math.floor(flex * 0.38)
+    local noteW = flex - nameW
+
+    local nameX = 0
+    local noteX = nameX + nameW + GAP
+    local sourceX = noteX + noteW + GAP
+    local actionsX = sourceX + sourceW + GAP  -- left edge of the action block
+
+    for i = 1, #FP.Rows do
+        local row = FP.Rows[i]
+        if row then
+            row.nameText:ClearAllPoints()
+            row.nameText:SetPoint("LEFT", row, "LEFT", nameX, 0)
+            row.nameText:SetWidth(nameW)
+
+            row.noteText:ClearAllPoints()
+            row.noteText:SetPoint("LEFT", row, "LEFT", noteX, 0)
+            row.noteText:SetWidth(noteW)
+
+            row.sourceText:ClearAllPoints()
+            row.sourceText:SetPoint("LEFT", row, "LEFT", sourceX, 0)
+            row.sourceText:SetWidth(sourceW)
+
+            -- Action buttons flush to the row's right edge
+            row.removeBtn:ClearAllPoints()
+            row.removeBtn:SetPoint("RIGHT", row, "RIGHT", -rightPad, 0)
+            row.editBtn:ClearAllPoints()
+            row.editBtn:SetPoint("RIGHT", row.removeBtn, "LEFT", -5, 0)
+        end
+    end
+
+    local left = f.colLeft or 10
+    local hy = f.headerY or 0
+    if f.colName then f.colName:ClearAllPoints(); f.colName:SetPoint("TOPLEFT", left + nameX, hy) end
+    if f.colNote then f.colNote:ClearAllPoints(); f.colNote:SetPoint("TOPLEFT", left + noteX, hy) end
+    if f.colSource then f.colSource:ClearAllPoints(); f.colSource:SetPoint("TOPLEFT", left + sourceX, hy) end
+    if f.colActions then f.colActions:ClearAllPoints(); f.colActions:SetPoint("TOPLEFT", left + actionsX, hy) end
+end
 
 -- Helper: Fix UIDropDownMenu strata issues in WotLK
 local function FixDropdownStrata(dropdown)
@@ -111,6 +184,7 @@ function FP.Create(parent)
         self:SetText("")
         self:ClearFocus()
     end)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(searchBox) end
     frame.searchBox = searchBox
 
     local filterLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -183,6 +257,7 @@ function FP.Create(parent)
     addNameBox:SetSize(120, 20)
     addNameBox:SetPoint("LEFT", addLabel, "RIGHT", 5, 0)
     addNameBox:SetAutoFocus(false)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(addNameBox) end
     frame.addNameBox = addNameBox
 
     local noteLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -193,6 +268,7 @@ function FP.Create(parent)
     addNoteBox:SetSize(200, 20)
     addNoteBox:SetPoint("LEFT", noteLabel, "RIGHT", 5, 0)
     addNoteBox:SetAutoFocus(false)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(addNoteBox) end
     frame.addNoteBox = addNoteBox
 
     local addBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
@@ -222,7 +298,9 @@ function FP.Create(parent)
     end)
     y = y - 30
 
-    -- Column headers (full width layout)
+    -- Column headers (full width layout). Re-anchored by FP.LayoutColumns to
+    -- track the dynamic column positions; this row sits below the search/add
+    -- strip so the columns never overlap those controls.
     local headerY = y
     local colName = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     colName:SetPoint("TOPLEFT", 10, headerY)
@@ -243,6 +321,15 @@ function FP.Create(parent)
     colActions:SetPoint("TOPLEFT", 520, headerY)
     colActions:SetText("Actions")
     colActions:SetTextColor(1, 0.82, 0)
+
+    -- Save header refs + geometry so FP.LayoutColumns can realign them. colLeft
+    -- is the X (in frame coords) of the scroll frame's / each row's left edge.
+    frame.colName = colName
+    frame.colNote = colNote
+    frame.colSource = colSource
+    frame.colActions = colActions
+    frame.headerY = headerY
+    frame.colLeft = 10
     y = y - 18
 
     -- Separator line (full width)
@@ -263,11 +350,12 @@ function FP.Create(parent)
     end)
     frame.scrollFrame = scrollFrame
 
-    -- Create row frames
-    for i = 1, FP.RowsVisible do
+    -- Create a generous row pool; the number actually shown adapts to the
+    -- scroll height (computed live in FP.VisibleCount / FP.Update).
+    for i = 1, FP.MAX_ROWS do
         local row = CreateFrame("Frame", "AIPFavoritesRow"..i, frame)
         row:SetHeight(24)
-        row:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 0, -((i-1) * 26))
+        row:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 0, -((i-1) * FP.ROW_HEIGHT))
         row:SetPoint("RIGHT", scrollFrame, "RIGHT", 0, 0)
 
         -- Highlight on hover
@@ -336,6 +424,13 @@ function FP.Create(parent)
         row:Hide()
         FP.Rows[i] = row
     end
+
+    -- Re-fill the list whenever the scroll area resizes. FP.Update recomputes
+    -- the visible row count from the live scroll height, so rows always grow to
+    -- fill the panel and never overflow past it.
+    scrollFrame:SetScript("OnSizeChanged", function(self)
+        FP.Update()
+    end)
 
     -- Bottom buttons (anchored to bottom of frame)
     local importGuildBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
@@ -481,7 +576,16 @@ function FP.Update()
     local favorites = GetFilteredFavorites()
     local numEntries = #favorites
 
-    FauxScrollFrame_Update(FP.Frame.scrollFrame, numEntries, FP.RowsVisible, 26)
+    -- Recompute visible rows from the live (elastic) scroll height every refresh,
+    -- so the list fills the panel on tab-switch and resize, and never overflows.
+    local vis = FP.VisibleCount()
+    FP.RowsVisible = vis  -- keep field in sync for any external readers
+
+    -- Reflow columns to the current width every refresh (runs on tab-switch and
+    -- on the scroll frame's OnSizeChanged, so columns track the panel width).
+    FP.LayoutColumns()
+
+    FauxScrollFrame_Update(FP.Frame.scrollFrame, numEntries, vis, FP.ROW_HEIGHT)
 
     local offset = FauxScrollFrame_GetOffset(FP.Frame.scrollFrame) or 0
 
@@ -493,11 +597,11 @@ function FP.Update()
         queue = {0.8, 0.6, 1},
     }
 
-    for i = 1, FP.RowsVisible do
+    for i = 1, #FP.Rows do
         local row = FP.Rows[i]
         local index = offset + i
 
-        if index <= numEntries then
+        if i <= vis and index <= numEntries then
             local entry = favorites[index]
             row.entryData = entry
 
@@ -513,6 +617,7 @@ function FP.Update()
 
             row:Show()
         else
+            row.entryData = nil
             row:Hide()
         end
     end

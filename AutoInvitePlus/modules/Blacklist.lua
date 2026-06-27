@@ -560,6 +560,7 @@ local function CreateBlacklistUI()
     searchBox:SetSize(150, 20)
     searchBox:SetPoint("LEFT", searchLabel, "RIGHT", 5, 0)
     searchBox:SetAutoFocus(false)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(searchBox) end
     frame.searchBox = searchBox
     frame.searchFilter = ""
 
@@ -584,11 +585,13 @@ local function CreateBlacklistUI()
     inputBox:SetSize(100, 20)
     inputBox:SetPoint("LEFT", addLabel, "RIGHT", 5, 0)
     inputBox:SetAutoFocus(false)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(inputBox) end
 
     local reasonBox = CreateFrame("EditBox", "AIPBlacklistReason", frame, "InputBoxTemplate")
     reasonBox:SetSize(120, 20)
     reasonBox:SetPoint("LEFT", inputBox, "RIGHT", 5, 0)
     reasonBox:SetAutoFocus(false)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(reasonBox) end
 
     local reasonPlaceholder = reasonBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     reasonPlaceholder:SetPoint("LEFT", 5, 0)

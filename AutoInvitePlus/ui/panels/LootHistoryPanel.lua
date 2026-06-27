@@ -250,7 +250,7 @@ function LH.Create(parent)
     frame.raidsScroll = raidsScroll
 
     frame.raidRows = {}
-    for i = 1, 7 do
+    for i = 1, LH.MAX_ROWS do
         local row = LH.CreateSelectableRow(raidsPanel, PANEL_WIDTH_THIRD - 30, 18)
         row:SetPoint("TOPLEFT", 5, -40 - (i-1) * 18)
         row.index = i
@@ -313,7 +313,7 @@ function LH.Create(parent)
     frame.bossesScroll = bossesScroll
 
     frame.bossRows = {}
-    for i = 1, 7 do
+    for i = 1, LH.MAX_ROWS do
         local row = LH.CreateSelectableRow(bossesPanel, PANEL_WIDTH_THIRD - 30, 18)
         row:SetPoint("TOPLEFT", 5, -40 - (i-1) * 18)
         row.index = i
@@ -360,7 +360,7 @@ function LH.Create(parent)
     frame.bossAttScroll = bossAttScroll
 
     frame.bossAttRows = {}
-    for i = 1, 7 do
+    for i = 1, LH.MAX_ROWS do
         local row = LH.CreateSelectableRow(bossAttPanel, PANEL_WIDTH_THIRD - 30, 18)
         row:SetPoint("TOPLEFT", 5, -40 - (i-1) * 18)
         row.index = i
@@ -412,7 +412,7 @@ function LH.Create(parent)
     frame.raidAttScroll = raidAttScroll
 
     frame.raidAttRows = {}
-    for i = 1, 9 do
+    for i = 1, LH.MAX_ROWS do
         local row = LH.CreateSelectableRow(raidAttPanel, PANEL_WIDTH_HALF - 30, 18)
         row:SetPoint("TOPLEFT", 5, -40 - (i-1) * 18)
         row.index = i
@@ -494,6 +494,7 @@ function LH.Create(parent)
         self:SetText("")
         self:ClearFocus()
     end)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(searchBox) end
     frame.searchBox = searchBox
 
     -- Loot stats
@@ -533,7 +534,7 @@ function LH.Create(parent)
     frame.lootScroll = lootScroll
 
     frame.lootRows = {}
-    for i = 1, 8 do
+    for i = 1, LH.MAX_ROWS do
         local row = CreateFrame("Button", nil, lootPanel)
         row:SetSize(PANEL_WIDTH_LOOT - 30, 18)
         row:SetPoint("TOPLEFT", 5, -55 - (i-1) * 18)
@@ -697,19 +698,19 @@ function LH.Create(parent)
 
         -- Update row widths in each panel
         local topRowWidth = topPanelWidth - 30
-        for i = 1, 7 do
+        for i = 1, LH.MAX_ROWS do
             if frame.raidRows[i] then frame.raidRows[i]:SetWidth(topRowWidth) end
             if frame.bossRows[i] then frame.bossRows[i]:SetWidth(topRowWidth) end
             if frame.bossAttRows[i] then frame.bossAttRows[i]:SetWidth(topRowWidth) end
         end
 
         local bottomAttRowWidth = bottomAttWidth - 30
-        for i = 1, 9 do
+        for i = 1, LH.MAX_ROWS do
             if frame.raidAttRows[i] then frame.raidAttRows[i]:SetWidth(bottomAttRowWidth) end
         end
 
         local lootRowWidth = bottomLootWidth - 30
-        for i = 1, 8 do
+        for i = 1, LH.MAX_ROWS do
             if frame.lootRows[i] then frame.lootRows[i]:SetWidth(lootRowWidth) end
         end
 
@@ -724,7 +725,7 @@ function LH.Create(parent)
         local raidsDateW = math.floor(raidsPanelWidth * 0.30)
         local raidsZoneW = raidsPanelWidth - raidsNumW - raidsDateW - 10
 
-        for i = 1, 7 do
+        for i = 1, LH.MAX_ROWS do
             local row = frame.raidRows[i]
             if row then
                 row.numText:SetWidth(raidsNumW)
@@ -743,7 +744,7 @@ function LH.Create(parent)
         local bossNameW = math.floor(topRowWidth * 0.58)
         local bossTimeW = topRowWidth - bossNumW - bossNameW - 10
 
-        for i = 1, 7 do
+        for i = 1, LH.MAX_ROWS do
             local row = frame.bossRows[i]
             if row then
                 row.numText:SetWidth(bossNumW)
@@ -758,7 +759,7 @@ function LH.Create(parent)
 
         -- Boss Attendees panel (1 column: Name - 100%)
         local bossAttNameW = topRowWidth - 10
-        for i = 1, 7 do
+        for i = 1, LH.MAX_ROWS do
             local row = frame.bossAttRows[i]
             if row then
                 row.nameText:SetWidth(bossAttNameW)
@@ -771,7 +772,7 @@ function LH.Create(parent)
         local attJoinW = math.floor(bottomAttRowWidth * 0.27)
         local attLeaveW = bottomAttRowWidth - attNameW - attJoinW - 10
 
-        for i = 1, 9 do
+        for i = 1, LH.MAX_ROWS do
             local row = frame.raidAttRows[i]
             if row then
                 row.nameText:SetWidth(attNameW)
@@ -791,7 +792,7 @@ function LH.Create(parent)
         local lootWinnerW = math.floor(lootRowWidth * 0.22)
         local lootTimeW = lootRowWidth - lootItemW - lootSourceW - lootWinnerW - 5
 
-        for i = 1, 8 do
+        for i = 1, LH.MAX_ROWS do
             local row = frame.lootRows[i]
             if row then
                 -- Item text is after the 16px icon + 6px padding
@@ -826,6 +827,9 @@ function LH.Create(parent)
             frame.lootHeaders.time:ClearAllPoints()
             frame.lootHeaders.time:SetPoint("TOPLEFT", lootPanel, "TOPLEFT", 5 + lootItemW + lootSourceW + lootWinnerW, -42)
         end
+
+        -- Re-show the correct number of rows for the new panel heights
+        if LH.RefreshAll then LH.RefreshAll() end
     end
 
     frame:SetScript("OnSizeChanged", ResizePanels)
@@ -990,6 +994,16 @@ function LH.RefreshAll()
     LH.RefreshLoot()
 end
 
+-- Generous row pool; the number actually shown adapts to each panel's height.
+LH.MAX_ROWS = 40
+function LH.VisibleCount(scrollFrame)
+    local h = (scrollFrame and scrollFrame:GetHeight()) or 0
+    local n = math.floor(h / 18)
+    if n < 1 then n = 1 end
+    if n > LH.MAX_ROWS then n = LH.MAX_ROWS end
+    return n
+end
+
 function LH.RefreshRaids()
     if not LH.Frame or not LH.Frame.raidRows then
         return
@@ -1001,13 +1015,14 @@ function LH.RefreshRaids()
 
     local offset = FauxScrollFrame_GetOffset(scrollFrame) or 0
 
-    FauxScrollFrame_Update(scrollFrame, #sessions, 7, 18)
+    local vis = LH.VisibleCount(scrollFrame)
+    FauxScrollFrame_Update(scrollFrame, #sessions, vis, 18)
 
-    for i = 1, 7 do
+    for i = 1, #LH.Frame.raidRows do
         local row = LH.Frame.raidRows[i]
         local index = offset + i
 
-        if index <= #sessions then
+        if i <= vis and index <= #sessions then
             local session = sessions[index]
             row.data = session
 
@@ -1039,13 +1054,14 @@ function LH.RefreshBosses()
     if not scrollFrame then return end
     local offset = FauxScrollFrame_GetOffset(scrollFrame) or 0
 
-    FauxScrollFrame_Update(scrollFrame, #bosses, 7, 18)
+    local vis = LH.VisibleCount(scrollFrame)
+    FauxScrollFrame_Update(scrollFrame, #bosses, vis, 18)
 
-    for i = 1, 7 do
+    for i = 1, #LH.Frame.bossRows do
         local row = LH.Frame.bossRows[i]
         local index = offset + i
 
-        if index <= #bosses then
+        if i <= vis and index <= #bosses then
             local boss = bosses[index]
             row.data = boss
 
@@ -1076,13 +1092,14 @@ function LH.RefreshBossAttendees()
     if not scrollFrame then return end
     local offset = FauxScrollFrame_GetOffset(scrollFrame) or 0
 
-    FauxScrollFrame_Update(scrollFrame, #attendees, 7, 18)
+    local vis = LH.VisibleCount(scrollFrame)
+    FauxScrollFrame_Update(scrollFrame, #attendees, vis, 18)
 
-    for i = 1, 7 do
+    for i = 1, #LH.Frame.bossAttRows do
         local row = LH.Frame.bossAttRows[i]
         local index = offset + i
 
-        if index <= #attendees then
+        if i <= vis and index <= #attendees then
             local name = attendees[index]
             row.data = name
             row.nameText:SetText(name)
@@ -1106,13 +1123,14 @@ function LH.RefreshRaidAttendees()
     if not scrollFrame then return end
     local offset = FauxScrollFrame_GetOffset(scrollFrame) or 0
 
-    FauxScrollFrame_Update(scrollFrame, #attendees, 9, 18)
+    local vis = LH.VisibleCount(scrollFrame)
+    FauxScrollFrame_Update(scrollFrame, #attendees, vis, 18)
 
-    for i = 1, 9 do
+    for i = 1, #LH.Frame.raidAttRows do
         local row = LH.Frame.raidAttRows[i]
         local index = offset + i
 
-        if index <= #attendees then
+        if i <= vis and index <= #attendees then
             local att = attendees[index]
             row.data = att
 
@@ -1139,17 +1157,18 @@ function LH.RefreshLoot()
     if not scrollFrame then return end
     local offset = FauxScrollFrame_GetOffset(scrollFrame) or 0
 
-    FauxScrollFrame_Update(scrollFrame, #loot, 8, 18)
+    local vis = LH.VisibleCount(scrollFrame)
+    FauxScrollFrame_Update(scrollFrame, #loot, vis, 18)
 
     if LH.Frame.lootStats then
         LH.Frame.lootStats:SetText(#loot .. " items")
     end
 
-    for i = 1, 8 do
+    for i = 1, #LH.Frame.lootRows do
         local row = LH.Frame.lootRows[i]
         local index = offset + i
 
-        if index <= #loot then
+        if i <= vis and index <= #loot then
             local entry = loot[index]
             row.data = entry
 
@@ -1314,6 +1333,7 @@ function LH.ShowAddBossPopup()
         nameInput:SetSize(180, 20)
         nameInput:SetPoint("TOPLEFT", 90, -38)
         nameInput:SetAutoFocus(false)
+        if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(nameInput) end
         popup.nameInput = nameInput
 
         local addBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
@@ -1373,7 +1393,7 @@ end
 
 function LH.ShowExportPopup(text)
     if not LH.ExportPopup then
-        local popup = CreateFrame("Frame", "AIPExportPopup", UIParent)
+        local popup = CreateFrame("Frame", "AIPLootExportPopup", UIParent)
         popup:SetSize(400, 300)
         popup:SetPoint("CENTER")
         popup:SetFrameStrata("DIALOG")
@@ -1397,7 +1417,7 @@ function LH.ShowExportPopup(text)
         local closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
         closeBtn:SetPoint("TOPRIGHT", -5, -5)
 
-        local scroll = CreateFrame("ScrollFrame", "AIPExportScroll", popup, "UIPanelScrollFrameTemplate")
+        local scroll = CreateFrame("ScrollFrame", "AIPLootExportScroll", popup, "UIPanelScrollFrameTemplate")
         scroll:SetPoint("TOPLEFT", 15, -40)
         scroll:SetPoint("BOTTOMRIGHT", -35, 50)
 
@@ -1420,7 +1440,7 @@ function LH.ShowExportPopup(text)
         end)
 
         popup:Hide()
-        tinsert(UISpecialFrames, "AIPExportPopup")
+        tinsert(UISpecialFrames, "AIPLootExportPopup")
         LH.ExportPopup = popup
     end
 

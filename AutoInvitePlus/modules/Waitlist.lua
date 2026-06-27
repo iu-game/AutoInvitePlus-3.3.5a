@@ -444,6 +444,7 @@ local function CreateWaitlistUI()
     nameInput:SetSize(100, 20)
     nameInput:SetPoint("LEFT", addLabel, "RIGHT", 5, 0)
     nameInput:SetAutoFocus(false)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(nameInput) end
     frame.nameInput = nameInput
 
     local roleDropdown = CreateFrame("Frame", "AIPWaitlistRole", frame, "UIDropDownMenuTemplate")
@@ -473,6 +474,7 @@ local function CreateWaitlistUI()
     noteInput:SetSize(120, 20)
     noteInput:SetPoint("LEFT", roleDropdown, "RIGHT", 0, 3)
     noteInput:SetAutoFocus(false)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(noteInput) end
     frame.noteInput = noteInput
 
     local notePlaceholder = noteInput:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")

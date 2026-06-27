@@ -462,18 +462,29 @@ function TB.BuildLFMTree(preserveState)
     local groupsByCategory = {}  -- {categoryId = {groups}}
     local unmatchedGroups = {}   -- Groups that don't match any category
 
+    local recruitmentGroups = {}  -- guild promotions, shown in their own category
     for _, group in ipairs(allGroups) do
         local raid = group.raid or ""
         local matched = false
 
-        -- Try to match to a category
-        for _, cat in ipairs(AIP.GroupTracker.RaidHierarchy) do
-            -- Check if raid starts with category id or equals it
-            if raid == cat.id or raid:find("^" .. cat.id) then
-                groupsByCategory[cat.id] = groupsByCategory[cat.id] or {}
-                table.insert(groupsByCategory[cat.id], group)
-                matched = true
-                break
+        -- Guild recruitment / promotion messages get their own category instead
+        -- of polluting the raid lists (they only mention a raid in passing).
+        if AIP.Parsers and AIP.Parsers.IsGuildRecruitment
+           and AIP.Parsers.IsGuildRecruitment(group.message or group.note or "") then
+            table.insert(recruitmentGroups, group)
+            matched = true
+        end
+
+        -- Otherwise try to match to a raid category
+        if not matched then
+            for _, cat in ipairs(AIP.GroupTracker.RaidHierarchy) do
+                -- Check if raid starts with category id or equals it
+                if raid == cat.id or raid:find("^" .. cat.id) then
+                    groupsByCategory[cat.id] = groupsByCategory[cat.id] or {}
+                    table.insert(groupsByCategory[cat.id], group)
+                    matched = true
+                    break
+                end
             end
         end
 
@@ -590,6 +601,43 @@ function TB.BuildLFMTree(preserveState)
                 table.insert(tree, catNode)
             end
         end
+    end
+
+    -- Guild Recruitment category (guild promotions, kept separate from raids).
+    -- Collapsed by default so it stays out of the way.
+    if #recruitmentGroups > 0 then
+        local recruitNode = {
+            id = "lfm_guild_recruit",
+            type = "category",
+            text = "Guild Recruitment (" .. #recruitmentGroups .. ")",
+            count = #recruitmentGroups,
+            icon = TB.Icons.raid,
+            children = {},
+        }
+        TB.KnownCategories[recruitNode.id] = true  -- don't auto-expand
+
+        for _, group in ipairs(recruitmentGroups) do
+            local displayName = group.leader or group.name or "?"
+            if group.raid and group.raid ~= "" then
+                displayName = displayName .. " - " .. group.raid
+            end
+            if group.isOwn then
+                displayName = "|cFF00FF00(You)|r " .. displayName
+            end
+            local groupNode = {
+                id = "lfm_recruit_" .. (group.leader or group.name or displayName),
+                type = "group",
+                text = displayName,
+                compText = "",
+                textColor = group.isOwn and {r = 0, g = 1, b = 0} or {r = 0.8, g = 0.7, b = 1},
+                icon = TB.Icons.group,
+                isLeaf = true,
+                data = group,
+            }
+            table.insert(recruitNode.children, groupNode)
+        end
+
+        table.insert(tree, recruitNode)
     end
 
     -- Add unmatched groups to "Other" category
@@ -1097,7 +1145,7 @@ function TB.CreateTreeView(parent, width, height)
         frame.rows[i] = row
     end
 
-    -- Update function
+    -- Update function (pure display; row count is managed by UpdateSize)
     function frame:Update(treeData, scrollOffset)
         scrollOffset = scrollOffset or 0
         local flatList = TB.FlattenTree(treeData or {})
@@ -1124,7 +1172,10 @@ function TB.CreateTreeView(parent, width, height)
                     row.expandBtn:SetNormalTexture(TB.IsNodeExpanded(node.id) and TB.Icons.expanded or TB.Icons.collapsed)
                     row.expandBtn:SetScript("OnClick", function()
                         TB.ToggleNode(node.id)
-                        self:Update(treeData, FauxScrollFrame_GetOffset(self.scrollFrame))
+                        -- Recompute row count from the current (stable) height so the
+                        -- newly revealed items fill the panel, then redraw.
+                        self.currentTreeData = treeData
+                        self:UpdateSize()
                     end)
                 else
                     row.expandBtn:Hide()
@@ -1236,7 +1287,8 @@ function TB.CreateTreeView(parent, width, height)
                 row:SetScript("OnDoubleClick", function()
                     if node.children and #node.children > 0 then
                         TB.ToggleNode(node.id)
-                        self:Update(treeData, FauxScrollFrame_GetOffset(self.scrollFrame))
+                        self.currentTreeData = treeData
+                        self:UpdateSize()
                     end
                 end)
 
@@ -1354,6 +1406,14 @@ function TB.CreateTreeView(parent, width, height)
                 row:Hide()
             end
         end
+
+        -- Hide any pooled rows beyond the current visible count. numRows can
+        -- shrink when the window is made smaller; without this, previously-shown
+        -- rows linger as ghost rows overflowing below the panel (3.3.5a has no
+        -- child clipping).
+        for i = self.numRows + 1, #self.rows do
+            if self.rows[i] then self.rows[i]:Hide() end
+        end
     end
 
     -- Scroll handler
@@ -1385,10 +1445,22 @@ function TB.CreateTreeView(parent, width, height)
     -- Update size dynamically (for window resize handling)
     -- If width/height are nil, use the frame's actual dimensions (from anchors)
     function frame:UpdateSize(newWidth, newHeight)
-        -- If using anchor-based sizing, get dimensions from frame itself
+        -- When not given explicit dimensions, derive them from the PARENT panel.
+        -- self:GetHeight() is unreliable here: the frame carries an explicit
+        -- SetSize from creation and keeps reporting that stale height even though
+        -- the BOTTOMRIGHT anchor stretches the rendered frame. The parent panel
+        -- reports its true (anchored) size, so we subtract the known insets.
         if not newWidth or not newHeight then
-            newWidth = self:GetWidth()
-            newHeight = self:GetHeight()
+            local parent = self:GetParent()
+            local pH = (parent and parent:GetHeight()) or 0
+            local pW = (parent and parent:GetWidth()) or 0
+            if parent and pH > 50 then
+                newWidth = pW - (self._widthInset or 0)
+                newHeight = pH - (self._heightInset or 0)
+            else
+                newWidth = self:GetWidth()
+                newHeight = self:GetHeight()
+            end
         end
 
         -- Skip update if dimensions are too small (frame not yet visible/laid out)
@@ -1484,7 +1556,7 @@ function TB.CreateTreeView(parent, width, height)
 
         self.numRows = newNumRows
 
-        -- Refresh display with current data
+        -- Refresh display with current data.
         if self.currentTreeData then
             local offset = 0
             if self.scrollFrame then

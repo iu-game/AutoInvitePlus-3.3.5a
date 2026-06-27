@@ -19,6 +19,7 @@ AIP.DBVersion = DB_VERSION
 local defaults = {
     dbVersion = DB_VERSION,
     enabled = false,
+    debugLogging = false,   -- persistent debug logging to db.debugLog (Settings toggle)
     triggers = "invme-auto",
     spamMessage = 'LFM <raid> <roles> | <gs>+ | Whisper "<key>" for invite',
     maxRaiders = 25,
@@ -138,6 +139,19 @@ local defaults = {
     reservedAnnounceInterval = 5,   -- Minutes between announcements
     msTracking = {},                -- MS/OS tracking per player
 
+    -- Raid Tools (v5.6) - announcements bar, /RW, roll system
+    customAnnouncements = {
+        {label = "Pull", message = "Pulling in 5 seconds - get ready!", channel = "RAID_WARNING"},
+        {label = "Stack", message = "STACK UP NOW!", channel = "RAID_WARNING"},
+        {label = "Spread", message = "SPREAD OUT!", channel = "RAID_WARNING"},
+        {label = "Move", message = "MOVE OUT OF THE FIRE!", channel = "RAID_WARNING"},
+        {label = "Bloodlust", message = "BLOODLUST / HEROISM NOW!", channel = "RAID_WARNING"},
+        {label = "Interrupt", message = "INTERRUPT NOW!", channel = "RAID_WARNING"},
+    },
+    floatingBarEnabled = false,     -- Show the floating announcement bar
+    floatingBarPos = nil,           -- {point, relPoint, x, y}
+    rollDuration = 10,              -- Roll countdown seconds
+
     -- Loot History (v5.3)
     lootHistory = {},               -- Historical loot drops (legacy, migrated to raidSessions)
     lootTrackThreshold = 2,         -- Min item quality to track (2 = Green)
@@ -220,9 +234,12 @@ end
 -- Utility functions
 local function Print(msg)
     DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00[AutoInvite+]|r " .. tostring(msg))
+    if AIP.Log then AIP.Log("[PRINT] " .. tostring(msg)) end
 end
 
 local function Debug(msg)
+    -- Always log to file; only echo to chat when debug mode is enabled.
+    if AIP.Log then AIP.Log("[DEBUG] " .. tostring(msg)) end
     if AIP.db and AIP.db.debug then
         DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00[AIP Debug]|r " .. tostring(msg))
     end
@@ -247,16 +264,36 @@ end
 
 AIP.IsPlayerInGuild = IsPlayerInGuild
 
+-- Parsed-trigger cache. The trigger string rarely changes, but CheckTriggers
+-- runs on every incoming message of every listened channel, so we parse the
+-- list once and rebuild only when the source string changes.
+local triggerCache = { source = nil, list = {} }
+
+local function GetParsedTriggers()
+    local raw = AIP.db.triggers or ""
+    if triggerCache.source ~= raw then
+        triggerCache.source = raw
+        local list = {}
+        for _, trigger in ipairs({ strsplit(";", raw:lower()) }) do
+            trigger = trigger:trim()
+            if trigger ~= "" then
+                list[#list + 1] = trigger
+            end
+        end
+        triggerCache.list = list
+    end
+    return triggerCache.list
+end
+
 -- Check if message contains any trigger word
 local function CheckTriggers(message)
     if not AIP.db or not AIP.db.triggers then return false end
 
     local msg = message:lower():gsub("%s+", " "):trim()
-    local triggers = { strsplit(";", AIP.db.triggers:lower():gsub("%s*;%s*", ";")) }
+    local triggers = GetParsedTriggers()
 
-    for _, trigger in ipairs(triggers) do
-        trigger = trigger:trim()
-        if trigger ~= "" and msg:find(trigger, 1, true) then
+    for i = 1, #triggers do
+        if msg:find(triggers[i], 1, true) then
             return true
         end
     end
@@ -445,6 +482,47 @@ function AIP.RemoveFromFavorites(name)
         return true
     end
     return false
+end
+
+-- Reset all settings to defaults while PRESERVING user data collections.
+-- Used by Settings > "Reset to Defaults". Previously referenced but never
+-- defined, so the button silently did nothing while claiming success.
+function AIP.ResetDefaults()
+    if not AIP.db then return false end
+
+    local function deepCopy(orig)
+        if type(orig) ~= "table" then return orig end
+        local copy = {}
+        for k, v in pairs(orig) do
+            copy[k] = deepCopy(v)
+        end
+        return copy
+    end
+
+    -- Keys that hold user-owned data and must survive a settings reset.
+    local preserve = {
+        dbVersion = true,
+        blacklist = true, whitelist = true, queue = true, waitlist = true,
+        inviteHistory = true, lootHistory = true, raidSessions = true,
+        nextRaidSessionId = true, currentRaidSessionId = true,
+        raidWarningTemplates = true, lfmTemplates = true,
+        lootBans = true, msTracking = true,
+    }
+
+    -- Drop every non-preserved key, then re-seed from defaults.
+    for k in pairs(AIP.db) do
+        if not preserve[k] then
+            AIP.db[k] = nil
+        end
+    end
+    for k, v in pairs(defaults) do
+        if AIP.db[k] == nil then
+            AIP.db[k] = deepCopy(v)
+        end
+    end
+    AIP.db.dbVersion = DB_VERSION
+
+    return true
 end
 
 -- Get player info from message (role, class, GS)
@@ -714,17 +792,12 @@ AIP.ChatBan = {
     maxDelay = 5,      -- Max delay after bans detected
 }
 
--- Timer helper for delayed execution (WotLK compatible)
+-- Timer helper for delayed execution (WotLK compatible).
+-- Delegates to the pooled, error-isolated implementation in Utils so we don't
+-- maintain (or leak) a second frame-per-call timer here. Utils loads before
+-- Core in the .toc, so it is always available by the time this runs.
 local function DelayedCall(delay, func)
-    local frame = CreateFrame("Frame")
-    frame.elapsed = 0
-    frame:SetScript("OnUpdate", function(self, elapsed)
-        self.elapsed = self.elapsed + elapsed
-        if self.elapsed >= delay then
-            self:SetScript("OnUpdate", nil)
-            func()
-        end
-    end)
+    return AIP.Utils.DelayedCall(delay, func)
 end
 
 -- Spam invite message with staggered channel sends
@@ -1082,6 +1155,18 @@ local function OnEvent(self, event, ...)
 
             AIP.db = AutoInvitePlusDB
 
+            -- Mark a new session in the persistent log (stored in db.debugLog)
+            if AIP.Log then
+                AIP.Log("===== SESSION START v" .. VERSION .. " @ " .. date("%Y-%m-%d %H:%M:%S") .. " =====")
+            end
+
+            -- When debug logging is enabled, wrap every module function with call
+            -- logging. Runs once here, after all addon files have loaded.
+            -- (Toggling the setting on requires a /reload to apply instrumentation.)
+            if AIP.db.debugLogging and AIP.InstrumentAll then
+                AIP.InstrumentAll()
+            end
+
             -- Initialize Utils event system if available
             if AIP.Utils and AIP.Utils.Events and AIP.Utils.Events.Init then
                 AIP.Utils.Events.Init()
@@ -1357,6 +1442,32 @@ local function SlashHandler(msg)
         else
             Print("LootHistory panel not loaded")
         end
+
+    -- Debug log
+    elseif cmd == "log" then
+        if rest:lower():trim() == "clear" then
+            if AIP.db then AIP.db.debugLog = {} end
+            Print("Debug log cleared.")
+        else
+            local n = (AIP.db and AIP.db.debugLog) and #AIP.db.debugLog or 0
+            Print("Debug log: " .. n .. " entries. Type /reload to flush to SavedVariables\\AutoInvitePlus.lua, or /aip log clear to reset.")
+        end
+
+    -- Raid tools (announcements bar, roll, /RW loot)
+    elseif cmd == "roll" then
+        if AIP.RaidTools then
+            if rest and rest ~= "" then
+                AIP.RaidTools.StartRoll(rest)
+            else
+                AIP.RaidTools.ToggleRollWindow()
+            end
+        end
+    elseif cmd == "rollwindow" or cmd == "rolls" then
+        if AIP.RaidTools then AIP.RaidTools.ToggleRollWindow() end
+    elseif cmd == "rw" or cmd == "announceloot" then
+        if AIP.RaidTools then AIP.RaidTools.AnnounceReserved() end
+    elseif cmd == "bar" or cmd == "announcebar" then
+        if AIP.RaidTools then AIP.RaidTools.ToggleBar() end
 
     -- Status
     elseif cmd == "status" then

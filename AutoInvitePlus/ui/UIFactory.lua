@@ -127,10 +127,38 @@ end
 -- INPUT ELEMENTS
 -- ============================================================================
 
--- Create an edit box
+-- Clean, consistent input style: dark fill, subtle border, proper text padding,
+-- gold border while focused. Applied to all addon inputs for a uniform look and
+-- to avoid the stock InputBoxTemplate's offset/jammed-text quirks.
+function UI.StyleEditBox(editBox)
+    if not editBox then return end
+    -- Hide any InputBoxTemplate cap textures (Left/Right/Middle) if present
+    local regions = { editBox:GetRegions() }
+    for _, r in ipairs(regions) do
+        if r and r.GetObjectType and r:GetObjectType() == "Texture" then
+            r:SetTexture(nil)
+        end
+    end
+    editBox:SetFontObject(ChatFontNormal)
+    editBox:SetTextColor(1, 1, 1)
+    editBox:SetTextInsets(6, 6, 0, 0)
+    editBox:SetBackdrop({
+        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = {left = 3, right = 3, top = 3, bottom = 3},
+    })
+    editBox:SetBackdropColor(0, 0, 0, 0.55)
+    editBox:SetBackdropBorderColor(0.45, 0.45, 0.5)
+    editBox:HookScript("OnEditFocusGained", function(self) self:SetBackdropBorderColor(1, 0.82, 0) end)
+    editBox:HookScript("OnEditFocusLost", function(self) self:SetBackdropBorderColor(0.45, 0.45, 0.5) end)
+    return editBox
+end
+
+-- Create an edit box (clean styled look)
 function UI.CreateEditBox(parent, width, height, numeric, maxChars)
-    local editBox = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
-    editBox:SetSize(width, height or 20)
+    local editBox = CreateFrame("EditBox", nil, parent)
+    editBox:SetSize(width, height or 22)
     editBox:SetAutoFocus(false)
 
     if numeric then
@@ -145,6 +173,7 @@ function UI.CreateEditBox(parent, width, height, numeric, maxChars)
         self:ClearFocus()
     end)
 
+    UI.StyleEditBox(editBox)
     return editBox
 end
 

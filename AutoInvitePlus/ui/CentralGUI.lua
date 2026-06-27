@@ -43,6 +43,197 @@ GUI.IsMaximized = false
 GUI.SavedSize = nil  -- Stores {width, height} before maximize
 GUI.SavedPosition = nil  -- Stores {point, relPoint, x, y} before maximize
 
+-- Elastic row sizing for the Queue/LFG/Waitlist sub-lists of the LFM Browser.
+-- The row pools are created at QUEUE_MAX_ROWS; the number actually shown is
+-- recomputed from each list's elastic content frame height on every refresh,
+-- so the lists fill the panel and never overflow past its bottom edge.
+GUI.QUEUE_MAX_ROWS = 40       -- generous pool size (cap on visible rows)
+GUI.QUEUE_ROW_HEIGHT = 20     -- per-row height (matches ROW_HEIGHT below)
+-- Vertical space above the first data row. The top strip holds the right-aligned
+-- Search/+Add/Invite All cluster (~0..-18); the column-header labels sit on their
+-- OWN row below it (QUEUE_HEADER_Y); data rows start below that. Keeping headers
+-- on a separate row lets the columns span the full width without sliding under
+-- the search cluster.
+GUI.QUEUE_HEADER_Y = -24      -- y of the column-header label row
+GUI.QUEUE_HEADER_INSET = 44   -- space reserved above the first data row
+
+-- Compute how many rows fit in an elastic content frame without overflowing.
+-- Derives height from the passed content frame, which is anchored with both
+-- TOPLEFT and BOTTOMRIGHT (no SetSize), so GetHeight() is reliable. Clamped to
+-- [1, QUEUE_MAX_ROWS] so the last row always fits fully.
+function GUI.QueueVisibleRows(content)
+    local h = (content and content:GetHeight()) or 0
+    local n = math.floor((h - GUI.QUEUE_HEADER_INSET) / GUI.QUEUE_ROW_HEIGHT)
+    if n < 1 then n = 1 end
+    if n > GUI.QUEUE_MAX_ROWS then n = GUI.QUEUE_MAX_ROWS end
+    return n
+end
+
+-- ===========================================================================
+-- Dynamic column layout for the Queue/LFG/Waitlist listings.
+-- Columns are FIXED (leading "#", Time/Added, BL flag, GS) or FLEXIBLE (Player,
+-- Class, Message/Note, Spec, Raid, Role). On resize the flexible columns share
+-- the leftover width by weight, so columns fill a wide panel and shrink on a
+-- narrow one. The action-button group (Inv/Rej/Block/Whisper/W/X/...) is pinned
+-- flush to the right edge. Header labels are re-anchored to match their column.
+-- ===========================================================================
+local QUEUE_COLS = {
+    {field = "numText",   kind = "fixed", w = 20},
+    {field = "nameText",  kind = "flex",  weight = 2.2},
+    {field = "classText", kind = "flex",  weight = 1.3},
+    {field = "msgText",   kind = "flex",  weight = 3.2},
+    {field = "timeText",  kind = "fixed", w = 35},
+    {field = "blText",    kind = "fixed", w = 25},
+}
+local QUEUE_ACTIONS = {
+    {field = "invBtn", w = 28}, {field = "rejBtn", w = 28}, {field = "waitBtn", w = 18},
+    {field = "blBtn", w = 18},  {field = "remBtn", w = 18}, {field = "whisperBtn", w = 22},
+}
+local LFG_COLS = {
+    {field = "numText",  kind = "fixed", w = 20},
+    {field = "nameText", kind = "flex",  weight = 2.0},
+    {field = "specText", kind = "flex",  weight = 2.0},
+    {field = "raidText", kind = "flex",  weight = 2.2},
+    {field = "gsText",   kind = "fixed", w = 45},
+}
+local LFG_ACTIONS = {
+    {field = "invBtn", w = 50}, {field = "whisperBtn", w = 40},
+    {field = "queueBtn", w = 40}, {field = "waitlistBtn", w = 40},
+}
+local WAITLIST_COLS = {
+    {field = "numText",  kind = "fixed", w = 20},
+    {field = "nameText", kind = "flex",  weight = 2.0},
+    {field = "roleText", kind = "flex",  weight = 1.1},
+    {field = "noteText", kind = "flex",  weight = 3.2},
+    {field = "timeText", kind = "fixed", w = 45},
+}
+local WAITLIST_ACTIONS = {
+    {field = "invBtn", w = 35}, {field = "upBtn", w = 22}, {field = "downBtn", w = 22},
+    {field = "remBtn", w = 22}, {field = "whisperBtn", w = 22},
+}
+
+-- Position one list's columns from the elastic content frame's current width.
+-- content      : the elastic *Content frame (reliable GetWidth, never SetSize'd)
+-- rows         : the row pool (each row[field] holds the cell/button)
+-- headerLabels : array of header FontStrings; [#cols+1] is the "Actions" header
+-- cols, actions: the layout spec (see tables above)
+function GUI.ApplyColumnLayout(content, rows, headerLabels, cols, actions)
+    if not content then return end
+    local W = content:GetWidth() or 0
+    if W < 120 then return end  -- too small / not laid out yet
+
+    local LPAD, RPAD, COLGAP, BGAP = 5, 8, 6, 2
+    local nCols = #cols
+
+    -- Width of the right-pinned action-button group (incl. inter-button gaps).
+    local actionTotal = 0
+    for ai = 1, #actions do actionTotal = actionTotal + actions[ai].w end
+    if #actions > 1 then actionTotal = actionTotal + BGAP * (#actions - 1) end
+
+    -- Sum of fixed column widths + total flex weight.
+    local fixedSum, weightSum = 0, 0
+    for ci = 1, nCols do
+        local c = cols[ci]
+        if c.kind == "flex" then
+            weightSum = weightSum + (c.weight or 1)
+        else
+            fixedSum = fixedSum + (c.w or 0)
+        end
+    end
+
+    local reserved = LPAD + RPAD + fixedSum + actionTotal + COLGAP * (nCols + 1)
+    local flexAvail = W - reserved
+    if flexAvail < 0 then flexAvail = 0 end
+    local perUnit = (weightSum > 0) and (flexAvail / weightSum) or 0
+    local MINFLEX = 24
+
+    -- Resolve each column's x position and width left-to-right.
+    local xs, ws = {}, {}
+    local cursor = LPAD
+    for ci = 1, nCols do
+        local c = cols[ci]
+        local cw
+        if c.kind == "flex" then
+            cw = math.floor(perUnit * (c.weight or 1))
+            if cw < MINFLEX then cw = MINFLEX end
+        else
+            cw = c.w or 0
+        end
+        xs[ci] = cursor
+        ws[ci] = cw
+        cursor = cursor + cw + COLGAP
+    end
+
+    -- Action group flush to the right edge.
+    local actionLeft = W - RPAD - actionTotal
+    if actionLeft < cursor then actionLeft = cursor end
+
+    -- Re-anchor the column-header labels to match.
+    if headerLabels then
+        for ci = 1, nCols do
+            local lbl = headerLabels[ci]
+            if lbl then
+                lbl:ClearAllPoints()
+                lbl:SetPoint("TOPLEFT", xs[ci], GUI.QUEUE_HEADER_Y)
+                lbl:SetWidth(ws[ci])
+            end
+        end
+        local actHeader = headerLabels[nCols + 1]
+        if actHeader then
+            actHeader:ClearAllPoints()
+            actHeader:SetPoint("TOPLEFT", actionLeft, GUI.QUEUE_HEADER_Y)
+            actHeader:SetWidth(actionTotal)
+        end
+    end
+
+    -- Re-anchor every row's cells + action buttons.
+    for ri = 1, #rows do
+        local row = rows[ri]
+        if row then
+            row:SetWidth(W - RPAD)  -- explicit width => not stale
+            for ci = 1, nCols do
+                local cell = row[cols[ci].field]
+                if cell then
+                    cell:ClearAllPoints()
+                    cell:SetPoint("LEFT", xs[ci], 0)
+                    cell:SetWidth(ws[ci])
+                end
+            end
+            local bx = actionLeft
+            for ai = 1, #actions do
+                local btn = row[actions[ai].field]
+                if btn then
+                    btn:ClearAllPoints()
+                    btn:SetPoint("LEFT", bx, 0)
+                end
+                bx = bx + actions[ai].w + BGAP
+            end
+        end
+    end
+end
+
+-- Re-flow all three sub-lists' columns from their elastic content widths.
+function GUI.LayoutQueueColumns(container)
+    if not container then return end
+    GUI.ApplyColumnLayout(container.queueContent, container.queueRows or {},
+        container.queueHeaderLabels, QUEUE_COLS, QUEUE_ACTIONS)
+    GUI.ApplyColumnLayout(container.lfgContent, container.lfgRows or {},
+        container.lfgHeaderLabels, LFG_COLS, LFG_ACTIONS)
+    GUI.ApplyColumnLayout(container.waitlistContent, container.waitlistRows or {},
+        container.waitlistHeaderLabels, WAITLIST_COLS, WAITLIST_ACTIONS)
+end
+
+-- Recompute and refresh the elastic Queue/LFG/Waitlist lists (called on
+-- window resize / maximize / restore / minimize-expand): both the column
+-- widths (LayoutQueueColumns) and the visible row count (UpdateQueuePanel).
+function GUI.RefreshQueueLayout()
+    local container = GUI.Frame and GUI.Frame.tabContents and GUI.Frame.tabContents["lfm"]
+    if container then
+        GUI.LayoutQueueColumns(container)
+        GUI.UpdateQueuePanel(container)
+    end
+end
+
 -- LFG Enrollment tracking (other players looking for groups)
 GUI.LfgEnrollments = {}  -- {playerName = {name, class, spec, role, gs, ilvl, raid, time}}
 GUI.MyEnrollment = nil   -- Our own enrollment data
@@ -742,6 +933,8 @@ function GUI.CreateFrame()
         if GUI.CurrentTab and AIP.Panels then
             -- Let child frames handle their own OnSizeChanged
         end
+        -- Recompute elastic Queue/LFG/Waitlist row counts on window resize.
+        GUI.RefreshQueueLayout()
     end)
 
     frame:SetMinResize(GUI.Config.minWidth, GUI.Config.minHeight)
@@ -792,6 +985,13 @@ function GUI.ToggleMinimize()
         if GUI.Frame.minBtn then
             GUI.Frame.minBtn:SetNormalTexture("Interface\\Buttons\\UI-Panel-CollapseButton-Up")
             GUI.Frame.minBtn:SetPushedTexture("Interface\\Buttons\\UI-Panel-CollapseButton-Down")
+        end
+
+        -- Recompute elastic list row counts after expanding back to full size.
+        if AIP.Utils and AIP.Utils.DelayedCall then
+            AIP.Utils.DelayedCall(0.05, GUI.RefreshQueueLayout)
+        else
+            GUI.RefreshQueueLayout()
         end
     end
 end
@@ -849,6 +1049,13 @@ function GUI.ToggleMaximize()
             GUI.Frame.maxBtn:SetNormalTexture("Interface\\Buttons\\UI-Panel-BiggerButton-Up")
             GUI.Frame.maxBtn:SetPushedTexture("Interface\\Buttons\\UI-Panel-BiggerButton-Down")
         end
+    end
+
+    -- Recompute elastic list row counts after the layout settles.
+    if AIP.Utils and AIP.Utils.DelayedCall then
+        AIP.Utils.DelayedCall(0.05, GUI.RefreshQueueLayout)
+    else
+        GUI.RefreshQueueLayout()
     end
 end
 
@@ -1067,6 +1274,7 @@ function GUI.CreateBrowserTab(container, tabType)
     searchLabel:SetText("Search:")
 
     local searchBox = CreateFrame("EditBox", "AIPSearch" .. tabType, treePanel, "InputBoxTemplate")
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(searchBox) end
     searchBox:SetSize(100, 18)
     searchBox:SetPoint("LEFT", searchLabel, "RIGHT", 5, 0)
     searchBox:SetAutoFocus(false)
@@ -1127,15 +1335,19 @@ function GUI.CreateBrowserTab(container, tabType)
         treeFrame = AIP.TreeBrowser.CreateTreeView(treePanel, initialWidth, initialHeight)
         treeFrame:SetPoint("TOPLEFT", 8, -55)
         treeFrame:SetPoint("BOTTOMRIGHT", treePanel, "BOTTOMRIGHT", -8, 60)  -- Anchor to bottom with space for buttons
+        -- Record the anchor insets so UpdateSize can derive the true available
+        -- size from the parent panel. The tree frame's own GetHeight() is
+        -- unreliable -- it carries an explicit SetSize from creation and keeps
+        -- reporting that stale value even though the anchors stretch the frame.
+        treeFrame._heightInset = 55 + 60   -- TOPLEFT y -55, BOTTOMRIGHT y +60
+        treeFrame._widthInset = 8 + 8      -- TOPLEFT x +8, BOTTOMRIGHT x -8
         container.treeView = treeFrame
 
-        -- Hook OnSizeChanged to resize tree view dynamically
-        treePanel:SetScript("OnSizeChanged", function(self, width, height)
-            if treeFrame and treeFrame.UpdateSize then
-                -- Let tree frame use its anchor-based size (TOPLEFT + BOTTOMRIGHT)
-                -- Pass nil to have UpdateSize read dimensions from anchors
-                treeFrame:UpdateSize()
-            end
+        -- Recompute rows when the parent panel resizes. UpdateSize() with no
+        -- args derives the size from the parent (reliable), so a single direct
+        -- call is enough -- no stale GetHeight, no deferral needed.
+        treePanel:SetScript("OnSizeChanged", function(self)
+            if treeFrame and treeFrame.UpdateSize then treeFrame:UpdateSize() end
         end)
 
         -- Also hook OnShow to ensure proper sizing when tab becomes visible
@@ -1613,6 +1825,14 @@ function GUI.CreateBrowserTab(container, tabType)
     GUI.ApplyBackdrop(queuePanel, "SubPanel", 0.95)
     container.queuePanel = queuePanel
 
+    -- Elastic lists: when this panel resizes (window resize / maximize /
+    -- restore / minimize-expand all propagate down to here), recompute how many
+    -- Queue/LFG/Waitlist rows fit and refresh so rows never overflow the panel.
+    queuePanel:SetScript("OnSizeChanged", function()
+        GUI.LayoutQueueColumns(container)
+        GUI.UpdateQueuePanel(container)
+    end)
+
     -- === Queue Panel Sub-Tabs ===
     container.queueSubTab = "queue"  -- "queue" or "lfg"
 
@@ -1700,15 +1920,6 @@ function GUI.CreateBrowserTab(container, tabType)
     lfgTabBtn:SetScript("OnClick", function() SwitchQueueSubTab("lfg") end)
     waitlistTabBtn:SetScript("OnClick", function() SwitchQueueSubTab("waitlist") end)
 
-    -- Invite All button
-    local inviteAllBtn = CreateFrame("Button", nil, queuePanel, "UIPanelButtonTemplate")
-    inviteAllBtn:SetSize(70, 20)
-    inviteAllBtn:SetPoint("TOPRIGHT", -8, -6)
-    inviteAllBtn:SetText("Invite All")
-    inviteAllBtn:SetScript("OnClick", function()
-        if AIP.InviteAllFromQueue then AIP.InviteAllFromQueue() end
-    end)
-
     -- === QUEUE CONTENT (Whisper requests) ===
     local queueContent = CreateFrame("Frame", nil, queuePanel)
     queueContent:SetPoint("TOPLEFT", 5, -30)
@@ -1725,18 +1936,52 @@ function GUI.CreateBrowserTab(container, tabType)
         {text = "BL?", x = 322, width = 25},
         {text = "Actions", x = 350, width = 140},
     }
-    for _, h in ipairs(qHeaders) do
+    container.queueHeaderLabels = {}
+    for idx, h in ipairs(qHeaders) do
         local label = queueContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        label:SetPoint("TOPLEFT", h.x, 0)
+        label:SetPoint("TOPLEFT", h.x, GUI.QUEUE_HEADER_Y)
         label:SetWidth(h.width)
         label:SetText(h.text)
         label:SetTextColor(0.8, 0.8, 0.8)
+        container.queueHeaderLabels[idx] = label
     end
+
+    -- Header control cluster (right-aligned, single row, chained left-to-right):
+    -- [Search: label] [search box] [+ Add] [Invite All]. All parented to
+    -- queueContent so they track the same right edge as the data area.
+
+    -- Invite All button (rightmost)
+    local inviteAllBtn = CreateFrame("Button", nil, queueContent, "UIPanelButtonTemplate")
+    inviteAllBtn:SetSize(70, 18)
+    inviteAllBtn:SetPoint("TOPRIGHT", -5, 0)
+    inviteAllBtn:SetText("Invite All")
+    inviteAllBtn:SetScript("OnClick", function()
+        if AIP.InviteAllFromQueue then AIP.InviteAllFromQueue() end
+    end)
+    container.inviteAllBtn = inviteAllBtn
+
+    -- Add Player button for queue
+    local addQueueBtn = CreateFrame("Button", nil, queueContent, "UIPanelButtonTemplate")
+    addQueueBtn:SetSize(70, 18)
+    addQueueBtn:SetPoint("RIGHT", inviteAllBtn, "LEFT", -5, 0)
+    addQueueBtn:SetText("+ Add")
+    addQueueBtn:SetScript("OnClick", function()
+        GUI.ShowAddToQueuePopup()
+    end)
+    addQueueBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Add Player to Queue")
+        GameTooltip:AddLine("Manually add a player by name", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    addQueueBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    container.addQueueBtn = addQueueBtn
 
     -- Search box for queue
     local queueSearchBox = CreateFrame("EditBox", "AIPQueueSearch", queueContent, "InputBoxTemplate")
-    queueSearchBox:SetSize(80, 16)
-    queueSearchBox:SetPoint("TOPRIGHT", -80, 0)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(queueSearchBox) end
+    queueSearchBox:SetSize(100, 16)
+    queueSearchBox:SetPoint("RIGHT", addQueueBtn, "LEFT", -12, 0)
     queueSearchBox:SetAutoFocus(false)
     queueSearchBox:SetScript("OnTextChanged", function(self)
         container.queueSearchFilter = self:GetText():lower()
@@ -1756,31 +2001,22 @@ function GUI.CreateBrowserTab(container, tabType)
     container.queueSearchBox = queueSearchBox
     container.queueSearchFilter = ""
 
-    -- Add Player button for queue
-    local addQueueBtn = CreateFrame("Button", nil, queueContent, "UIPanelButtonTemplate")
-    addQueueBtn:SetSize(70, 18)
-    addQueueBtn:SetPoint("TOPRIGHT", -5, 2)
-    addQueueBtn:SetText("+ Add")
-    addQueueBtn:SetScript("OnClick", function()
-        GUI.ShowAddToQueuePopup()
-    end)
-    addQueueBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Add Player to Queue")
-        GameTooltip:AddLine("Manually add a player by name", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    addQueueBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    container.addQueueBtn = addQueueBtn
+    -- "Search:" label (leftmost in the cluster)
+    local queueSearchLabel = queueContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    queueSearchLabel:SetPoint("RIGHT", queueSearchBox, "LEFT", -8, 0)
+    queueSearchLabel:SetText("Search:")
+    queueSearchLabel:SetTextColor(0.8, 0.8, 0.8)
 
     -- Queue rows (whisper requests)
+    -- Pool is created at QUEUE_MAX_ROWS; how many actually render is computed
+    -- elastically from the content frame height (see GUI.QueueVisibleRows).
     container.queueRows = {}
-    local ROW_HEIGHT = 20
-    local NUM_ROWS = 5
+    local ROW_HEIGHT = GUI.QUEUE_ROW_HEIGHT
+    local NUM_ROWS = GUI.QUEUE_MAX_ROWS
     for i = 1, NUM_ROWS do
         local row = CreateFrame("Frame", nil, queueContent)
         row:SetSize(500, ROW_HEIGHT)
-        row:SetPoint("TOPLEFT", 0, -18 - ((i - 1) * ROW_HEIGHT))
+        row:SetPoint("TOPLEFT", 0, -GUI.QUEUE_HEADER_INSET - ((i - 1) * ROW_HEIGHT))
         row.numText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         row.numText:SetPoint("LEFT", 5, 0)
         row.numText:SetWidth(20)
@@ -2013,17 +2249,23 @@ function GUI.CreateBrowserTab(container, tabType)
         {text = "GS", x = 265, width = 50},
         {text = "Actions", x = 320, width = 180},
     }
-    for _, h in ipairs(lfgHeaders) do
+    container.lfgHeaderLabels = {}
+    for idx, h in ipairs(lfgHeaders) do
         local label = lfgContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        label:SetPoint("TOPLEFT", h.x, 0)
+        label:SetPoint("TOPLEFT", h.x, GUI.QUEUE_HEADER_Y)
         label:SetWidth(h.width)
         label:SetText(h.text)
         label:SetTextColor(0.8, 0.8, 0.8)
+        container.lfgHeaderLabels[idx] = label
     end
 
-    -- Search box for LFG
+    -- Header control cluster (right-aligned, single row): [Search: label]
+    -- [search box]. LFG has no +Add or Invite All. Parented to lfgContent.
+
+    -- Search box for LFG (rightmost)
     local lfgSearchBox = CreateFrame("EditBox", "AIPLfgSearch", lfgContent, "InputBoxTemplate")
-    lfgSearchBox:SetSize(80, 16)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(lfgSearchBox) end
+    lfgSearchBox:SetSize(100, 16)
     lfgSearchBox:SetPoint("TOPRIGHT", -5, 0)
     lfgSearchBox:SetAutoFocus(false)
     lfgSearchBox:SetScript("OnTextChanged", function(self)
@@ -2044,12 +2286,18 @@ function GUI.CreateBrowserTab(container, tabType)
     container.lfgSearchBox = lfgSearchBox
     container.lfgSearchFilter = ""
 
+    -- "Search:" label (leftmost in the cluster)
+    local lfgSearchLabel = lfgContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lfgSearchLabel:SetPoint("RIGHT", lfgSearchBox, "LEFT", -8, 0)
+    lfgSearchLabel:SetText("Search:")
+    lfgSearchLabel:SetTextColor(0.8, 0.8, 0.8)
+
     -- LFG rows (enrollment broadcasts)
     container.lfgRows = {}
     for i = 1, NUM_ROWS do
         local row = CreateFrame("Frame", nil, lfgContent)
         row:SetSize(500, ROW_HEIGHT)
-        row:SetPoint("TOPLEFT", 0, -18 - ((i - 1) * ROW_HEIGHT))
+        row:SetPoint("TOPLEFT", 0, -GUI.QUEUE_HEADER_INSET - ((i - 1) * ROW_HEIGHT))
         row.numText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         row.numText:SetPoint("LEFT", 5, 0)
         row.numText:SetWidth(20)
@@ -2283,18 +2531,42 @@ function GUI.CreateBrowserTab(container, tabType)
         {text = "Added", x = 305, width = 50},
         {text = "Actions", x = 360, width = 100},
     }
-    for _, h in ipairs(wlHeaders) do
+    container.waitlistHeaderLabels = {}
+    for idx, h in ipairs(wlHeaders) do
         local label = waitlistContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        label:SetPoint("TOPLEFT", h.x, 0)
+        label:SetPoint("TOPLEFT", h.x, GUI.QUEUE_HEADER_Y)
         label:SetWidth(h.width)
         label:SetText(h.text)
         label:SetTextColor(0.8, 0.8, 0.8)
+        container.waitlistHeaderLabels[idx] = label
     end
+
+    -- Header control cluster (right-aligned, single row, chained):
+    -- [Search: label] [search box] [+ Add]. Waitlist has no Invite All.
+    -- Parented to waitlistContent so they track the data area's right edge.
+
+    -- Add Player button for waitlist (rightmost)
+    local addWaitlistBtn = CreateFrame("Button", nil, waitlistContent, "UIPanelButtonTemplate")
+    addWaitlistBtn:SetSize(70, 18)
+    addWaitlistBtn:SetPoint("TOPRIGHT", -5, 0)
+    addWaitlistBtn:SetText("+ Add")
+    addWaitlistBtn:SetScript("OnClick", function()
+        GUI.ShowAddToWaitlistPopup()
+    end)
+    addWaitlistBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Add Player to Waitlist")
+        GameTooltip:AddLine("Manually add a player with role and note", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    addWaitlistBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    container.addWaitlistBtn = addWaitlistBtn
 
     -- Search box for waitlist
     local waitlistSearchBox = CreateFrame("EditBox", "AIPWaitlistSearch", waitlistContent, "InputBoxTemplate")
-    waitlistSearchBox:SetSize(80, 16)
-    waitlistSearchBox:SetPoint("TOPRIGHT", -80, 0)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(waitlistSearchBox) end
+    waitlistSearchBox:SetSize(100, 16)
+    waitlistSearchBox:SetPoint("RIGHT", addWaitlistBtn, "LEFT", -12, 0)
     waitlistSearchBox:SetAutoFocus(false)
     waitlistSearchBox:SetScript("OnTextChanged", function(self)
         container.waitlistSearchFilter = self:GetText():lower()
@@ -2314,29 +2586,18 @@ function GUI.CreateBrowserTab(container, tabType)
     container.waitlistSearchBox = waitlistSearchBox
     container.waitlistSearchFilter = ""
 
-    -- Add Player button for waitlist
-    local addWaitlistBtn = CreateFrame("Button", nil, waitlistContent, "UIPanelButtonTemplate")
-    addWaitlistBtn:SetSize(70, 18)
-    addWaitlistBtn:SetPoint("TOPRIGHT", -5, 2)
-    addWaitlistBtn:SetText("+ Add")
-    addWaitlistBtn:SetScript("OnClick", function()
-        GUI.ShowAddToWaitlistPopup()
-    end)
-    addWaitlistBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Add Player to Waitlist")
-        GameTooltip:AddLine("Manually add a player with role and note", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    addWaitlistBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    container.addWaitlistBtn = addWaitlistBtn
+    -- "Search:" label (leftmost in the cluster)
+    local waitlistSearchLabel = waitlistContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    waitlistSearchLabel:SetPoint("RIGHT", waitlistSearchBox, "LEFT", -8, 0)
+    waitlistSearchLabel:SetText("Search:")
+    waitlistSearchLabel:SetTextColor(0.8, 0.8, 0.8)
 
     -- Waitlist rows
     container.waitlistRows = {}
     for i = 1, NUM_ROWS do
         local row = CreateFrame("Frame", nil, waitlistContent)
         row:SetSize(480, ROW_HEIGHT)
-        row:SetPoint("TOPLEFT", 0, -18 - ((i - 1) * ROW_HEIGHT))
+        row:SetPoint("TOPLEFT", 0, -GUI.QUEUE_HEADER_INSET - ((i - 1) * ROW_HEIGHT))
         row.numText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         row.numText:SetPoint("LEFT", 5, 0)
         row.numText:SetWidth(20)
@@ -2544,10 +2805,9 @@ function GUI.CreateBrowserTab(container, tabType)
             end
             -- Update time displays for waitlist rows
             if container.waitlistRows then
-                local entries = AIP.db and AIP.db.waitlist or {}
                 for i, row in ipairs(container.waitlistRows) do
-                    if row:IsShown() and row.timeText and entries[i] and entries[i].addedTime then
-                        local elapsed = time() - entries[i].addedTime
+                    if row:IsShown() and row.timeText and row.entryData and row.entryData.addedTime then
+                        local elapsed = time() - row.entryData.addedTime
                         local timeStr
                         if elapsed < 60 then
                             timeStr = elapsed .. "s"
@@ -2639,6 +2899,14 @@ function GUI.CreateBrowserTab(container, tabType)
     container.refreshLfgBtn = refreshLfgBtn
 
     -- Waitlist is now a tab, so button removed
+
+    -- Initial column layout. Deferred so the content frames have their real
+    -- (anchor-derived) width before we measure it; also covers the case where
+    -- the panel is created while hidden.
+    GUI.LayoutQueueColumns(container)
+    if AIP.Utils and AIP.Utils.DelayedCall then
+        AIP.Utils.DelayedCall(0.1, function() GUI.LayoutQueueColumns(container) end)
+    end
 end
 
 -- Create inspection panel content
@@ -3068,10 +3336,21 @@ function GUI.CreateCompositionTab(container)
     GUI.ApplyBackdrop(buffFrame, "Inset", 0.4)
     container.buffFrame = buffFrame
 
-    -- Create buff display rows (icon + status + name + provider count)
+    -- Create buff display rows (icon + status + name + provider count).
+    -- Pre-create a generous pool; the number shown adapts to the frame height,
+    -- and wheel paging reaches categories with more buffs than fit.
     container.buffRows = {}
-    local NUM_BUFF_ROWS = 10
+    container.buffOffset = 0
+    local NUM_BUFF_ROWS = 20
     local BUFF_ROW_HEIGHT = 16
+    buffFrame:EnableMouseWheel(true)
+    buffFrame:SetScript("OnMouseWheel", function(_, delta)
+        container.buffOffset = (container.buffOffset or 0) - delta
+        GUI.UpdateCompositionBuffDisplay(container)
+    end)
+    buffFrame:SetScript("OnSizeChanged", function()
+        GUI.UpdateCompositionBuffDisplay(container)
+    end)
     for i = 1, NUM_BUFF_ROWS do
         local row = CreateFrame("Frame", nil, buffFrame)
         row:SetSize(296, BUFF_ROW_HEIGHT)  -- Increased from 268
@@ -3777,9 +4056,27 @@ function GUI.UpdateCompositionBuffDisplay(container)
 
     if not catData or not catData.buffs then return end
 
+    -- Show as many rows as fit the frame height (capped by the pool), and page
+    -- the rest with the mouse wheel via container.buffOffset.
+    local buffs = catData.buffs
+    local total = #buffs
+    local visible = #container.buffRows
+    if container.buffFrame then
+        local h = container.buffFrame:GetHeight()
+        if h and h > 0 then visible = math.floor((h - 2) / 16) end
+    end
+    if visible < 1 then visible = 1 end
+    if visible > #container.buffRows then visible = #container.buffRows end
+    local maxOff = math.max(0, total - visible)
+    local off = container.buffOffset or 0
+    if off > maxOff then off = maxOff end
+    if off < 0 then off = 0 end
+    container.buffOffset = off
+
     local rowIndex = 1
-    for _, buffData in ipairs(catData.buffs) do
-        if rowIndex > #container.buffRows then break end
+    for srcIndex = off + 1, total do
+        if rowIndex > visible then break end
+        local buffData = buffs[srcIndex]
 
         local row = container.buffRows[rowIndex]
         row.buffData = buffData
@@ -4179,6 +4476,23 @@ end
 function GUI.UpdateQueuePanel(container)
     if not container then return end
 
+    -- One-time mouse-wheel paging for the Queue/LFG/Waitlist lists. Each list
+    -- shows a fixed number of rows; wheel scrolling reaches entries beyond the
+    -- visible rows (previously anything past row 5 was unreachable).
+    local function HookWheel(frame, offsetKey)
+        if frame and not frame._wheelHooked then
+            frame._wheelHooked = true
+            frame:EnableMouseWheel(true)
+            frame:SetScript("OnMouseWheel", function(_, delta)
+                container[offsetKey] = (container[offsetKey] or 0) - delta
+                GUI.UpdateQueuePanel(container)
+            end)
+        end
+    end
+    HookWheel(container.queueContent, "queueOffset")
+    HookWheel(container.lfgContent, "lfgOffset")
+    HookWheel(container.waitlistContent, "waitlistOffset")
+
     -- Refresh saved instances for lockout checks
     if AIP.TreeBrowser and AIP.TreeBrowser.UpdateSavedInstances then
         AIP.TreeBrowser.UpdateSavedInstances()
@@ -4256,18 +4570,23 @@ function GUI.UpdateQueuePanel(container)
 
     -- Update Queue rows (whisper requests)
     if container.queueRows then
-        for i = 1, #container.queueRows do
+        local numRows = #container.queueRows
+        local vis = GUI.QueueVisibleRows(container.queueContent)
+        local qOff = math.min(math.max(0, container.queueOffset or 0), math.max(0, #queueEntries - vis))
+        container.queueOffset = qOff
+        for i = 1, numRows do
             local row = container.queueRows[i]
-            local entry = queueEntries[i]
+            local dataIdx = qOff + i
+            local entry = queueEntries[dataIdx]
 
-            row.invBtn.index = i
-            row.rejBtn.index = i
-            row.waitBtn.index = i
-            row.blBtn.index = i
-            if row.remBtn then row.remBtn.index = i end
+            row.invBtn.index = dataIdx
+            row.rejBtn.index = dataIdx
+            row.waitBtn.index = dataIdx
+            row.blBtn.index = dataIdx
+            if row.remBtn then row.remBtn.index = dataIdx end
 
-            if entry then
-                row.numText:SetText(i)
+            if entry and i <= vis then
+                row.numText:SetText(dataIdx)
 
                 -- Time since added (seconds display)
                 if row.timeText and entry.time then
@@ -4368,17 +4687,22 @@ function GUI.UpdateQueuePanel(container)
     -- Update LFG rows (enrollment broadcasts)
     container.lfgData = lfgEntries  -- Store for button callbacks
     if container.lfgRows then
-        for i = 1, #container.lfgRows do
+        local numRows = #container.lfgRows
+        local vis = GUI.QueueVisibleRows(container.lfgContent)
+        local lOff = math.min(math.max(0, container.lfgOffset or 0), math.max(0, #lfgEntries - vis))
+        container.lfgOffset = lOff
+        for i = 1, numRows do
             local row = container.lfgRows[i]
-            local entry = lfgEntries[i]
+            local dataIdx = lOff + i
+            local entry = lfgEntries[dataIdx]
 
-            row.invBtn.index = i
-            row.whisperBtn.index = i
-            row.queueBtn.index = i
-            row.waitlistBtn.index = i
+            row.invBtn.index = dataIdx
+            row.whisperBtn.index = dataIdx
+            row.queueBtn.index = dataIdx
+            row.waitlistBtn.index = dataIdx
 
-            if entry then
-                row.numText:SetText(i)
+            if entry and i <= vis then
+                row.numText:SetText(dataIdx)
 
                 local class = entry.class or "UNKNOWN"
                 local classColor = RAID_CLASS_COLORS and RAID_CLASS_COLORS[class:upper()]
@@ -4475,11 +4799,16 @@ function GUI.UpdateQueuePanel(container)
     end
 
     if container.waitlistRows then
-        for i = 1, #container.waitlistRows do
+        local numRows = #container.waitlistRows
+        local vis = GUI.QueueVisibleRows(container.waitlistContent)
+        local wOff = math.min(math.max(0, container.waitlistOffset or 0), math.max(0, #waitlistEntries - vis))
+        container.waitlistOffset = wOff
+        for i = 1, numRows do
             local row = container.waitlistRows[i]
-            local wlEntry = waitlistEntries[i]
+            local wlEntry = waitlistEntries[wOff + i]
             local entry = wlEntry and wlEntry.entry or nil
-            local origIndex = wlEntry and wlEntry.origIndex or i
+            local origIndex = wlEntry and wlEntry.origIndex or (wOff + i)
+            row.entryData = entry
 
             row.invBtn.index = origIndex
             row.upBtn.index = origIndex
@@ -4487,7 +4816,7 @@ function GUI.UpdateQueuePanel(container)
             row.remBtn.index = origIndex
             if row.whisperBtn then row.whisperBtn.index = origIndex end
 
-            if entry then
+            if entry and i <= vis then
                 row.numText:SetText(origIndex)
                 row.nameText:SetText(entry.name or "-")
 
@@ -6759,7 +7088,7 @@ function GUI.DetectPlayerRole()
         WARRIOR = {["Protection"] = "TANK", ["Arms"] = "DPS", ["Fury"] = "DPS"},
         PALADIN = {["Protection"] = "TANK", ["Holy"] = "HEALER", ["Retribution"] = "DPS"},
         DEATHKNIGHT = {["Blood"] = "TANK", ["Frost"] = "DPS", ["Unholy"] = "DPS"},
-        DRUID = {["Feral Combat"] = "TANK", ["Restoration"] = "HEALER", ["Balance"] = "DPS"},
+        DRUID = {["Feral Combat"] = "DPS", ["Restoration"] = "HEALER", ["Balance"] = "DPS"},  -- Feral tab is both cat (DPS) & bear; default to the common case (DPS)
         PRIEST = {["Holy"] = "HEALER", ["Discipline"] = "HEALER", ["Shadow"] = "DPS"},
         SHAMAN = {["Restoration"] = "HEALER", ["Elemental"] = "DPS", ["Enhancement"] = "DPS"},
         MAGE = "DPS",

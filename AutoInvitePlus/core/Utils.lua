@@ -23,6 +23,102 @@ if not string.trim then
 end
 
 -- ============================================================================
+-- PERSISTENT DEBUG LOG
+-- Stored inside AutoInvitePlusDB.debugLog (AutoInvitePlusDB is an already-
+-- registered SavedVariable, so this persists reliably without needing a new
+-- SavedVariable declaration / client restart). WoW flushes it to
+-- WTF/Account/<acct>/SavedVariables/AutoInvitePlus.lua on /reload or logout.
+-- Use /aip log clear to reset.
+-- ============================================================================
+local LOG_MAX = 4000
+
+function AIP.Log(msg)
+    if type(AutoInvitePlusDB) ~= "table" then return end  -- DB not loaded yet
+    if not AutoInvitePlusDB.debugLogging then return end   -- gated by Settings toggle
+    local log = AutoInvitePlusDB.debugLog
+    if type(log) ~= "table" then
+        log = {}
+        AutoInvitePlusDB.debugLog = log
+    end
+    log[#log + 1] = date("%H:%M:%S") .. "  " .. tostring(msg)
+    if #log > LOG_MAX then
+        -- Drop the oldest chunk to keep the saved table bounded
+        local keep = LOG_MAX - 1000
+        local startIdx = #log - keep + 1
+        local t = {}
+        for i = startIdx, #log do t[#t + 1] = log[i] end
+        AutoInvitePlusDB.debugLog = t
+    end
+end
+
+-- Capture Lua errors into the log (chained to the existing handler)
+local _aipOrigErrorHandler = geterrorhandler and geterrorhandler()
+if seterrorhandler and _aipOrigErrorHandler then
+    seterrorhandler(function(err)
+        AIP.Log("[LUA ERROR] " .. tostring(err))
+        return _aipOrigErrorHandler(err)
+    end)
+end
+
+-- ============================================================================
+-- AUTO-INSTRUMENTATION
+-- Wraps every function on a namespace table with an entry log, so each call is
+-- recorded in the debug log. Applied to all module namespaces when debug
+-- logging is enabled (see Core ADDON_LOADED). Off by default = zero overhead.
+-- ============================================================================
+
+-- Names never wrapped (would recurse or spam): the logging primitives.
+local NO_INSTRUMENT = {
+    Log = true, Debug = true, Print = true,
+    InstrumentNamespace = true, InstrumentAll = true,
+}
+local _instrumented = {}  -- label -> true (kept out of the namespaces themselves)
+
+function AIP.InstrumentNamespace(tbl, name)
+    if type(tbl) ~= "table" then return 0 end
+    -- Collect keys first (mutating a table during pairs() is unsafe in 5.1)
+    local keys = {}
+    for k, v in pairs(tbl) do
+        if type(v) == "function" and type(k) == "string"
+           and not NO_INSTRUMENT[k] and not _instrumented[name .. "." .. k] then
+            keys[#keys + 1] = k
+        end
+    end
+    for _, k in ipairs(keys) do
+        local orig = tbl[k]
+        local label = name .. "." .. k
+        tbl[k] = function(...)
+            if AIP.Log then AIP.Log("[CALL] " .. label) end
+            return orig(...)
+        end
+        _instrumented[label] = true  -- guard against double-wrapping
+    end
+    return #keys
+end
+
+-- Wrap all public functions across every module namespace.
+function AIP.InstrumentAll()
+    local namespaces = {
+        AIP = AIP, Utils = AIP.Utils, Parsers = AIP.Parsers, DataBus = AIP.DataBus,
+        ChatScanner = AIP.ChatScanner, InspectionEngine = AIP.InspectionEngine,
+        Composition = AIP.Composition, Roster = AIP.Roster, RaidSession = AIP.RaidSession,
+        Integrations = AIP.Integrations, MessageComposer = AIP.MessageComposer, RaidTools = AIP.RaidTools,
+        GroupTracker = AIP.GroupTracker, LFMBrowser = AIP.LFMBrowser, TestData = AIP.TestData,
+        CentralGUI = AIP.CentralGUI, TreeBrowser = AIP.TreeBrowser, UI = AIP.UI,
+    }
+    local total = 0
+    for name, t in pairs(namespaces) do
+        total = total + AIP.InstrumentNamespace(t, name)
+    end
+    if AIP.Panels then
+        for pname, ptbl in pairs(AIP.Panels) do
+            total = total + AIP.InstrumentNamespace(ptbl, "Panels." .. tostring(pname))
+        end
+    end
+    AIP.Log("[INSTRUMENT] wrapped " .. total .. " functions")
+end
+
+-- ============================================================================
 -- STRING UTILITIES
 -- ============================================================================
 
@@ -449,21 +545,55 @@ end
 -- DELAYED CALL (WotLK compatible timer)
 -- ============================================================================
 
+-- Frame pool for one-shot delayed calls. Frames can never be garbage-collected
+-- in WoW, so creating one per call (as the old implementation did) leaks frames
+-- for the whole session. We recycle inert frames instead.
+Utils.delayedCallPool = Utils.delayedCallPool or {}
+
+-- Single shared OnUpdate handler so we don't allocate a closure per call.
+local function delayedCallOnUpdate(self, elapsed)
+    self.elapsed = self.elapsed + elapsed
+    if self.elapsed >= self.delay then
+        self:SetScript("OnUpdate", nil)
+        -- Capture and clear state before running, so the callback may safely
+        -- schedule another DelayedCall (which could reuse a pooled frame).
+        local fn, args, argCount = self.fn, self.args, self.argCount
+        self.fn, self.args, self.argCount = nil, nil, nil
+        if args then
+            Utils.SafeCall(fn, unpack(args, 1, argCount))
+        else
+            Utils.SafeCall(fn)
+        end
+        local pool = Utils.delayedCallPool
+        pool[#pool + 1] = self
+    end
+end
+
 -- Call function after delay (in seconds)
 function Utils.DelayedCall(delay, fn, ...)
     if not fn then return end
 
-    local args = {...}
-    local frame = CreateFrame("Frame")
-    frame.elapsed = 0
+    local pool = Utils.delayedCallPool
+    local frame = table.remove(pool)
+    if not frame then
+        frame = CreateFrame("Frame")
+    end
 
-    frame:SetScript("OnUpdate", function(self, elapsed)
-        self.elapsed = self.elapsed + elapsed
-        if self.elapsed >= delay then
-            self:SetScript("OnUpdate", nil)
-            Utils.SafeCall(fn, unpack(args))
-        end
-    end)
+    frame.elapsed = 0
+    frame.delay = delay
+    frame.fn = fn
+    -- Only allocate an args table when extra arguments were actually passed
+    -- (the vast majority of callers pass a zero-arg closure).
+    local argCount = select("#", ...)
+    if argCount > 0 then
+        frame.args = {...}
+        frame.argCount = argCount
+    else
+        frame.args = nil
+        frame.argCount = nil
+    end
+
+    frame:SetScript("OnUpdate", delayedCallOnUpdate)
 
     return frame  -- Return frame so caller can cancel if needed
 end

@@ -137,7 +137,7 @@ function TD.GenerateLFMGroups(count)
 
     for i = 1, count do
         local raid = RandomElement(RAIDS)
-        local leader = TEST_NAMES[i] .. "Leader"
+        local leader = TEST_NAMES[((i - 1) % #TEST_NAMES) + 1] .. "Leader" .. i
         local gsMin = math.random(5200, 6000)
         local tanksNeeded = raid.size == 25 and math.random(2, 3) or math.random(1, 2)
         local healersNeeded = raid.size == 25 and math.random(5, 7) or math.random(2, 3)
@@ -213,62 +213,66 @@ function TD.GenerateRaidSessions(count)
         local sessionTime = time() - (i * 86400) - math.random(0, 43200)  -- Days ago
         local duration = math.random(7200, 14400)  -- 2-4 hours
 
-        -- Generate attendees
+        -- Attendees: array of {name, joinTime, leaveTime} (matches RaidSessionManager)
         local attendees = {}
+        local attendeeNames = {}
         local numAttendees = math.random(math.floor(raid.size * 0.8), raid.size)
         for j = 1, numAttendees do
             local player = GenerateRandomPlayer(j)
-            attendees[player.name] = {
-                class = player.class,
-                spec = player.spec,
-                role = player.role,
-                gs = player.gs,
+            attendeeNames[j] = player.name
+            table.insert(attendees, {
+                name = player.name,
                 joinTime = sessionTime + math.random(0, 600),
-                leftTime = sessionTime + duration - math.random(0, 600),
-            }
+                leaveTime = nil,
+            })
         end
 
-        -- Generate boss kills
-        local bossKills = {}
+        -- Bosses: array of {id, name, killTime, attendees=[names]}; loot is at session level
+        local bosses = {}
+        local loot = {}
         local bossPrefix = raid.key:match("^(%u+)")
         local bossList = BOSS_NAMES[bossPrefix] or BOSS_NAMES.ICC
         local numBosses = math.random(math.floor(#bossList * 0.5), #bossList)
 
-        for j = 1, numBosses do
-            local bossName = bossList[j]
-            local killTime = sessionTime + (j * math.floor(duration / numBosses))
+        for b = 1, numBosses do
+            local bossName = bossList[b]
+            local killTime = sessionTime + (b * math.floor(duration / numBosses))
 
-            -- Generate loot drops
-            local lootDrops = {}
-            local numDrops = math.random(2, 4)
+            table.insert(bosses, {
+                id = b,
+                name = bossName,
+                killTime = killTime,
+                attendees = attendeeNames,  -- array of name strings
+            })
+
+            -- Loot drops for this boss (session.loot array, with bossId link)
+            local numDrops = math.random(1, 3)
             for k = 1, numDrops do
                 local item = RandomElement(LOOT_ITEMS)
-                local winner = RandomElement(TEST_NAMES) .. tostring(math.random(1, 10))
-                table.insert(lootDrops, {
+                local winner = RandomElement(TEST_NAMES) .. tostring(math.random(1, 99))
+                table.insert(loot, {
                     itemId = item.id,
                     itemName = item.name,
                     itemLink = "|cffff8000|Hitem:" .. item.id .. "::::::::80:::::|h[" .. item.name .. "]|h|r",
+                    itemQuality = 4,
+                    itemLevel = math.random(245, 284),
+                    bossId = b,
                     winner = winner,
-                    rollType = RandomElement({"MS", "OS", "GREED"}),
-                    time = killTime + math.random(10, 60),
+                    source = bossName,
+                    timestamp = killTime + math.random(10, 60),
                 })
             end
-
-            table.insert(bossKills, {
-                bossName = bossName,
-                killTime = killTime,
-                loot = lootDrops,
-            })
         end
 
         local session = {
-            id = "test_session_" .. i,
-            raid = raid.key,
-            raidName = raid.name,
+            id = 900000 + i,  -- high id, won't collide with real (incrementing) session ids
+            zone = raid.name,
+            mode = (raid.key:find("H") and (raid.size .. " Heroic")) or (raid.size .. " Normal"),
             startTime = sessionTime,
             endTime = sessionTime + duration,
+            bosses = bosses,
             attendees = attendees,
-            bossKills = bossKills,
+            loot = loot,
             _testData = true,
         }
 
@@ -286,7 +290,7 @@ function TD.GenerateLootBans(count)
     local bossDropTypes = {"All Loot", "Tokens", "Weapons", "Trinkets"}
 
     for i = 1, count do
-        local player = TEST_NAMES[i] .. "Banned"
+        local player = TEST_NAMES[((i - 1) % #TEST_NAMES) + 1] .. "Banned" .. i
         local boss = bossList[((i - 1) % #bossList) + 1]
         local dropType = bossDropTypes[((i - 1) % #bossDropTypes) + 1]
 
@@ -317,7 +321,7 @@ function TD.GenerateBlacklist(count)
     }
 
     for i = 1, count do
-        local player = TEST_NAMES[#TEST_NAMES - i + 1] .. "Blocked"
+        local player = TEST_NAMES[((i - 1) % #TEST_NAMES) + 1] .. "Blocked" .. i
 
         table.insert(AIP.db.blacklist, {
             name = player,
@@ -333,7 +337,10 @@ end
 function TD.GenerateFavorites(count)
     count = count or 5
     AIP.db = AIP.db or {}
-    AIP.db.favorites = AIP.db.favorites or {}
+    -- Favorites live in `whitelist`, keyed by lowercase name (see Core.AddToFavorites
+    -- and FavoritesPanel). Writing to a separate `favorites` array meant test
+    -- favorites never appeared in the UI.
+    AIP.db.whitelist = AIP.db.whitelist or {}
 
     local notes = {
         "Great tank, very skilled",
@@ -346,14 +353,155 @@ function TD.GenerateFavorites(count)
     for i = 1, count do
         local player = GenerateRandomPlayer(20 + i)
 
-        table.insert(AIP.db.favorites, {
+        AIP.db.whitelist[player.name:lower()] = {
             name = player.name,
             class = player.class,
             note = notes[((i - 1) % #notes) + 1],
             gs = player.gs,
-            timestamp = time() - math.random(0, 2592000),
+            source = "manual",
+            addedTime = time() - math.random(0, 2592000),
+            _testData = true,
+        }
+    end
+end
+
+-- Generate test queue entries (LFM Browser > Queue sub-tab)
+function TD.GenerateQueue(count)
+    count = count or 30
+    AIP.db = AIP.db or {}
+    AIP.db.queue = AIP.db.queue or {}
+    for i = 1, count do
+        local p = GenerateRandomPlayer(i)
+        table.insert(AIP.db.queue, {
+            name = p.name,
+            class = p.class,
+            spec = p.spec,
+            role = p.role,
+            gs = p.gs,
+            ilvl = p.ilvl,
+            message = "inv " .. p.role .. " " .. p.gs .. "gs",
+            time = time() - math.random(0, 1800),
+            isLfgEnrollment = false,
             _testData = true,
         })
+    end
+end
+
+-- Generate test waitlist entries (LFM Browser > Waitlist sub-tab)
+function TD.GenerateWaitlist(count)
+    count = count or 30
+    AIP.db = AIP.db or {}
+    AIP.db.waitlist = AIP.db.waitlist or {}
+    for i = 1, count do
+        local p = GenerateRandomPlayer(i + 400)
+        table.insert(AIP.db.waitlist, {
+            name = p.name,
+            class = p.class,
+            role = p.role,
+            gs = p.gs,
+            addedTime = time() - math.random(0, 3600),
+            priority = #AIP.db.waitlist + 1,
+            note = "Test waitlist",
+            _testData = true,
+        })
+    end
+end
+
+-- Generate Raid Mgmt extras: reserved items + MS/OS tracking
+-- (reservedItems is a single string; the original is backed up in LoadTestData
+--  and restored by ClearTestData. MS/OS entries are keyed and marked _testData.)
+function TD.GenerateRaidMgmt(count)
+    count = count or 30
+    AIP.db = AIP.db or {}
+
+    AIP.db.reservedItems = "Shadowmourne\nInvincible's Reins\nDeathbringer's Will\nHeroic Trinket\nFragment of Val'anyr"
+
+    AIP.db.msTracking = AIP.db.msTracking or {}
+    for i = 1, count do
+        local p = GenerateRandomPlayer(i + 800)
+        local specs = CLASS_SPECS[p.class] or {p.spec}
+        AIP.db.msTracking[p.name] = {
+            ms = p.spec,
+            os = specs[(i % #specs) + 1],
+            _testData = true,
+        }
+    end
+end
+
+-- Generate test data for the Loot Roll window (RaidTools):
+-- a live "current" raid session with fresh, rollable loot (some near expiry so
+-- the expiration warnings show), a couple of manual items, and a sample set of
+-- captured rolls so the Rolls / winners column is populated.
+function TD.GenerateRollData()
+    AIP.db = AIP.db or {}
+    AIP.db.raidSessions = AIP.db.raidSessions or {}
+
+    local now = time()
+
+    -- Roster snapshot
+    local attendees, names = {}, {}
+    for j = 1, 25 do
+        local p = GenerateRandomPlayer(j)
+        names[j] = p.name
+        table.insert(attendees, { name = p.name, joinTime = now - 3600, leaveTime = nil })
+    end
+
+    local bosses = {
+        { id = 1, name = "Lord Marrowgar",   killTime = now - 1800, attendees = names },
+        { id = 2, name = "Lady Deathwhisper", killTime = now - 900,  attendees = names },
+    }
+
+    -- Fresh, un-won loot. Ages span the 2h trade window; the last few are within
+    -- 15m of expiry (>6300s old) so they render red with a warning.
+    local ages = { 90, 600, 1500, 2700, 3900, 5100, 6000, 6450, 6750, 7050 }
+    local loot = {}
+    for k = 1, #ages do
+        local it = LOOT_ITEMS[((k - 1) % #LOOT_ITEMS) + 1]
+        table.insert(loot, {
+            itemId = it.id,
+            itemName = it.name,
+            itemLink = "|cffa335ee|Hitem:" .. it.id .. "::::::::80:::::|h[" .. it.name .. "]|h|r",
+            itemQuality = 4,
+            itemLevel = 264,
+            bossId = ((k - 1) % 2) + 1,
+            winner = nil,           -- nil = still rollable
+            source = bosses[((k - 1) % 2) + 1].name,
+            timestamp = now - ages[k],
+            _testData = true,
+        })
+    end
+
+    local session = {
+        id = 999999,
+        zone = "Icecrown Citadel (Test Roll)",
+        mode = "25 Heroic",
+        startTime = now - 3600,
+        endTime = nil,             -- nil = active/current
+        bosses = bosses,
+        attendees = attendees,
+        loot = loot,
+        _testData = true,
+    }
+    table.insert(AIP.db.raidSessions, 1, session)
+    AIP.db.currentRaidSessionId = 999999
+
+    -- Roll window state: manual items + a finished sample roll set
+    local RT = AIP.RaidTools
+    if RT then
+        RT.manualItems = RT.manualItems or {}
+        table.insert(RT.manualItems, { name = "Shadowmourne", quality = 5,
+            link = "|cffe6cc80|Hitem:49623::::::::80:::::|h[Shadowmourne]|h|r", timestamp = now })
+        table.insert(RT.manualItems, { name = "Invincible's Reins", quality = 5,
+            link = "|cffe6cc80|Hitem:50818::::::::80:::::|h[Invincible's Reins]|h|r", timestamp = now })
+
+        RT.rolls = {}
+        for j = 1, 9 do
+            RT.rolls[names[j]] = math.random(1, 100)
+        end
+        RT.rollItem = "Deathbringer's Will"
+        RT.rollItemLink = "|cffa335ee|Hitem:50709::::::::80:::::|h[Deathbringer's Will]|h|r"
+        RT.rollActive = false
+        if RT.RefreshRollWindow then RT.RefreshRollWindow() end
     end
 end
 
@@ -404,7 +552,12 @@ function TD.LoadTestData()
         raidSessions = AIP.db and AIP.db.raidSessions or {},
         lootBans = AIP.db and AIP.db.lootBans or {},
         blacklist = AIP.db and AIP.db.blacklist or {},
-        favorites = AIP.db and AIP.db.favorites or {},
+        whitelist = AIP.db and AIP.db.whitelist or {},
+        queue = AIP.db and AIP.db.queue or {},
+        waitlist = AIP.db and AIP.db.waitlist or {},
+        msTracking = AIP.db and AIP.db.msTracking or {},
+        reservedItems = AIP.db and AIP.db.reservedItems or "",
+        currentRaidSessionId = AIP.db and AIP.db.currentRaidSessionId,
         chatScannerGroups = AIP.ChatScanner and AIP.ChatScanner.Groups or {},
         chatScannerPlayers = AIP.ChatScanner and AIP.ChatScanner.Players or {},
     }
@@ -428,31 +581,36 @@ function TD.LoadTestData()
     AIP.db.raidSessions = AIP.db.raidSessions or {}
     AIP.db.lootBans = AIP.db.lootBans or {}
     AIP.db.blacklist = AIP.db.blacklist or {}
-    AIP.db.favorites = AIP.db.favorites or {}
+    AIP.db.whitelist = AIP.db.whitelist or {}
+    AIP.db.queue = AIP.db.queue or {}
+    AIP.db.waitlist = AIP.db.waitlist or {}
+    AIP.db.msTracking = AIP.db.msTracking or {}
 
     if AIP.ChatScanner then
         AIP.ChatScanner.Groups = AIP.ChatScanner.Groups or {}
         AIP.ChatScanner.Players = AIP.ChatScanner.Players or {}
     end
 
-    -- Generate all test data
-    TD.GenerateRaidSessions(3)
-    TD.GenerateLFMGroups(5)
-    TD.GenerateLFGPlayers(10)
-    TD.GenerateLootBans(5)
-    TD.GenerateBlacklist(5)
-    TD.GenerateFavorites(5)
+    -- Generate all test data (100+ records per section for scroll/layout testing)
+    local N = 120
+    TD.GenerateRaidSessions(N)
+    TD.GenerateLFMGroups(N)
+    TD.GenerateLFGPlayers(N)
+    TD.GenerateLootBans(N)
+    TD.GenerateBlacklist(N)
+    TD.GenerateFavorites(N)
+    TD.GenerateQueue(N)
+    TD.GenerateWaitlist(N)
+    TD.GenerateRaidMgmt(N)
+    TD.GenerateRollData()
 
     -- Refresh UI
     TD.RefreshAllUI()
 
-    AIP.Print("|cFF00FF00Test data loaded!|r Generated:")
-    AIP.Print("  - 3 raid sessions (Loot History)")
-    AIP.Print("  - 5 LFM groups (Browser)")
-    AIP.Print("  - 10 LFG players (Browser)")
-    AIP.Print("  - 5 loot bans (Raid Mgmt)")
-    AIP.Print("  - 5 blacklist entries")
-    AIP.Print("  - 5 favorites")
+    AIP.Print("|cFF00FF00Test data loaded!|r Generated " .. N .. " records each for:")
+    AIP.Print("  - Raid sessions (Loot History), LFM groups, LFG players")
+    AIP.Print("  - Loot bans (Raid Mgmt), Blacklist, Favorites")
+    AIP.Print("  - Loot Roll window: live raid loot + sample rolls (Raid Mgmt -> Open Roll Window)")
     AIP.Print("Use |cFF00FFFF/aip cleartest|r to remove test data.")
 end
 
@@ -492,12 +650,32 @@ function TD.ClearTestData()
         end
     end
 
-    -- Remove test entries from arrays
+    -- Remove test entries from arrays / keyed tables
     if AIP.db then
         RemoveTestEntries(AIP.db.raidSessions)
         RemoveTestEntries(AIP.db.lootBans)
         RemoveTestEntries(AIP.db.blacklist)
-        RemoveTestEntries(AIP.db.favorites)
+        RemoveTestEntries(AIP.db.queue)
+        RemoveTestEntries(AIP.db.waitlist)
+        RemoveTestEntriesKeyed(AIP.db.whitelist)
+        RemoveTestEntriesKeyed(AIP.db.msTracking)
+        -- Reserved items is a single string; restore the pre-test value
+        if TD.originalData then
+            AIP.db.reservedItems = TD.originalData.reservedItems or ""
+            -- Restore the active raid session pointer (test data set a fake one)
+            AIP.db.currentRaidSessionId = TD.originalData.currentRaidSessionId
+        end
+    end
+
+    -- Clear the roll-window test state
+    if AIP.RaidTools then
+        AIP.RaidTools.manualItems = {}
+        AIP.RaidTools.rolls = {}
+        AIP.RaidTools.rollItem = nil
+        AIP.RaidTools.rollItemLink = nil
+        AIP.RaidTools.rollActive = false
+        AIP.RaidTools.warnedItems = {}
+        if AIP.RaidTools.RefreshRollWindow then AIP.RaidTools.RefreshRollWindow() end
     end
 
     -- Remove test entries from ChatScanner (keyed tables)

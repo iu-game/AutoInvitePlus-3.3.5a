@@ -117,6 +117,7 @@ local function CreatePromoteUI()
         self:SetText(AIP.db.promoteKey or "")
         self:ClearFocus()
     end)
+    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(keyInput) end
     frame.keyInput = keyInput
 
     -- Auto-assist radio button

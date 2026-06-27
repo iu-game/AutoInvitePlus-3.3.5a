@@ -1,4 +1,4 @@
-# AutoInvite Plus v5.5.0
+# AutoInvite Plus v6.0.0
 
 A comprehensive raid organization suite for World of Warcraft 3.3.5a (WotLK) with LFM/LFG browser, auto-invite system, raid management tools, and loot tracking.
 
@@ -78,6 +78,14 @@ Quick promotion tools for raid assist and master looter assignment.
 - **Winner Assignment**: Assign loot winners with dropdown selection
 - **Export to Chat**: Post boss loot to Say/Party/Raid chat
 
+### Raid Tools (v6.0+)
+- **Roll System**: Run master-loot rolls with a countdown, automatic `/roll` capture, and a sorted winners list
+- **Roll Window**: Dedicated UI to start rolls on linked items and watch results live
+- **Smart Chat Sender**: Sends to `RAID_WARNING` when you have the rank, with safe fallbacks to `RAID`/`PARTY`/`SAY`
+- **Reserved-Loot Announcements**: One-click `/RW` announcement of reserved items, with a configurable announcement panel
+- **Floating Loot Bar**: On-screen bar tracking lootable items against the BoP trade window (2h), warning when under 15 minutes remain
+- **Per-Section Loading**: Split into RaidTools / Roll / UI / Events files so the client reports load failures per section
+
 ### Composition Advisor
 - **Raid Templates**: Pre-configured templates for WotLK, TBC, Classic raids
 - **Role Tracking**: Track tanks, healers, and DPS requirements
@@ -118,6 +126,10 @@ Quick promotion tools for raid assist and master looter assignment.
 | `/aip unbl <name>` | Remove from blacklist |
 | `/aip clear` | Clear invite queue |
 | `/aip spam` | Broadcast invite message once |
+| `/aip roll [item]` | Start a loot roll (or open the roll window) |
+| `/aip rollwindow` | Toggle the roll window |
+| `/aip rw` | Announce reserved loot to the raid |
+| `/aip bar` | Toggle the floating loot bar |
 | `/aip status` | Show current addon state |
 | `/aip help` | List all commands |
 
@@ -256,6 +268,15 @@ Customize automatic whisper responses:
 ---
 
 ## Changelog
+
+### v6.0.0
+- **Raid Tools**: New loot roll system with countdown, automatic `/roll` capture, and sorted winners
+- **Roll Window**: Dedicated UI to start rolls on linked items and watch results live
+- **Reserved-Loot Announcements**: One-click `/RW` announcement with a configurable announcement panel
+- **Floating Loot Bar**: Tracks lootable items against the BoP trade window with low-time warnings
+- **Smart Chat Sender**: Auto-selects `RAID_WARNING` with safe fallbacks based on your raid rank
+- **New Slash Commands**: `/aip roll`, `/aip rollwindow`, `/aip rw`, `/aip bar`
+- **Raid Mgmt Integration**: Raid Tools section added to the Raid Management panel
 
 ### v5.5.0
 - **Loot Ban System**: Ban players from specific boss loot with dropdown selection
