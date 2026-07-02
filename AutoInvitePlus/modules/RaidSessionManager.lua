@@ -13,10 +13,30 @@ local RSM = AIP.RaidSession
 RSM.BossPatterns = {}
 
 -- Multi-unit encounters: the unit that dies differs from the encounter/loot name.
+-- The 60s same-name dedup in AddBossKill collapses the several deaths within an
+-- encounter into one recorded kill.
 RSM.BossAliases = {
+    -- Blood Prince Council (ICC)
     ["prince valanar"]  = {name = "Blood Prince Council", zone = "Icecrown Citadel"},
     ["prince keleseth"] = {name = "Blood Prince Council", zone = "Icecrown Citadel"},
     ["prince taldaram"] = {name = "Blood Prince Council", zone = "Icecrown Citadel"},
+    -- Northrend Beasts (ToC)
+    ["gormok the impaler"] = {name = "Northrend Beasts", zone = "Trial of the Crusader"},
+    ["acidmaw"]            = {name = "Northrend Beasts", zone = "Trial of the Crusader"},
+    ["dreadscale"]         = {name = "Northrend Beasts", zone = "Trial of the Crusader"},
+    ["icehowl"]            = {name = "Northrend Beasts", zone = "Trial of the Crusader"},
+    -- Twin Val'kyr (ToC)
+    ["fjola lightbane"]    = {name = "Twin Val'kyr", zone = "Trial of the Crusader"},
+    ["eydis darkbane"]     = {name = "Twin Val'kyr", zone = "Trial of the Crusader"},
+    -- Assembly of Iron (Ulduar)
+    ["steelbreaker"]        = {name = "Assembly of Iron", zone = "Ulduar"},
+    ["runemaster molgeim"]  = {name = "Assembly of Iron", zone = "Ulduar"},
+    ["stormcaller brundir"] = {name = "Assembly of Iron", zone = "Ulduar"},
+    -- The Four Horsemen (Naxxramas)
+    ["baron rivendare"] = {name = "The Four Horsemen", zone = "Naxxramas"},
+    ["thane korth'azz"] = {name = "The Four Horsemen", zone = "Naxxramas"},
+    ["lady blaumeux"]   = {name = "The Four Horsemen", zone = "Naxxramas"},
+    ["sir zeliek"]      = {name = "The Four Horsemen", zone = "Naxxramas"},
 }
 
 -- Build boss patterns from RaidComposition data
@@ -308,15 +328,20 @@ RSM.LOOT_WINDOW = 600  -- seconds (10 minutes)
 -- Source is determined authoritatively from the boss-kill list (3.3.5a has no
 -- loot-source API), NOT from the unreliable yell/target heuristic that the caller
 -- previously passed in (which latched onto trash NPCs like "Sindragosa's Ward").
-function RSM.AddLoot(itemLink, looter, source)
+function RSM.AddLoot(itemLink, looter, source, category)
     local session = RSM.GetCurrentSession()
     if not session then return nil end
 
     local itemName, _, itemQuality, itemLevel = GetItemInfo(itemLink)
     if not itemName then
-        -- Item info not cached yet; the pending system retries.
-        return nil
+        -- Not cached (typical for OTHER players' loot on 3.3.5a). Use the
+        -- name/quality from the link so the pick is recorded, not dropped.
+        if AIP.Utils and AIP.Utils.ParseItemLink then
+            itemName, itemQuality = AIP.Utils.ParseItemLink(itemLink)
+        end
+        itemLevel = itemLevel or 0
     end
+    if not itemName then return nil end  -- not a real item link
 
     -- Quality threshold (skip junk)
     local threshold = (AIP.db and AIP.db.lootTrackThreshold) or 2
@@ -349,7 +374,8 @@ function RSM.AddLoot(itemLink, looter, source)
         itemQuality = itemQuality or 1,
         itemLevel = itemLevel or 0,
         bossId = bossId,
-        winner = looter or "Unknown",
+        winner = looter,  -- may be nil (unassigned); display renders a dash
+        category = category or "picked",
         timestamp = now,
         source = bossName or "Trash",
     }
@@ -474,6 +500,53 @@ function RSM.MigrateLootSources()
 
     AIP.db.lootSourcesMigrated = true
     if fixed > 0 then AIP.Debug("RaidSession: cleaned " .. fixed .. " historical loot sources") end
+end
+
+-- One-time cleanup of duplicate loot recorded before the roll-result/receipt
+-- de-dup existed. Within each loot list, entries with the same item and winner
+-- recorded within a few seconds of each other are collapsed to one. Genuinely
+-- separate drops are preserved: they go to a different winner, or a different
+-- item (name-based key distinguishes random-suffix variants), or are spaced
+-- further apart in time than a single award's two loot lines ever are.
+function RSM.DedupeExistingLoot()
+    if not AIP.db or AIP.db.lootDedupeMigrated then return end
+    local WINDOW = 6  -- seconds; must exceed the gap between an award's two lines
+    local removed = 0
+
+    local function dedupeList(arr)
+        if not arr then return end
+        local lastKept = {}  -- "item:winner" -> timestamp of last kept entry
+        -- Walk newest->oldest; adjacent duplicates sit within WINDOW of a kept neighbour.
+        for i = #arr, 1, -1 do
+            local e = arr[i]
+            local who = e.winner or e.looter or "?"
+            local id = e.itemName or e.itemId or e.itemLink or "?"
+            local key = tostring(id) .. ":" .. tostring(who)
+            local ts = e.timestamp
+            local prev = lastKept[key]
+            if ts and prev and math.abs(prev - ts) < WINDOW then
+                table.remove(arr, i)
+                removed = removed + 1
+            elseif ts then
+                lastKept[key] = ts
+            end
+        end
+    end
+
+    if AIP.db.raidSessions then
+        for _, session in ipairs(AIP.db.raidSessions) do
+            dedupeList(session.loot)
+        end
+    end
+    dedupeList(AIP.db.lootHistory)
+
+    AIP.db.lootDedupeMigrated = true
+    if removed > 0 then
+        AIP.Print("Loot history: removed " .. removed .. " duplicate entries.")
+        if AIP.Panels and AIP.Panels.LootHistory and AIP.Panels.LootHistory.RefreshAll then
+            AIP.Panels.LootHistory.RefreshAll()
+        end
+    end
 end
 
 function RSM.MigrateOldLootHistory()
@@ -753,6 +826,8 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         RSM.MigrateOldLootHistory()
         -- Clean up historical loot sources from the old yell-based attribution.
         RSM.MigrateLootSources()
+        -- Remove duplicate loot recorded before roll-result/receipt de-dup existed.
+        RSM.DedupeExistingLoot()
         -- Check if we should resume a session
         OnRosterUpdate()
         -- Instance transitions fire here (not ZONE_CHANGED_NEW_AREA), so sync zone
@@ -769,11 +844,11 @@ local function HookLootTracking()
     local LH = AIP.Panels and AIP.Panels.LootHistory
     if LH and LH.AddLootEntry then
         local originalAddLoot = LH.AddLootEntry
-        LH.AddLootEntry = function(itemLink, looter, source, zone)
+        LH.AddLootEntry = function(itemLink, looter, source, zone, category)
             -- Call original
-            originalAddLoot(itemLink, looter, source, zone)
+            originalAddLoot(itemLink, looter, source, zone, category)
             -- Also add to session
-            RSM.AddLoot(itemLink, looter, source)
+            RSM.AddLoot(itemLink, looter, source, category)
         end
     end
 end

@@ -350,7 +350,9 @@ function Int.GetMyLockouts()
 
     local numSaved = GetNumSavedInstances()
     for i = 1, numSaved do
-        local name, id, reset, difficulty, locked, extended, instanceIDMostSig, isRaid, maxPlayers, difficultyName, numEncounters, encounterProgress = GetSavedInstanceInfo(i)
+        -- 3.3.5a GetSavedInstanceInfo returns only through difficultyName; the
+        -- numEncounters/encounterProgress fields were added in 4.0.1.
+        local name, id, reset, difficulty, locked, extended, instanceIDMostSig, isRaid, maxPlayers, difficultyName = GetSavedInstanceInfo(i)
 
         -- Only count as locked if: locked flag is true AND reset time is positive (not expired)
         -- reset is the number of seconds until the lockout expires; if <= 0, it's expired
@@ -360,7 +362,7 @@ function Int.GetMyLockouts()
                 id = id,
                 reset = reset,
                 difficulty = difficultyName or (maxPlayers .. " Player"),
-                progress = (encounterProgress or 0) .. "/" .. (numEncounters or 0),
+                progress = "",  -- 3.3.5a exposes no boss-progress source here
                 maxPlayers = maxPlayers,
             })
         end
@@ -707,6 +709,7 @@ function Int.ScanRaidBrowser()
 
     for i = 1, numResults do
         local name, level, areaName, className, comment, partyMembers, status, class, encountersTotal, encountersComplete, isIneligible, leader, tank, healer, damage = SearchLFGGetResults(i)
+        partyMembers = partyMembers or 1  -- guard the partyMembers > 10 comparisons below
 
         if name and name ~= "" then
             -- Determine raid from areaName or comment

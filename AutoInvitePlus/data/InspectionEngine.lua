@@ -48,7 +48,9 @@ IE.EnchantableSlots = {
     [1] = true,   -- Head (arcanum)
     [3] = true,   -- Shoulder (inscription)
     [5] = true,   -- Chest
-    [6] = true,   -- Waist (belt buckle = gem, not enchant)
+    -- Waist (slot 6) is NOT enchantable in WotLK - the belt buckle is a gem
+    -- socket, tracked separately via IE.GemSlots. Listing it here produced a
+    -- false "missing enchant" for every belt.
     [7] = true,   -- Legs (spellthread/armor kit)
     [8] = true,   -- Feet
     [9] = true,   -- Wrist
@@ -172,7 +174,8 @@ local function AnalyzeGems(link)
     local totalSlots = emptySlots + filledSlots
 
     tooltip:Hide()
-    return totalSlots, filledSlots
+    -- Caller expects (empty, total) to match the {empty=, total=} field semantics.
+    return emptySlots, totalSlots
 end
 
 -- Inspect a unit and cache results
@@ -552,9 +555,12 @@ end
 
 -- Event frame for inspection
 local eventFrame = CreateFrame("Frame")
-eventFrame:RegisterEvent("INSPECT_READY")
+-- 3.3.5a fires INSPECT_TALENT_READY (INSPECT_READY was added in 4.0.1). Using
+-- the wrong event meant OnInspectReady never ran, so the queue's inProgress flag
+-- was never cleared and all live inspection stalled after the first request.
+eventFrame:RegisterEvent("INSPECT_TALENT_READY")
 eventFrame:SetScript("OnEvent", function(self, event, ...)
-    if event == "INSPECT_READY" then
+    if event == "INSPECT_TALENT_READY" then
         OnInspectReady()
     end
 end)

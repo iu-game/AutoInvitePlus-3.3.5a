@@ -77,7 +77,7 @@ SP.Tooltips = {
     -- Section 6: LFM/LFG Scanner
     lfmScanner = "Scans chat for other players' LFM/LFG messages and displays them in the browser.\n\nUses the same Listen Channels settings from section 4.\n\nCache duration controls how long entries are kept.\n\n|cFF00FF00Enable when:|r You want to browse available groups instead of forming your own.",
 
-    cacheDuration = "How long (in minutes) to keep scanned LFM/LFG messages in memory.\n\nOlder entries will be automatically removed.\n\n|cFFFFFFFFRecommended:|r 10-15 minutes\n|cFFFFFFFFShorter:|r Shows only very recent groups\n|cFFFFFFFFLonger:|r May show stale/filled groups",
+    cacheDuration = "How long (in minutes) scanned LFM/LFG listings stay visible in the browser before they expire.\n\nThis single value controls both how long entries are kept AND how long they show in the tree (and drives the row age colors).\n\n|cFFFFFFFFRecommended:|r 10-15 minutes\n|cFFFFFFFFShorter:|r Shows only very recent groups\n|cFFFFFFFFLonger:|r May show stale/filled groups",
 
     treeViewTimeout = "How long (in minutes) before entries in the LFM/LFG browser are marked as stale and hidden.\n\nStale entries appear grayed out before being removed.\n\n|cFFFFFFFFRecommended:|r 3-5 minutes\n\n|cFF00FF00Tip:|r Set shorter if you only want to see very active groups.",
 
@@ -862,6 +862,19 @@ function SP.Create(parent)
     scanNote:SetText("|cFF888888(Uses channels from section 4)|r")
     y = y - 26
 
+    -- Hide blacklisted players' listings from the browser tree
+    local hideBlCheck = CreateCheckbox(content, 15, y, "hideBlacklistedListings",
+        "Hide blacklisted players' listings from the browser", function(self)
+        local checked = self:GetChecked() == 1 or self:GetChecked() == true
+        if AIP.db then AIP.db.hideBlacklistedListings = checked end
+        if AIP.CentralGUI and AIP.CentralGUI.RefreshBrowserTab then
+            AIP.CentralGUI.RefreshBrowserTab("lfm")
+            AIP.CentralGUI.RefreshBrowserTab("lfg")
+        end
+    end)
+    frame.checks.hideBlacklistedListings = hideBlCheck
+    y = y - 26
+
     -- Cache duration
     local cacheLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     cacheLabel:SetPoint("TOPLEFT", 15, y)
@@ -891,47 +904,20 @@ function SP.Create(parent)
     clearCacheBtn:SetPoint("LEFT", cacheSuffix, "RIGHT", 20, 0)
     clearCacheBtn:SetText("Clear Cache")
     clearCacheBtn:SetScript("OnClick", function()
-        if AIP.GroupTracker and AIP.GroupTracker.ClearCache then
-            AIP.GroupTracker.ClearCache()
-            AIP.Print("LFM/LFG cache cleared")
-        end
-    end)
-    y = y - 26
-
-    -- Tree view stale timeout
-    local staleLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    staleLabel:SetPoint("TOPLEFT", 15, y)
-    staleLabel:SetText("Tree View Timeout:")
-
-    local staleTooltip = CreateTooltipButton(content, "treeViewTimeout")
-    staleTooltip:SetPoint("LEFT", staleLabel, "RIGHT", 2, 0)
-
-    local staleInput, staleContainer = CreateStyledEditBox(content, 30, 16, true)
-    staleContainer:SetPoint("LEFT", staleTooltip, "RIGHT", 2, 0)
-    staleInput:SetText(AIP.TreeBrowser and AIP.TreeBrowser.StaleTimeout and math.floor(AIP.TreeBrowser.StaleTimeout / 60) or 3)
-    staleInput:SetScript("OnEnterPressed", function(self)
-        local val = tonumber(self:GetText()) or 3
-        val = math.max(1, math.min(30, val))  -- 1-30 minutes
-        self:SetText(val)
-        if AIP.TreeBrowser then
-            AIP.TreeBrowser.StaleTimeout = val * 60  -- Convert to seconds
-        end
-        if AIP.db then
-            AIP.db.treeStaleTimeout = val * 60
-        end
-        self:ClearFocus()
-        -- Refresh browser tabs
+        -- GroupTracker/LFMBrowser expose ClearAll (=CS.ClearGroups/ClearPlayers);
+        -- there is no ClearCache. Clear both stores and refresh the browser.
+        if AIP.GroupTracker and AIP.GroupTracker.ClearAll then AIP.GroupTracker.ClearAll() end
+        if AIP.LFMBrowser and AIP.LFMBrowser.ClearAll then AIP.LFMBrowser.ClearAll() end
         if AIP.CentralGUI and AIP.CentralGUI.RefreshBrowserTab then
             AIP.CentralGUI.RefreshBrowserTab("lfm")
             AIP.CentralGUI.RefreshBrowserTab("lfg")
         end
     end)
-    frame.staleInput = staleInput
-
-    local staleSuffix = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    staleSuffix:SetPoint("LEFT", staleContainer, "RIGHT", 5, 0)
-    staleSuffix:SetText("minutes  |cFF888888(hide entries older than this)|r")
     y = y - 26
+
+    -- (The former "Tree View Timeout" control was removed: the Cache Duration
+    -- setting above is now the single source of truth for how long listings stay
+    -- visible, so a second overlapping timeout was an inert, confusing no-op.)
 
     -- Loot History Retention
     local lootRetLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1580,10 +1566,6 @@ function SP.Update()
     end
     if SP.Frame.cacheInput and not SP.Frame.cacheInput:HasFocus() then
         SP.Frame.cacheInput:SetText(db.cacheDuration or 15)
-    end
-    if SP.Frame.staleInput and not SP.Frame.staleInput:HasFocus() then
-        local staleMin = (db.treeStaleTimeout or 180) / 60
-        SP.Frame.staleInput:SetText(math.floor(staleMin))
     end
     if SP.Frame.lootRetInput and not SP.Frame.lootRetInput:HasFocus() then
         SP.Frame.lootRetInput:SetText(db.lootHistoryRetentionDays or 30)

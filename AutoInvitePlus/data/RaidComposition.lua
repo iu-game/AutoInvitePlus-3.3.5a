@@ -2357,6 +2357,9 @@ function Comp.RequestInspect(unit)
     if not CanInspect(unit) then return end
     if not CheckInteractDistance(unit, 1) then return end  -- Must be in range
 
+    -- Remember who we're inspecting: INSPECT_TALENT_READY carries no unit arg.
+    Comp.PendingInspectUnit = unit
+    Comp.PendingInspectName = UnitName(unit)
     NotifyInspect(unit)
 end
 
@@ -2365,13 +2368,16 @@ local inspectFrame = CreateFrame("Frame")
 inspectFrame:RegisterEvent("INSPECT_TALENT_READY")
 inspectFrame:SetScript("OnEvent", function(self, event)
     if event == "INSPECT_TALENT_READY" then
-        -- Get the inspected unit's spec and cache it
-        local unit = "target"  -- Inspection is usually on target
+        -- Resolve which unit was actually inspected (recorded at request time).
+        -- 3.3.5a's INSPECT_TALENT_READY carries no unit arg, and InspectFrame.unit
+        -- only exists when the Blizzard inspect UI is open.
+        local unit = Comp.PendingInspectUnit
         if InspectFrame and InspectFrame.unit then
             unit = InspectFrame.unit
         end
 
-        if UnitExists(unit) then
+        if unit and UnitExists(unit)
+           and (not Comp.PendingInspectName or UnitName(unit) == Comp.PendingInspectName) then
             local unitName = UnitName(unit)
             local _, class = UnitClass(unit)
 
@@ -2392,6 +2398,18 @@ inspectFrame:SetScript("OnEvent", function(self, event)
         end
     end
 end)
+
+-- Adapter for the smart-invite roleMatching gate (Core.lua): returns open slot
+-- counts in the lowercase shape {tanks,healers,dps} it expects. With no active
+-- template it returns non-blocking sentinels so role-matched invites aren't
+-- rejected outright.
+function Comp.GetRoleNeeds()
+    local r = Comp.GetRecommendations()
+    if not r or not r.ok or not r.gaps then
+        return {tanks = math.huge, healers = math.huge, dps = math.huge}
+    end
+    return {tanks = r.gaps.TANK or 0, healers = r.gaps.HEALER or 0, dps = r.gaps.DPS or 0}
+end
 
 -- Get GearScore if addon is available
 function Comp.GetGearScore(name)

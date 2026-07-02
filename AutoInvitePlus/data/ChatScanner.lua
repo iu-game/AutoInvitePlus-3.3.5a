@@ -32,6 +32,93 @@ CS.Groups = {}
 -- LFG Players (individual players looking for groups)
 CS.Players = {}
 
+-- Runtime per-listing state (keyed by leader:lower()).
+-- NOT persisted and NOT stored on the group table: an LFM re-post can replace
+-- the group entry, and these must survive that. They are cleared only when the
+-- listing itself is pruned (see CS.PruneGroups), so an excluded/requested
+-- listing reappears once the leader posts fresh after the cache expires.
+CS.Excluded = {}    -- leader:lower() -> time() when excluded
+CS.Requested = {}   -- leader:lower() -> time() when we sent an invite request
+
+-- ============================================================================
+-- PER-LISTING STATE (exclude / requested)
+-- ============================================================================
+
+local function listingKey(leader)
+    if not leader or leader == "" then return nil end
+    return leader:lower()
+end
+
+function CS.MarkExcluded(leader)
+    local key = listingKey(leader)
+    if not key then return end
+    CS.Excluded[key] = time()
+end
+
+function CS.ClearExcluded(leader)
+    local key = listingKey(leader)
+    if not key then return end
+    CS.Excluded[key] = nil
+end
+
+function CS.IsExcluded(leader)
+    local key = listingKey(leader)
+    return key ~= nil and CS.Excluded[key] ~= nil
+end
+
+function CS.MarkRequested(leader)
+    local key = listingKey(leader)
+    if not key then return end
+    CS.Requested[key] = time()
+end
+
+-- Returns the timestamp we requested this leader, or nil.
+function CS.GetRequested(leader)
+    local key = listingKey(leader)
+    if not key then return nil end
+    return CS.Requested[key]
+end
+
+-- Collect current listings (LFM leaders + LFG players) from favorited players.
+-- Used for the minimap tooltip count and the "Favorites Listed" bubble. Skips
+-- our own listings and excluded ones.
+function CS.GetFavoriteListings()
+    local results = {}
+    if not AIP.IsPlayerFavorite then return results end
+    for leader, group in pairs(CS.Groups) do
+        if not group.isOwn and not CS.IsExcluded(leader) and AIP.IsPlayerFavorite(leader) then
+            table.insert(results, { name = leader, kind = "lfm" })
+        end
+    end
+    for name in pairs(CS.Players) do
+        if AIP.IsPlayerFavorite(name) then
+            table.insert(results, { name = name, kind = "lfg" })
+        end
+    end
+    return results
+end
+
+-- Collect current VOA listings (for the minimap alert/tooltip).
+-- Skips our own listings and any we've excluded. Each result is tagged with
+-- isFavorite so the caller can highlight favorited leaders.
+function CS.GetVOAListings()
+    local results = {}
+    for leader, group in pairs(CS.Groups) do
+        local isVOA = group.raidCategory == "VOA"
+            or (group.raid and tostring(group.raid):upper():find("^VOA"))
+        if isVOA and not group.isOwn and not CS.IsExcluded(leader) then
+            local isFav = AIP.IsPlayerFavorite and AIP.IsPlayerFavorite(leader) or false
+            table.insert(results, {
+                leader = leader,
+                raid = group.raid,
+                group = group,
+                isFavorite = isFav,
+            })
+        end
+    end
+    return results
+end
+
 -- ============================================================================
 -- ENTRY MANAGEMENT
 -- ============================================================================
@@ -336,10 +423,13 @@ function CS.PruneGroups()
     local now = time()
     local expiry = CS.GetExpiry()
 
-    -- Remove expired
+    -- Remove expired (also clear per-listing state so the exclusion/request
+    -- expires with the listing and reappears if the leader posts fresh)
     for leader, info in pairs(CS.Groups) do
         if now - info.time > expiry then
             CS.Groups[leader] = nil
+            CS.ClearExcluded(leader)
+            CS.Requested[listingKey(leader)] = nil
         end
     end
 
@@ -357,7 +447,10 @@ function CS.PruneGroups()
         -- Remove excess entries
         local toRemove = count - CS.Config.maxGroups
         for i = 1, toRemove do
-            CS.Groups[entries[i].leader] = nil
+            local leader = entries[i].leader
+            CS.Groups[leader] = nil
+            CS.ClearExcluded(leader)
+            CS.Requested[listingKey(leader)] = nil
         end
     end
 end
@@ -633,21 +726,24 @@ end
 -- CLEAR FUNCTIONS
 -- ============================================================================
 
+-- Clear IN PLACE (wipe) rather than reassigning: the GroupTracker/LFMBrowser
+-- compat aliases point at these same table objects, so replacing them would
+-- orphan the aliases and permanently diverge the two views.
 function CS.ClearGroups()
-    CS.Groups = {}
+    wipe(CS.Groups)
     CS.NotifyUpdate("lfm")
     AIP.Print("Group listings cleared")
 end
 
 function CS.ClearPlayers()
-    CS.Players = {}
+    wipe(CS.Players)
     CS.NotifyUpdate("lfg")
     AIP.Print("Player listings cleared")
 end
 
 function CS.ClearAll()
-    CS.Groups = {}
-    CS.Players = {}
+    wipe(CS.Groups)
+    wipe(CS.Players)
     CS.NotifyUpdate("lfm")
     CS.NotifyUpdate("lfg")
     AIP.Print("Chat scanner cleared")
@@ -1022,8 +1118,8 @@ function CS.SlashHandler(msg)
     msg = (msg or ""):lower():trim()
 
     if msg == "" or msg == "show" then
-        if AIP.ToggleLFMBrowserUI then
-            AIP.ToggleLFMBrowserUI()
+        if AIP.CentralGUI then
+            AIP.CentralGUI.Show("lfm")
         end
     elseif msg == "clear" then
         CS.ClearAll()

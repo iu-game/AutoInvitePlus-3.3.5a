@@ -55,6 +55,8 @@ local function MakeInput(parent, w, h)
     -- brighten the border while focused for clear affordance
     eb:SetScript("OnEditFocusGained", function(self) self:SetBackdropBorderColor(1, 0.82, 0) end)
     eb:SetScript("OnEditFocusLost", function(self) self:SetBackdropBorderColor(0.45, 0.45, 0.5) end)
+    -- Allow shift-clicking items/quests/etc. into these fields.
+    if AIP.UI and AIP.UI.MakeEditBoxLinkable then AIP.UI.MakeEditBoxLinkable(eb) end
     return eb
 end
 
@@ -91,6 +93,22 @@ function RT.CreateRollWindow()
 
     local close = CreateFrame("Button", nil, win, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", -4, -4)
+
+    -- Personal-roll shortcut: rolls 1-100 for YOU, exactly like typing /roll.
+    local myRollBtn = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
+    myRollBtn:SetSize(90, 22)
+    myRollBtn:SetPoint("TOPLEFT", 14, -12)
+    myRollBtn:SetText("Roll 1-100")
+    myRollBtn:SetScript("OnClick", function()
+        if RandomRoll then RandomRoll(1, 100) else DEFAULT_CHAT_FRAME.editBox:SetText("/roll") end
+    end)
+    myRollBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Roll 1-100")
+        GameTooltip:AddLine("Same as typing /roll - counts toward the active roll.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    myRollBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- Status / countdown banner
     local statusBg = MakeBox(win, 622, 24)
@@ -353,7 +371,8 @@ function RT.CreateAnnounceConfig()
     if RT.ConfigWin then return RT.ConfigWin end
 
     local win = CreateFrame("Frame", "AIPAnnounceConfig", UIParent)
-    win:SetSize(560, 420)
+    -- Height fits: header(72) + rows + footer(scroll hint + buttons + margins).
+    win:SetSize(560, 72 + (AC_ROWS * 26 + 8) + 64)
     win:SetPoint("CENTER", 120, 0)
     win:SetFrameStrata("DIALOG")
     win:SetToplevel(true)
@@ -370,17 +389,19 @@ function RT.CreateAnnounceConfig()
 
     local title = win:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -16)
-    title:SetText("|cFFFFD700Floating Bar Buttons|r")
+    title:SetText("|cFFFFD700Bar Buttons / Raid-Warning Templates|r")
     local close = CreateFrame("Button", nil, win, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", -4, -4)
 
     local help = win:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     help:SetPoint("TOP", title, "BOTTOM", 0, -4)
-    help:SetText("Each row is a button on the floating bar. Click the channel to cycle it.")
+    help:SetWidth(516)            -- constrain so it wraps inside the window
+    help:SetJustifyH("CENTER")
+    help:SetText("Each row is a raid-warning template and a floating-bar button. Click a channel to cycle it.")
 
     -- Column headers
     local hLabel = win:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    hLabel:SetPoint("TOPLEFT", 24, -56); hLabel:SetText("|cFFFFD700Button label|r")
+    hLabel:SetPoint("TOPLEFT", 24, -56); hLabel:SetText("|cFFFFD700Name|r")
     local hMsg = win:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     hMsg:SetPoint("TOPLEFT", 150, -56); hMsg:SetText("|cFFFFD700Message|r")
     local hChan = win:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -389,21 +410,48 @@ function RT.CreateAnnounceConfig()
     local listBg = MakeBox(win, 516, AC_ROWS * 26 + 8)
     listBg:SetPoint("TOPLEFT", 22, -72)
 
+    -- Visible draggable scrollbar (works alongside the mouse wheel).
+    local sb = CreateFrame("Slider", nil, listBg)
+    sb:SetOrientation("VERTICAL")
+    sb:SetWidth(16)
+    sb:SetPoint("TOPRIGHT", listBg, "TOPRIGHT", -5, -10)
+    sb:SetPoint("BOTTOMRIGHT", listBg, "BOTTOMRIGHT", -5, 10)
+    sb:SetBackdrop({
+        bgFile = "Interface\\Buttons\\UI-SliderBar-Background",
+        edgeFile = "Interface\\Buttons\\UI-SliderBar-Border",
+        tile = true, tileSize = 8, edgeSize = 8,
+        insets = {left = 3, right = 3, top = 6, bottom = 6},
+    })
+    sb:SetThumbTexture("Interface\\Buttons\\UI-ScrollBar-Knob")
+    local thumb = sb:GetThumbTexture()
+    if thumb then thumb:SetSize(18, 24) end
+    sb:SetMinMaxValues(0, 0)
+    sb:SetValueStep(1)
+    sb:SetValue(0)
+    win.acScrollBar = sb
+    sb:SetScript("OnValueChanged", function(self, value)
+        local v = math.floor(value + 0.5)
+        if v ~= (win.acOffset or 0) then
+            win.acOffset = v
+            RT.RefreshAnnounceConfig()
+        end
+    end)
+
     win.acRows = {}
     for i = 1, AC_ROWS do
         local y = -6 - (i - 1) * 26
         local row = CreateFrame("Frame", nil, listBg)
-        row:SetPoint("TOPLEFT", 6, y); row:SetPoint("RIGHT", listBg, "RIGHT", -6, 0)
+        row:SetPoint("TOPLEFT", 6, y); row:SetPoint("RIGHT", listBg, "RIGHT", -26, 0)
         row:SetHeight(24)
 
         local labelBox = MakeInput(row, 110, 22)
         labelBox:SetPoint("LEFT", 6, 0)
         labelBox:SetScript("OnTextChanged", function(self)
-            if row.entry then row.entry.label = self:GetText() end
+            if row.entry then row.entry.name = self:GetText() end
         end)
         row.labelBox = labelBox
 
-        local msgBox = MakeInput(row, 228, 22)
+        local msgBox = MakeInput(row, 200, 22)
         msgBox:SetPoint("LEFT", labelBox, "RIGHT", 12, 0)
         msgBox:SetScript("OnTextChanged", function(self)
             if row.entry then row.entry.message = self:GetText() end
@@ -452,24 +500,39 @@ function RT.CreateAnnounceConfig()
         win.acRows[i] = row
     end
 
+    -- Mouse-wheel scrolling through the (now unbounded) template list.
+    win.acOffset = 0
+    win:EnableMouseWheel(true)
+    win:SetScript("OnMouseWheel", function(self, delta)
+        local total = #RT.GetAnnouncements()
+        local maxOff = math.max(0, total - AC_ROWS)
+        self.acOffset = math.min(maxOff, math.max(0, (self.acOffset or 0) - delta))
+        RT.RefreshAnnounceConfig()
+    end)
+
+    -- Footer anchored to the LIST bottom so it always sits below the rows,
+    -- never overlapping them regardless of window/row count.
+    local scrollHint = win:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    scrollHint:SetPoint("TOP", listBg, "BOTTOM", 0, -6)
+    scrollHint:SetTextColor(0.6, 0.6, 0.6)
+    scrollHint:Hide()
+    win.scrollHint = scrollHint
+
     local addBtn = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
     addBtn:SetSize(140, 24)
-    addBtn:SetPoint("BOTTOMLEFT", 24, 24)
-    addBtn:SetText("+ Add Button")
+    addBtn:SetPoint("TOPLEFT", listBg, "BOTTOMLEFT", 0, -26)
+    addBtn:SetText("+ Add Template")
     addBtn:SetScript("OnClick", function()
         local list = RT.GetAnnouncements()
-        if #list >= AC_ROWS then
-            AIP.Print("Bar button limit reached (" .. AC_ROWS .. ").")
-            return
-        end
-        table.insert(list, { label = "New Button", message = "Type your message", channel = "RAID_WARNING" })
+        table.insert(list, { name = "New Warning", message = "Type your message", channel = "RAID_WARNING" })
+        win.acOffset = math.max(0, #list - AC_ROWS)  -- scroll to reveal the new row
         RT.RefreshAnnounceConfig()
         if RT.RefreshBar then RT.RefreshBar() end
     end)
 
     local doneBtn = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
     doneBtn:SetSize(120, 24)
-    doneBtn:SetPoint("BOTTOMRIGHT", -24, 24)
+    doneBtn:SetPoint("TOPRIGHT", listBg, "BOTTOMRIGHT", 0, -26)
     doneBtn:SetText("Done")
     doneBtn:SetScript("OnClick", function()
         if RT.RefreshBar then RT.RefreshBar() end
@@ -484,18 +547,44 @@ function RT.RefreshAnnounceConfig()
     local win = RT.ConfigWin
     if not win then return end
     local list = RT.GetAnnouncements()
+    local total = #list
+    local maxOff = math.max(0, total - AC_ROWS)
+    local offset = math.min(maxOff, math.max(0, win.acOffset or 0))
+    win.acOffset = offset
+
+    -- Sync the visible scrollbar (guarding against its OnValueChanged recursing).
+    if win.acScrollBar then
+        win.acScrollBar:SetMinMaxValues(0, maxOff)
+        win.acScrollBar:SetValue(offset)
+        if maxOff > 0 then win.acScrollBar:Show() else win.acScrollBar:Hide() end
+    end
+
     for i = 1, AC_ROWS do
         local row = win.acRows[i]
-        local entry = list[i]
+        local entry = list[offset + i]
         if entry then
             row.entry = entry
-            row.dbIndex = i
-            row.labelBox:SetText(entry.label or "")
+            row.dbIndex = offset + i
+            row.labelBox:SetText(entry.name or entry.label or "")
             row.msgBox:SetText(entry.message or "")
+            -- Reset cursor to the start so the box shows the BEGINNING of long
+            -- text (SetText leaves the cursor at the end, scrolling it off-view).
+            row.labelBox:SetCursorPosition(0)
+            row.msgBox:SetCursorPosition(0)
             row.chanBtn:SetText(entry.channel or "RAID_WARNING")
             row:Show()
         else
             row.entry = nil; row.dbIndex = nil; row:Hide()
+        end
+    end
+
+    if win.scrollHint then
+        if total > AC_ROWS then
+            win.scrollHint:SetText(string.format("Showing %d-%d of %d  -  scroll for more",
+                offset + 1, math.min(offset + AC_ROWS, total), total))
+            win.scrollHint:Show()
+        else
+            win.scrollHint:Hide()
         end
     end
 end
@@ -517,6 +606,7 @@ end
 local BTN_W = 150
 local BTN_H = 20
 local BTN_SPACING = 22
+local BAR_VISIBLE = 6   -- message buttons shown at once; the rest scroll (wheel)
 
 function RT.CreateBar()
     if RT.Bar then return RT.Bar end
@@ -550,17 +640,39 @@ function RT.CreateBar()
     title:SetText("|cFFFFD700Announcements|r")
     bar.title = title
 
-    -- Edit (gear) button to open the friendly config
+    -- Close button - hides the bar (and remembers it's off across reloads).
+    local closeBtn = CreateFrame("Button", nil, bar, "UIPanelButtonTemplate")
+    closeBtn:SetSize(16, 16)
+    closeBtn:SetPoint("TOPRIGHT", -6, -4)
+    closeBtn:SetText("X")
+    closeBtn:SetScript("OnClick", function() RT.ToggleBar() end)
+    closeBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:AddLine("Close the bar"); GameTooltip:Show()
+    end)
+    closeBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    bar.closeBtn = closeBtn
+
+    -- Edit (+) button to open the friendly config (left of the close button)
     local edit = CreateFrame("Button", nil, bar, "UIPanelButtonTemplate")
     edit:SetSize(16, 16)
-    edit:SetPoint("TOPRIGHT", -6, -4)
+    edit:SetPoint("RIGHT", closeBtn, "LEFT", -2, 0)
     edit:SetText("+")
     edit:SetScript("OnClick", function() RT.ToggleAnnounceConfig() end)
     edit:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:AddLine("Configure bar buttons"); GameTooltip:Show()
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:AddLine("Configure bar buttons (wired to raid-warning templates)"); GameTooltip:Show()
     end)
     edit:SetScript("OnLeave", function() GameTooltip:Hide() end)
     bar.editBtn = edit
+
+    -- Fixed-size bar: the message buttons scroll with the mouse wheel.
+    bar.scrollOffset = 0
+    bar:EnableMouseWheel(true)
+    bar:SetScript("OnMouseWheel", function(self, delta)
+        local total = #RT.GetAnnouncements()
+        local maxOff = math.max(0, total - BAR_VISIBLE)
+        self.scrollOffset = math.min(maxOff, math.max(0, (self.scrollOffset or 0) - delta))
+        RT.RefreshBar()
+    end)
 
     -- Action row: persistent raid-tool shortcuts beneath the title.
     local function actionBtn(text, w, tip, onClick)
@@ -583,6 +695,12 @@ function RT.CreateBar()
     roll:SetPoint("LEFT", buffs, "RIGHT", 2, 0)
     bar.actionButtons = {ready, buffs, roll}
 
+    -- Scroll position indicator at the bottom (shown only when the list overflows)
+    local scrollInfo = bar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    scrollInfo:SetPoint("BOTTOM", 0, 5)
+    scrollInfo:Hide()
+    bar.scrollInfo = scrollInfo
+
     bar.buttons = {}
     RT.Bar = bar
     return bar
@@ -591,34 +709,53 @@ end
 function RT.RefreshBar()
     if not RT.Bar then return end
     local anns = RT.GetAnnouncements()
+    local total = #anns
 
-    for i, ann in ipairs(anns) do
+    -- Clamp the scroll window to the current list.
+    local maxOff = math.max(0, total - BAR_VISIBLE)
+    local offset = math.min(maxOff, math.max(0, RT.Bar.scrollOffset or 0))
+    RT.Bar.scrollOffset = offset
+
+    -- Render only the visible window into a fixed pool of BAR_VISIBLE buttons.
+    for i = 1, BAR_VISIBLE do
+        local ann = anns[offset + i]
         local btn = RT.Bar.buttons[i]
         if not btn then
             btn = CreateFrame("Button", nil, RT.Bar, "UIPanelButtonTemplate")
             btn:SetSize(BTN_W, BTN_H)
+            btn:SetPoint("TOP", RT.Bar, "TOP", 0, -46 - (i - 1) * BTN_SPACING)
             RT.Bar.buttons[i] = btn
         end
-        btn:ClearAllPoints()
-        btn:SetPoint("TOP", RT.Bar, "TOP", 0, -46 - (i - 1) * BTN_SPACING)
-        btn:SetText(ann.label or ann.message or "?")
-        btn:SetScript("OnClick", function() RT.Send(ann.message, ann.channel or "RAID_WARNING") end)
-        btn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine(ann.label or "Announcement", 1, 0.82, 0)
-            GameTooltip:AddLine(ann.message or "", 1, 1, 1, true)
-            GameTooltip:AddLine("-> " .. (ann.channel or "RAID_WARNING"), 0.6, 0.8, 1)
-            GameTooltip:Show()
-        end)
-        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        btn:Show()
-    end
-    for i = #anns + 1, #RT.Bar.buttons do
-        if RT.Bar.buttons[i] then RT.Bar.buttons[i]:Hide() end
+        if ann then
+            btn:SetText(ann.name or ann.label or ann.message or "?")
+            btn:SetScript("OnClick", function() RT.Send(ann.message, ann.channel or "RAID_WARNING") end)
+            btn:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:AddLine(ann.name or ann.label or "Announcement", 1, 0.82, 0)
+                GameTooltip:AddLine(ann.message or "", 1, 1, 1, true)
+                GameTooltip:AddLine("-> " .. (ann.channel or "RAID_WARNING"), 0.6, 0.8, 1)
+                GameTooltip:Show()
+            end)
+            btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            btn:Show()
+        else
+            btn:Hide()
+        end
     end
 
-    -- 46px reserves the title + action row above the message buttons.
-    RT.Bar:SetHeight(math.max(58, 46 + #anns * BTN_SPACING + 6))
+    -- Compact scroll position shown under the row when the list overflows.
+    if RT.Bar.scrollInfo then
+        if total > BAR_VISIBLE then
+            RT.Bar.scrollInfo:SetText(string.format("|cFF888888%d-%d / %d  (scroll)|r",
+                offset + 1, math.min(offset + BAR_VISIBLE, total), total))
+            RT.Bar.scrollInfo:Show()
+        else
+            RT.Bar.scrollInfo:Hide()
+        end
+    end
+
+    -- Fixed height: always sized for BAR_VISIBLE rows regardless of list length.
+    RT.Bar:SetHeight(46 + BAR_VISIBLE * BTN_SPACING + 14)
     RT.Bar:SetWidth(BTN_W + 16)
 end
 

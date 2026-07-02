@@ -224,12 +224,16 @@ RM.SpecDetection = {
 
 function RM.GetTemplates()
     if not AIP.db then return RM.DefaultTemplates end
-    if not AIP.db.raidWarningTemplates or #AIP.db.raidWarningTemplates == 0 then
+    -- Seed defaults exactly once (persisted flag) rather than whenever the list
+    -- is empty, so intentionally deleting every template actually sticks.
+    if not AIP.db.raidWarningTemplatesInit then
+        AIP.db.raidWarningTemplatesInit = true
         AIP.db.raidWarningTemplates = {}
         for _, t in ipairs(RM.DefaultTemplates) do
-            table.insert(AIP.db.raidWarningTemplates, {name = t.name, message = t.message})
+            table.insert(AIP.db.raidWarningTemplates, {name = t.name, message = t.message, channel = t.channel})
         end
     end
+    AIP.db.raidWarningTemplates = AIP.db.raidWarningTemplates or {}
     return AIP.db.raidWarningTemplates
 end
 
@@ -1062,10 +1066,20 @@ function RM.Create(parent)
     reservedInput:SetWidth(120)
     reservedInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     reservedInput:SetScript("OnTextChanged", function(self, userInput)
-        if userInput and AIP.db then
+        -- Save on EVERY change, not just keyboard input: shift-clicked item links
+        -- arrive via EditBox:Insert() which fires OnTextChanged with userInput=false
+        -- and would otherwise never persist. RM.Update's SetText just re-saves the
+        -- same loaded value, which is harmless.
+        if AIP.db then
             AIP.db.reservedItems = self:GetText()
         end
     end)
+    -- Accept shift-clicked item links: each item goes on its own line so the
+    -- line-based announce (RT.AnnounceReserved) sends one link per warning.
+    if AIP.UI and AIP.UI.MakeEditBoxLinkable then
+        AIP.UI.MakeEditBoxLinkable(reservedInput)
+    end
+    reservedInput._aipLinkNewline = true  -- hint: put each inserted link on its own line
     reservedScroll:SetScrollChild(reservedInput)
     content.reservedInput = reservedInput
 
@@ -1077,7 +1091,13 @@ function RM.Create(parent)
         local items = content.reservedInput:GetText()
         if items and items ~= "" then
             local itemList = items:gsub("\n", ", "):gsub(", $", "")
-            SendChatMessage("Reserved items: " .. itemList, "RAID_WARNING")
+            -- Route through the smart sender so non-officers fall back to
+            -- RAID/PARTY/SAY instead of silently sending nothing on RAID_WARNING.
+            if AIP.RaidTools and AIP.RaidTools.Send then
+                AIP.RaidTools.Send("Reserved items: " .. itemList, "RAID_WARNING")
+            else
+                SendChatMessage("Reserved items: " .. itemList, "RAID_WARNING")
+            end
         end
     end)
     content.announceResBtn = announceResBtn
@@ -2034,7 +2054,10 @@ function RM.RefreshLootBanDisplay(content)
         local entry = data[offset + i]
         if entry then
             row.playerText:SetText(entry.player or "")
-            row.bossText:SetText(entry.boss or "")
+            -- Show the boss, and the linked item when the ban came from a drop.
+            local bossText = entry.boss or "(all bosses)"
+            if entry.itemName then bossText = bossText .. " - " .. entry.itemName end
+            row.bossText:SetText(bossText)
             row.dataIndex = offset + i
             row.deleteBtn:Show()
             row:Show()
@@ -2324,62 +2347,80 @@ local function CreateDropdownMenu(parent, width, items, onSelect, placeholder)
     menu:Hide()
     dropdown.menu = menu
 
-    -- Function to populate menu
-    function dropdown:SetItems(newItems)
-        self.items = newItems or {}
-        -- Clear existing rows
-        if self.menuRows then
-            for _, row in ipairs(self.menuRows) do
+    -- Mouse-wheel scroll so lists longer than the 12-row cap are fully reachable.
+    menu:EnableMouseWheel(true)
+    menu:SetScript("OnMouseWheel", function(_, delta)
+        dropdown.scrollOffset = (dropdown.scrollOffset or 0) - delta
+        dropdown:RefreshMenuRows()
+    end)
+
+    -- Populate a fixed pool of <=12 visible rows from the (possibly larger) list.
+    local MAX_VISIBLE = 12
+
+    function dropdown:RefreshMenuRows()
+        local numVisible = math.min(#self.items, MAX_VISIBLE)
+        local maxOffset = math.max(0, #self.items - MAX_VISIBLE)
+        if self.scrollOffset > maxOffset then self.scrollOffset = maxOffset end
+        if self.scrollOffset < 0 then self.scrollOffset = 0 end
+        for i = 1, #self.menuRows do
+            local row = self.menuRows[i]
+            local item = self.items[i + self.scrollOffset]
+            if i <= numVisible and item then
+                row.item = item
+                if item == "<Custom Name>" or item == "<Custom Boss>" then
+                    row.text:SetText("|cFFFFFF00" .. item .. "|r")
+                elseif item == "(None)" then
+                    row.text:SetText("|cFF888888" .. item .. "|r")
+                elseif item:match("^%-%-") then
+                    row.text:SetText("|cFF00FFFF" .. item .. "|r")
+                else
+                    row.text:SetText(item)
+                end
+                row:Show()
+            else
+                row.item = nil
                 row:Hide()
             end
         end
-        self.menuRows = {}
+    end
 
-        local maxVisible = math.min(#self.items, 12)
-        self.menu:SetHeight(maxVisible * 16 + 10)
+    function dropdown:SetItems(newItems)
+        self.items = newItems or {}
+        self.scrollOffset = 0
+        local numVisible = math.min(#self.items, MAX_VISIBLE)
+        self.menu:SetHeight(numVisible * 16 + 10)
 
-        for i, item in ipairs(self.items) do
-            if i > 12 then break end  -- Limit visible items
-            local row = CreateFrame("Button", nil, self.menu)
-            row:SetSize(width - 10, 16)
-            row:SetPoint("TOPLEFT", 5, -5 - (i - 1) * 16)
-
-            local rowText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            rowText:SetPoint("LEFT", 3, 0)
-            rowText:SetPoint("RIGHT", -3, 0)
-            rowText:SetJustifyH("LEFT")
-
-            -- Style based on item type
-            if item == "<Custom Name>" or item == "<Custom Boss>" then
-                rowText:SetText("|cFFFFFF00" .. item .. "|r")
-            elseif item == "(None)" then
-                rowText:SetText("|cFF888888" .. item .. "|r")
-            elseif item:match("^%-%-") then
-                rowText:SetText("|cFF00FFFF" .. item .. "|r")
-            else
-                rowText:SetText(item)
+        self.menuRows = self.menuRows or {}
+        for i = 1, MAX_VISIBLE do
+            local row = self.menuRows[i]
+            if not row then
+                row = CreateFrame("Button", nil, self.menu)
+                row:SetSize(width - 10, 16)
+                row:SetPoint("TOPLEFT", 5, -5 - (i - 1) * 16)
+                row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                row.text:SetPoint("LEFT", 3, 0)
+                row.text:SetPoint("RIGHT", -3, 0)
+                row.text:SetJustifyH("LEFT")
+                row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+                row:SetScript("OnClick", function(r)
+                    local item = r.item
+                    if not item then return end
+                    if self.onSelect then self.onSelect(item) end
+                    self.selectedValue = item
+                    if item == "(None)" then
+                        self.text:SetText("|cFF888888(None)|r")
+                    elseif item == "<Custom Name>" or item == "<Custom Boss>" then
+                        self.text:SetText("|cFFFFFF00" .. item .. "|r")
+                    else
+                        self.text:SetText(item)
+                        self.text:SetTextColor(1, 1, 1)
+                    end
+                    self.menu:Hide()
+                end)
+                self.menuRows[i] = row
             end
-
-            row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
-
-            row:SetScript("OnClick", function()
-                if self.onSelect then
-                    self.onSelect(item)
-                end
-                self.selectedValue = item
-                if item == "(None)" then
-                    self.text:SetText("|cFF888888(None)|r")
-                elseif item == "<Custom Name>" or item == "<Custom Boss>" then
-                    self.text:SetText("|cFFFFFF00" .. item .. "|r")
-                else
-                    self.text:SetText(item)
-                    self.text:SetTextColor(1, 1, 1)
-                end
-                self.menu:Hide()
-            end)
-
-            table.insert(self.menuRows, row)
         end
+        self:RefreshMenuRows()
     end
 
     -- Toggle menu
@@ -2407,10 +2448,31 @@ local function CreateDropdownMenu(parent, width, items, onSelect, placeholder)
     return dropdown
 end
 
-function RM.ShowLootBanAddPopup(prefilledPlayer)
+-- Boss names actually present in a raid session (for smart dropdown population).
+-- Falls back to the current session, then to nothing (caller uses RM.BossList).
+local function GetSessionBossNames(sessionId)
+    local RSM = AIP.RaidSession
+    local session
+    if sessionId and RSM and RSM.GetSession then session = RSM.GetSession(sessionId) end
+    if not session and RSM and RSM.GetCurrentSession then session = RSM.GetCurrentSession() end
+    local names, seen = {}, {}
+    if session and session.bosses then
+        for _, b in ipairs(session.bosses) do
+            if b.name and not seen[b.name] then
+                seen[b.name] = true
+                table.insert(names, b.name)
+            end
+        end
+    end
+    return names
+end
+
+-- context (optional): { sessionId, bossId, bossName, itemLink, itemName } links
+-- the ban to the raid session, the boss it dropped from, and the picked item.
+function RM.ShowLootBanAddPopup(prefilledPlayer, context)
     if not RM.LootBanAddPopup then
         local popup = CreateFrame("Frame", "AIPRMLootBanAddPopup", UIParent)
-        popup:SetSize(280, 170)
+        popup:SetSize(280, 195)
         popup:SetPoint("CENTER")
         popup:SetFrameStrata("DIALOG")
         popup:SetFrameLevel(100)
@@ -2496,6 +2558,15 @@ function RM.ShowLootBanAddPopup(prefilledPlayer)
         if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(customBossInput) end
         popup.customBossInput = customBossInput
 
+        -- Linked-item label (shows the specific looted item this ban came from)
+        local contextItemLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        contextItemLabel:SetPoint("BOTTOM", 0, 46)
+        contextItemLabel:SetWidth(250)
+        contextItemLabel:SetJustifyH("CENTER")
+        contextItemLabel:SetTextColor(0.8, 0.8, 0.8)
+        contextItemLabel:Hide()
+        popup.contextItemLabel = contextItemLabel
+
         -- Buttons
         local addBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
         addBtn:SetSize(80, 22)
@@ -2534,6 +2605,15 @@ function RM.ShowLootBanAddPopup(prefilledPlayer)
                 boss = boss,
             }
 
+            -- Link the ban to the raid session, boss, and specific looted item.
+            local ctx = popup.lootContext
+            if ctx then
+                entry.sessionId = ctx.sessionId
+                entry.itemLink = ctx.itemLink
+                entry.itemName = ctx.itemName
+            end
+            entry.time = time()
+
             if not AIP.db.lootBans then AIP.db.lootBans = {} end
             table.insert(AIP.db.lootBans, entry)
             if RM.Content then RM.RefreshLootBanDisplay(RM.Content) end
@@ -2566,6 +2646,20 @@ function RM.ShowLootBanAddPopup(prefilledPlayer)
     end
 
     local popup = RM.LootBanAddPopup
+    popup.lootContext = context
+
+    -- Smartly populate the boss dropdown from the raid session's actual bosses;
+    -- fall back to the full static boss list when no session context is available.
+    local bossItems = {"(None)", "<Custom Boss>"}
+    local sessionBosses = GetSessionBossNames(context and context.sessionId)
+    if #sessionBosses > 0 then
+        for _, n in ipairs(sessionBosses) do table.insert(bossItems, n) end
+    else
+        for _, n in ipairs(RM.BossList) do
+            if n ~= "(None)" and n ~= "<Custom Boss>" then table.insert(bossItems, n) end
+        end
+    end
+    popup.bossDropdown:SetItems(bossItems)
 
     -- Build player list from group members
     local playerItems = {"<Custom Name>", "-- Group Members --"}
@@ -2616,6 +2710,23 @@ function RM.ShowLootBanAddPopup(prefilledPlayer)
         popup.playerDropdown.selectedValue = prefilledPlayer
         popup.playerDropdown.text:SetText(prefilledPlayer)
         popup.playerDropdown.text:SetTextColor(1, 1, 1)
+    end
+
+    -- Pre-fill the boss from the loot context (the boss the item dropped from).
+    if context and context.bossName and context.bossName ~= "" and context.bossName ~= "Trash" then
+        popup.bossDropdown.selectedValue = context.bossName
+        popup.bossDropdown.text:SetText(context.bossName)
+        popup.bossDropdown.text:SetTextColor(1, 1, 1)
+    end
+
+    -- Show which item this ban is linked to, if any.
+    if popup.contextItemLabel then
+        if context and (context.itemLink or context.itemName) then
+            popup.contextItemLabel:SetText("Item: " .. (context.itemLink or context.itemName))
+            popup.contextItemLabel:Show()
+        else
+            popup.contextItemLabel:Hide()
+        end
     end
 
     popup:Show()

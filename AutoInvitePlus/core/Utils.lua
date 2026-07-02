@@ -157,6 +157,31 @@ function Utils.FormatTimeAgo(timestamp)
     return Utils.FormatTime(diff) .. " ago"
 end
 
+-- Map an item-link color code to a quality index (WotLK colors).
+local QUALITY_BY_COLOR = {
+    ["9d9d9d"] = 0,  -- Poor
+    ["ffffff"] = 1,  -- Common
+    ["1eff00"] = 2,  -- Uncommon
+    ["0070dd"] = 3,  -- Rare
+    ["a335ee"] = 4,  -- Epic
+    ["ff8000"] = 5,  -- Legendary
+    ["e6cc80"] = 6,  -- Artifact / Heirloom
+}
+
+-- Parse an item link WITHOUT GetItemInfo (which needs the item to be cached).
+-- Returns name, quality, itemId - the name and quality are always present in the
+-- link itself, so loot from other players (whose items we may not have cached)
+-- can still be recorded reliably. Returns nil if it's not an item link.
+function Utils.ParseItemLink(itemLink)
+    if not itemLink then return nil end
+    local itemId = itemLink:match("|Hitem:(%d+)")
+    local name = itemLink:match("|h%[(.-)%]|h")
+    -- Color is the trailing 6 hex of the |cAARRGGBB prefix.
+    local color = itemLink:match("|c%x%x(%x%x%x%x%x%x)")
+    local quality = color and QUALITY_BY_COLOR[color:lower()] or 1
+    return name, quality, itemId and tonumber(itemId) or nil
+end
+
 -- Format date for display
 function Utils.FormatDate(timestamp)
     if not timestamp then return "Unknown" end
@@ -682,7 +707,9 @@ function Utils.IterateGroup(includePlayer)
 
     if numRaid > 0 then
         for i = 1, numRaid do
-            local name, _, _, _, class = GetRaidRosterInfo(i)
+            -- 6th return (fileName) is the English UPPERCASE class token; the
+            -- 5th is the localized display name. Match UnitClass's 2nd return.
+            local name, _, _, _, _, class = GetRaidRosterInfo(i)
             if name then
                 local unit = "raid" .. i
                 if includePlayer or not UnitIsUnit(unit, "player") then

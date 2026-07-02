@@ -249,11 +249,18 @@ function TD.GenerateRaidSessions(count)
                 attendees = attendeeNames,  -- array of name strings
             })
 
-            -- Loot drops for this boss (session.loot array, with bossId link)
-            local numDrops = math.random(1, 3)
+            -- Loot drops for this boss (session.loot array, with bossId link).
+            -- Cycle categories so the Picked/Won/Unassigned tabs all have fixtures;
+            -- unassigned drops carry no winner (rendered as a dash).
+            local categories = {"picked", "won", "unassigned"}
+            local numDrops = 3
             for k = 1, numDrops do
                 local item = RandomElement(LOOT_ITEMS)
-                local winner = RandomElement(TEST_NAMES) .. tostring(math.random(1, 99))
+                local category = categories[k]
+                local winner = nil
+                if category ~= "unassigned" then
+                    winner = RandomElement(TEST_NAMES) .. tostring(math.random(1, 99))
+                end
                 table.insert(loot, {
                     itemId = item.id,
                     itemName = item.name,
@@ -262,6 +269,7 @@ function TD.GenerateRaidSessions(count)
                     itemLevel = math.random(245, 284),
                     bossId = b,
                     winner = winner,
+                    category = category,
                     source = bossName,
                     timestamp = killTime + math.random(10, 60),
                 })
@@ -522,19 +530,12 @@ function TD.RefreshAllUI()
         end
     end
 
-    -- Refresh individual panels
-    if AIP.BlacklistPanel and AIP.BlacklistPanel.Refresh then
-        AIP.BlacklistPanel.Refresh()
-    end
-    if AIP.FavoritesPanel and AIP.FavoritesPanel.Refresh then
-        AIP.FavoritesPanel.Refresh()
-    end
-    if AIP.LootHistoryPanel and AIP.LootHistoryPanel.Refresh then
-        AIP.LootHistoryPanel.Refresh()
-    end
-    if AIP.RaidManagementPanel and AIP.RaidManagementPanel.RefreshLootBans then
-        AIP.RaidManagementPanel.RefreshLootBans()
-    end
+    -- Refresh individual panels (they live under AIP.Panels.* with .Update()).
+    local panels = AIP.Panels or {}
+    if panels.Blacklist and panels.Blacklist.Update then panels.Blacklist.Update() end
+    if panels.Favorites and panels.Favorites.Update then panels.Favorites.Update() end
+    if panels.LootHistory and panels.LootHistory.Update then panels.LootHistory.Update() end
+    if panels.RaidMgmt and panels.RaidMgmt.Update then panels.RaidMgmt.Update() end
 
     -- Force update main UI
     if AIP.UpdateUI then

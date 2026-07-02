@@ -63,40 +63,18 @@ end
 -- CUSTOM ANNOUNCEMENTS
 -- ============================================================================
 
--- Extra predefined raid-warning buttons. These are topped up once into existing
--- saved variables (the deep-merge of `defaults` only fills missing keys, so it
--- never adds new entries to a DB that already has a customAnnouncements list).
-RT.ExtraPredefined = {
-    {label = "Pull 10",   message = "Pulling in 10 seconds - get in position!", channel = "RAID_WARNING"},
-    {label = "Switch",    message = "SWITCH to the priority target / adds!",    channel = "RAID_WARNING"},
-    {label = "Tank Swap", message = "TANK SWAP - taunt NOW!",                   channel = "RAID_WARNING"},
-    {label = "Dispel",    message = "DISPEL / decurse now!",                    channel = "RAID_WARNING"},
-    {label = "Cooldowns", message = "Use personal cooldowns / defensives!",     channel = "RAID_WARNING"},
-    {label = "Break",     message = "5 minute break - back at :00, be ready!",  channel = "RAID"},
-}
-
-local AC_LIMIT = 12  -- matches AC_ROWS in RaidToolsUI
-
+-- The floating bar's buttons ARE the raid-warning templates - the two are wired
+-- to the same list (AIP.db.raidWarningTemplates), so editing in either place is
+-- reflected in the other. Entries are {name, message, channel?}; RM.GetTemplates
+-- seeds the defaults on first use.
 function RT.GetAnnouncements()
     if not AIP.db then return {} end
-    AIP.db.customAnnouncements = AIP.db.customAnnouncements or {}
-
-    -- One-time top-up of the extra predefined buttons (by label, never duplicating
-    -- and respecting any the user has deleted of the originals).
-    if not AIP.db.announcementsToppedUp then
-        local have = {}
-        for _, a in ipairs(AIP.db.customAnnouncements) do
-            if a.label then have[a.label:lower()] = true end
-        end
-        for _, a in ipairs(RT.ExtraPredefined) do
-            if #AIP.db.customAnnouncements < AC_LIMIT and not have[(a.label or ""):lower()] then
-                table.insert(AIP.db.customAnnouncements, {label = a.label, message = a.message, channel = a.channel})
-            end
-        end
-        AIP.db.announcementsToppedUp = true
+    local RM = AIP.Panels and AIP.Panels.RaidMgmt
+    if RM and RM.GetTemplates then
+        return RM.GetTemplates()
     end
-
-    return AIP.db.customAnnouncements
+    AIP.db.raidWarningTemplates = AIP.db.raidWarningTemplates or {}
+    return AIP.db.raidWarningTemplates
 end
 
 function RT.SendAnnouncement(index)

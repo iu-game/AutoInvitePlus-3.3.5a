@@ -194,9 +194,17 @@ function AIP.UpdateWaitlistEntry(name, role, note, priority)
                 e.priority = i
             end
 
-            -- Notify all affected players of their new positions
+            -- Notify affected players, staggered ~0.4s apart to avoid tripping
+            -- the server chat throttle (see Core.lua OnChatBanDetected).
+            local n = 0
             for playerName, newPos in pairs(affectedPlayers) do
-                NotifyPositionChange(playerName, newPos)
+                n = n + 1
+                local who, pos = playerName, newPos
+                if AIP.Utils and AIP.Utils.DelayedCall then
+                    AIP.Utils.DelayedCall(n * 0.4, function() NotifyPositionChange(who, pos) end)
+                else
+                    NotifyPositionChange(who, pos)
+                end
             end
         end
     end

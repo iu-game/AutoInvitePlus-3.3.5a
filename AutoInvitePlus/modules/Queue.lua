@@ -98,8 +98,8 @@ function AIP.AddToQueue(name, message, role, gs, class)
     -- Try to get class and GS if not provided
     local playerClass = class
     local playerGS = gs
-    if not playerGS and AIP.Integrations and AIP.Integrations.GetPlayerGS then
-        playerGS = AIP.Integrations.GetPlayerGS(name)
+    if not playerGS and AIP.Integrations and AIP.Integrations.GetGearScore then
+        playerGS = AIP.Integrations.GetGearScore(name)
     end
 
     -- Create queue entry
@@ -160,10 +160,17 @@ function AIP.AddToQueue(name, message, role, gs, class)
     -- Notify other players of position changes if they moved down
     -- Use pcall to prevent errors from breaking the queue operation
     if insertPos < #AIP.db.queue and AIP.db.queueNotifyPosition then
+        -- Stagger the whispers ~0.5s apart to respect chat throttle instead of
+        -- firing a burst on a single frame (can trip server squelch).
+        local delay = 0
         for i = insertPos + 1, #AIP.db.queue do
             local movedEntry = AIP.db.queue[i]
             if movedEntry and movedEntry.name then
-                pcall(SendChatMessage, "[AutoInvite+] Your queue position changed to: #" .. i, "WHISPER", nil, movedEntry.name)
+                local targetName, newPos = movedEntry.name, i
+                delay = delay + 0.5
+                AIP.Utils.DelayedCall(delay, function()
+                    pcall(SendChatMessage, "[AutoInvite+] Your queue position changed to: #" .. newPos, "WHISPER", nil, targetName)
+                end)
             end
         end
     end
@@ -220,8 +227,9 @@ function AIP.ShowQueueWithEntry()
         AIP.CentralGUI.UpdateQueuePanel(container)
     end
 
-    -- Show the main window on LFM tab
-    if AIP.CentralGUI.Show then
+    -- Only raise/refresh the window if the user already has it open; do NOT
+    -- force it open on every queued whisper (intrusive, can hijack focus).
+    if AIP.CentralGUI.Frame and AIP.CentralGUI.Frame:IsShown() and AIP.CentralGUI.Show then
         AIP.CentralGUI.Show("lfm")
     end
 end
@@ -556,6 +564,7 @@ local autoProcessTimer = CreateFrame("Frame")
 local autoProcessElapsed = 0
 local AUTO_PROCESS_INTERVAL = 2  -- Check every 2 seconds
 local lastRaidSlots = 0
+local autoProcessInitialized = false
 
 -- Get current available raid slots
 local function GetAvailableRaidSlots()
@@ -591,6 +600,14 @@ autoProcessTimer:SetScript("OnUpdate", function(self, elapsed)
     autoProcessElapsed = 0
 
     local currentSlots = GetAvailableRaidSlots()
+
+    -- First run after login/reload: seed the baseline so we only react to FUTURE
+    -- slot gains (someone leaving), not to the full open-slot count on startup.
+    if not autoProcessInitialized then
+        autoProcessInitialized = true
+        lastRaidSlots = currentSlots
+        return
+    end
 
     -- Only process if we gained slots (someone left or raid converted)
     if currentSlots > lastRaidSlots and currentSlots > 0 then

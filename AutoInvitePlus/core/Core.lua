@@ -40,6 +40,8 @@ local defaults = {
     -- LFM/LFG chat scanner
     chatScanEnabled = true,         -- Persisted enable for the LFM/LFG browser scanner
     cacheDuration = 15,             -- Minutes to keep scanned LFM/LFG entries (drives scanner prune)
+    voaAlert = true,                -- Pulse the minimap icon when VOA listings are available
+    hideBlacklistedListings = true, -- Hide blacklisted players' listings from the browser tree
 
     -- Player mode: "none", "lfm" (looking for members), "lfg" (looking for group)
     playerMode = "none",
@@ -560,14 +562,19 @@ local function ParsePlayerInfo(author, message)
         info.role = AIP.Parsers.DetectRole(message)
     end
 
+    -- Try to detect class from message (feeds acceptClasses + Looking-For matching)
+    if AIP.Parsers and AIP.Parsers.DetectClass then
+        info.class = AIP.Parsers.DetectClass(message)
+    end
+
     -- Try to detect GearScore from message
     if AIP.Parsers and AIP.Parsers.ParseGearScore then
         info.gs = AIP.Parsers.ParseGearScore(message)
     end
 
     -- Try to get GS from GearScore addon if available
-    if not info.gs and AIP.Integrations and AIP.Integrations.GetPlayerGS then
-        info.gs = AIP.Integrations.GetPlayerGS(author)
+    if not info.gs and AIP.Integrations and AIP.Integrations.GetGearScore then
+        info.gs = AIP.Integrations.GetGearScore(author)
     end
 
     return info
@@ -1091,10 +1098,12 @@ function AIP.InviteGuild()
     GuildRoster()
     SetGuildRosterShowOffline(false)
 
-    local numMembers, numOnline = GetNumGuildMembers()
+    -- 3.3.5a GetNumGuildMembers returns only the total; with ShowOffline(false)
+    -- the roster is filtered to online members, so iterate the single count.
+    local numMembers = GetNumGuildMembers()
     local invited = 0
 
-    for i = 1, numOnline do
+    for i = 1, numMembers do
         local name = GetGuildRosterInfo(i)
         if name and name ~= UnitName("player") then
             if not UnitInRaid(name) and not UnitInParty(name) then
@@ -1387,10 +1396,8 @@ local function SlashHandler(msg)
     elseif cmd == "lfm" or cmd == "browser" or cmd == "scan" then
         if AIP.CentralGUI then
             AIP.CentralGUI.Show("lfm")
-        elseif AIP.LFMBrowser and AIP.LFMBrowser.SlashHandler then
-            AIP.LFMBrowser.SlashHandler(rest)
         else
-            AIP.ToggleLFMBrowserUI()
+            AIP.Print("LFM browser UI not available (CentralGUI failed to load).")
         end
 
     -- LFG Tab (new)

@@ -2,7 +2,7 @@
 ## Title: AutoInvite Plus
 ## Notes: Complete raid organization suite with LFM/LFG browser and inspection engine
 ## Author: iuGames
-## Version: 6.1.2
+## Version: 6.2.0
 ## SavedVariables: AutoInvitePlusDB
 ## OptionalDeps: GearScore, GearScoreLite, PlayerScore
 

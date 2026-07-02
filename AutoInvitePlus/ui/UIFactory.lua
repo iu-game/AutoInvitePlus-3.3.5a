@@ -130,6 +130,61 @@ end
 -- Clean, consistent input style: dark fill, subtle border, proper text padding,
 -- gold border while focused. Applied to all addon inputs for a uniform look and
 -- to avoid the stock InputBoxTemplate's offset/jammed-text quirks.
+-- Shift-click link support for text edit boxes.
+-- Item links call ChatEdit_InsertLink unconditionally, but quest / achievement /
+-- spell / etc. links only insert when a *chat* edit box is "active"
+-- (ChatEdit_GetActiveWindow ~= nil). Our custom fields aren't chat boxes, so we
+-- (1) report our focused box as the active window so those gated paths proceed,
+-- and (2) intercept ChatEdit_InsertLink to drop the link into our box.
+local linkHookInstalled = false
+
+-- The currently keyboard-focused editbox, but only if it's one of ours. Using
+-- GetCurrentKeyBoardFocus avoids relying on focus events firing in a set order.
+local function AIPLinkTarget()
+    local f = GetCurrentKeyBoardFocus and GetCurrentKeyBoardFocus()
+    if f and f._aipLinkable and f:IsVisible() then
+        return f
+    end
+    return nil
+end
+
+local function InstallInsertLinkHook()
+    if linkHookInstalled then return end
+    linkHookInstalled = true
+
+    local origInsert = ChatEdit_InsertLink
+    ChatEdit_InsertLink = function(link)
+        local box = AIPLinkTarget()
+        if link and box then
+            -- For list-style fields, drop each link onto its own line.
+            if box._aipLinkNewline then
+                local cur = box:GetText() or ""
+                if cur ~= "" and cur:sub(-1) ~= "\n" then box:Insert("\n") end
+            end
+            box:Insert(link)
+            return true
+        end
+        if origInsert then return origInsert(link) end
+        return false
+    end
+
+    -- Make gated link paths (quests, achievements, ...) believe a chat box is
+    -- active while our field is focused, so they call ChatEdit_InsertLink above.
+    if ChatEdit_GetActiveWindow then
+        local origActive = ChatEdit_GetActiveWindow
+        ChatEdit_GetActiveWindow = function()
+            return AIPLinkTarget() or origActive()
+        end
+    end
+end
+
+-- Make a text EditBox accept shift-clicked links while it is focused.
+function UI.MakeEditBoxLinkable(editBox)
+    if not editBox or editBox._aipLinkable then return end
+    editBox._aipLinkable = true
+    InstallInsertLinkHook()
+end
+
 function UI.StyleEditBox(editBox)
     if not editBox then return end
     -- Hide any InputBoxTemplate cap textures (Left/Right/Middle) if present
@@ -152,6 +207,10 @@ function UI.StyleEditBox(editBox)
     editBox:SetBackdropBorderColor(0.45, 0.45, 0.5)
     editBox:HookScript("OnEditFocusGained", function(self) self:SetBackdropBorderColor(1, 0.82, 0) end)
     editBox:HookScript("OnEditFocusLost", function(self) self:SetBackdropBorderColor(0.45, 0.45, 0.5) end)
+    -- Text boxes accept shift-clicked links; numeric boxes don't (flagged below).
+    if not editBox._aipNumeric then
+        UI.MakeEditBoxLinkable(editBox)
+    end
     return editBox
 end
 
@@ -163,6 +222,7 @@ function UI.CreateEditBox(parent, width, height, numeric, maxChars)
 
     if numeric then
         editBox:SetNumeric(true)
+        editBox._aipNumeric = true  -- so StyleEditBox skips link support
     end
 
     if maxChars then
@@ -401,6 +461,13 @@ function UI.CreateScrollList(parent, rowCount, rowHeight, width, createRowFunc)
 
     -- Update function
     container.Update = function(self, data, displayFunc)
+        -- Remember the last inputs so scrolling can re-render.
+        self._data = data or self._data
+        self._display = displayFunc or self._display
+        data = self._data
+        displayFunc = self._display
+        if not (data and displayFunc) then return end
+
         local numEntries = #data
         FauxScrollFrame_Update(self.scrollFrame, numEntries, self.rowCount, self.rowHeight)
 
@@ -419,10 +486,12 @@ function UI.CreateScrollList(parent, rowCount, rowHeight, width, createRowFunc)
         end
     end
 
-    -- Set scroll handler
+    -- Set scroll handler: re-render the remembered data on scroll.
     scrollFrame:SetScript("OnVerticalScroll", function(self, offset)
         FauxScrollFrame_OnVerticalScroll(self, offset, container.rowHeight, function()
-            -- This will be replaced by caller
+            if container._data and container._display then
+                container:Update(container._data, container._display)
+            end
         end)
     end)
 
@@ -938,7 +1007,21 @@ end
 -- Show LFG Tab
 function AIP_ShowLFGTab()
     local AIP = AutoInvitePlus
-    if AIP and AIP.CentralGUI then
-        AIP.CentralGUI.Show("lfg")
+    if not (AIP and AIP.CentralGUI) then return end
+    -- There is no top-level "lfg" tab; LFG is a sub-tab inside the LFM browser.
+    AIP.CentralGUI.Show("lfm")
+    local GUI = AIP.CentralGUI
+    local container = GUI.Frame and GUI.Frame.tabContents and GUI.Frame.tabContents["lfm"]
+    if container then
+        container.queueSubTab = "lfg"
+        if container.queueTabBtn and container.queueTabBtn.bg then
+            container.queueTabBtn.bg:SetTexture(0.15, 0.15, 0.15, 1)
+            if container.queueTabBtn.text then container.queueTabBtn.text:SetTextColor(0.8, 0.8, 0.8) end
+        end
+        if container.lfgTabBtn and container.lfgTabBtn.bg then
+            container.lfgTabBtn.bg:SetTexture(0.3, 0.3, 0.4, 1)
+            if container.lfgTabBtn.text then container.lfgTabBtn.text:SetTextColor(1, 0.82, 0) end
+        end
+        if GUI.UpdateQueuePanel then GUI.UpdateQueuePanel(container) end
     end
 end

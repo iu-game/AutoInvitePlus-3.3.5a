@@ -185,7 +185,7 @@ local function CreateCompositionFrame()
     -- BOTTOM BUTTONS
     -- ========================================
     local btnLFM = UI.CreateButton(frame, "Open LFM Browser", 120, 25, function()
-        if AIP.ToggleLFMBrowserUI then AIP.ToggleLFMBrowserUI() end
+        if AIP.CentralGUI and AIP.CentralGUI.Show then AIP.CentralGUI.Show("lfm") end
     end)
     btnLFM:SetPoint("BOTTOMLEFT", 20, 15)
 

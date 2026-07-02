@@ -12,6 +12,18 @@ LH.SelectedRaid = nil
 LH.SelectedBoss = nil
 LH.CurrentFilter = "all"
 LH.CurrentSearch = ""
+LH.CurrentCategory = "picked"  -- which loot tab: "picked" | "won" | "unassigned"
+
+-- Classify a loot entry into its display tab. New entries carry an explicit
+-- `category`; legacy entries have none, so fall back to the winner: no/Unknown
+-- winner means it was seen but never attributed -> Unassigned, otherwise Picked.
+function LH.EntryCategory(entry)
+    if not entry then return "picked" end
+    if entry.category then return entry.category end
+    local w = entry.winner
+    if not w or w == "" or w == "Unknown" then return "unassigned" end
+    return "picked"
+end
 
 -- Item quality colors
 LH.QualityColors = {
@@ -115,6 +127,17 @@ function LH.GetLoot()
         loot = filtered
     end
 
+    -- Filter by category tab (Picked / Won / Unassigned)
+    if LH.CurrentCategory then
+        local filtered = {}
+        for _, entry in ipairs(loot) do
+            if LH.EntryCategory(entry) == LH.CurrentCategory then
+                table.insert(filtered, entry)
+            end
+        end
+        loot = filtered
+    end
+
     -- Apply quality filter
     if LH.CurrentFilter ~= "all" then
         local filtered = {}
@@ -162,22 +185,19 @@ end
 -- Pending items waiting for item info
 LH.PendingItems = LH.PendingItems or {}
 
-function LH.AddLootEntry(itemLink, looter, source, zone)
+function LH.AddLootEntry(itemLink, looter, source, zone, category)
     if not AIP.db then return end
     if not AIP.db.lootHistory then AIP.db.lootHistory = {} end
 
     local itemName, _, itemQuality, itemLevel = GetItemInfo(itemLink)
     if not itemName then
-        -- Item not cached, queue for retry
-        table.insert(LH.PendingItems, {
-            itemLink = itemLink,
-            looter = looter,
-            source = source,
-            zone = zone or GetRealZoneText() or "Unknown",
-            timestamp = time(),
-        })
-        return
+        -- Item isn't cached client-side (common for OTHER players' loot on
+        -- 3.3.5a). Fall back to the name/quality embedded in the link so the
+        -- pick still registers instead of being lost waiting on item info.
+        itemName, itemQuality = AIP.Utils.ParseItemLink(itemLink)
+        itemLevel = itemLevel or 0
     end
+    if not itemName then return end            -- not a real item link
     if itemQuality and itemQuality < 2 then return end  -- Skip gray/white
 
     local itemId = itemLink:match("item:(%d+)")
@@ -191,6 +211,7 @@ function LH.AddLootEntry(itemLink, looter, source, zone)
         looter = looter,
         source = source or "Unknown",
         zone = zone or GetRealZoneText() or "Unknown",
+        category = category or "picked",
         timestamp = time(),
         raidStartTimestamp = AIP.db and AIP.db.currentRaidStartTime or nil,
     }
@@ -386,8 +407,14 @@ function LH.Create(parent)
 
         row:SetScript("OnClick", function(self)
             if self.data then
-                -- Could add to loot ban or other action
-                LH.ShowPlayerContextMenu(self, self.data)
+                -- Attendee -> loot ban / blacklist / favorite, linked to the
+                -- current raid session and the selected boss.
+                local ctx = {
+                    sessionId = LH.SelectedRaid,
+                    bossId = LH.SelectedBoss,
+                    bossName = LH.BossNameById(LH.SelectedBoss),
+                }
+                LH.ShowPlayerContextMenu(self, self.data, ctx)
             end
         end)
 
@@ -469,13 +496,43 @@ function LH.Create(parent)
     local lootPanel = LH.CreatePanelFrame(frame, "Raid Loot", PANEL_WIDTH_LOOT, BOTTOM_ROW_HEIGHT)
     lootPanel:SetPoint("TOPLEFT", raidAttPanel, "TOPRIGHT", PANEL_PADDING, 0)
 
-    -- Filter and search row
+    -- Category tabs (Picked / Won / Unassigned) - right-aligned on the title row
+    -- so they don't collide with the filter/search row or column headers below.
+    frame.categoryTabs = {}
+    local lootTabDefs = {
+        {text = "Picked", id = "picked", w = 54},
+        {text = "Won", id = "won", w = 44},
+        {text = "Unassigned", id = "unassigned", w = 82},
+    }
+    -- Build then anchor right-to-left so the group hugs the panel's top-right.
+    for _, def in ipairs(lootTabDefs) do
+        local tab = AIP.UI.CreateTabButton(lootPanel, def.w, 16, def.text, def.id)
+        tab:SetScript("OnClick", function(self)
+            LH.CurrentCategory = self.tabId
+            for _, t in ipairs(frame.categoryTabs) do
+                t:SetSelected(t == self)
+            end
+            LH.RefreshLoot()
+        end)
+        tab:SetSelected(def.id == LH.CurrentCategory)
+        table.insert(frame.categoryTabs, tab)
+    end
+    for i = #frame.categoryTabs, 1, -1 do
+        local tab = frame.categoryTabs[i]
+        if i == #frame.categoryTabs then
+            tab:SetPoint("TOPRIGHT", lootPanel, "TOPRIGHT", -8, -4)
+        else
+            tab:SetPoint("TOPRIGHT", frame.categoryTabs[i + 1], "TOPLEFT", -3, 0)
+        end
+    end
+
+    -- Filter and search row (below the title/tabs row)
     local filterLabel = lootPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    filterLabel:SetPoint("TOPLEFT", 8, -22)
+    filterLabel:SetPoint("TOPLEFT", 8, -26)
     filterLabel:SetText("Filter:")
 
     local filterDropdown = CreateFrame("Frame", "AIPLootFilter", lootPanel, "UIDropDownMenuTemplate")
-    filterDropdown:SetPoint("TOPLEFT", 35, -17)
+    filterDropdown:SetPoint("TOPLEFT", 35, -21)
     UIDropDownMenu_SetWidth(filterDropdown, 65)
     UIDropDownMenu_SetText(filterDropdown, "All")
 
@@ -528,28 +585,28 @@ function LH.Create(parent)
     frame.lootHeaders = {}
 
     local lootHeaderItem = lootPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lootHeaderItem:SetPoint("TOPLEFT", 8, -42)
+    lootHeaderItem:SetPoint("TOPLEFT", 8, -46)
     lootHeaderItem:SetText("|cFFFFCC00Item|r")
     frame.lootHeaders.item = lootHeaderItem
 
     local lootHeaderSource = lootPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lootHeaderSource:SetPoint("TOPLEFT", 165, -42)
+    lootHeaderSource:SetPoint("TOPLEFT", 165, -46)
     lootHeaderSource:SetText("|cFFFFCC00Source|r")
     frame.lootHeaders.source = lootHeaderSource
 
     local lootHeaderWinner = lootPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lootHeaderWinner:SetPoint("TOPLEFT", 250, -42)
+    lootHeaderWinner:SetPoint("TOPLEFT", 250, -46)
     lootHeaderWinner:SetText("|cFFFFCC00Winner|r")
     frame.lootHeaders.winner = lootHeaderWinner
 
     local lootHeaderTime = lootPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lootHeaderTime:SetPoint("TOPLEFT", 325, -42)
+    lootHeaderTime:SetPoint("TOPLEFT", 325, -46)
     lootHeaderTime:SetText("|cFFFFCC00Time|r")
     frame.lootHeaders.time = lootHeaderTime
 
     -- Loot scroll
     local lootScroll = CreateFrame("ScrollFrame", "AIPLootScroll", lootPanel, "FauxScrollFrameTemplate")
-    lootScroll:SetPoint("TOPLEFT", 5, -55)
+    lootScroll:SetPoint("TOPLEFT", 5, -60)
     lootScroll:SetPoint("BOTTOMRIGHT", -26, 35)
     lootScroll:EnableMouse(false)  -- Don't intercept mouse clicks meant for rows
     frame.lootScroll = lootScroll
@@ -558,7 +615,7 @@ function LH.Create(parent)
     for i = 1, LH.MAX_ROWS do
         local row = CreateFrame("Button", nil, lootPanel)
         row:SetSize(PANEL_WIDTH_LOOT - 30, 18)
-        row:SetPoint("TOPLEFT", 5, -55 - (i-1) * 18)
+        row:SetPoint("TOPLEFT", 5, -60 - (i-1) * 18)
         row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
 
         if i % 2 == 0 then
@@ -621,7 +678,20 @@ function LH.Create(parent)
             end
         end)
         row:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        row:SetScript("OnClick", function(self)
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        row:SetScript("OnClick", function(self, button)
+            -- Right-click: act on the item's winner (loot ban / blacklist / favorite).
+            if button == "RightButton" then
+                local e = self.data
+                local winner = e and e.winner
+                if winner and winner ~= "" and winner ~= "Unknown" then
+                    LH.ShowPlayerContextMenu(self, winner, LH.BuildLootContext(e))
+                else
+                    AIP.Print("No winner recorded for this item.")
+                end
+                return
+            end
+            -- Shift+left-click: insert the item link into chat.
             if self.data and self.data.itemLink and IsShiftKeyDown() then
                 if ChatFrame1EditBox:IsVisible() then
                     ChatFrame1EditBox:Insert(self.data.itemLink)
@@ -1258,7 +1328,14 @@ function LH.RefreshLoot()
             end
             row.sourceText:SetText(sourceName)
 
-            row.winnerText:SetText(entry.winner or "?")
+            -- Winner: dim dash when there's no identified winner (Unassigned),
+            -- otherwise the name.
+            local winner = entry.winner
+            if not winner or winner == "" or winner == "Unknown" then
+                row.winnerText:SetText("|cFF888888\226\128\148|r")  -- em dash
+            else
+                row.winnerText:SetText(winner)
+            end
 
             local timeStr = "-"
             if entry.timestamp then
@@ -1500,7 +1577,32 @@ function LH.ShowExportPopup(text)
     LH.ExportPopup:Show()
 end
 
-function LH.ShowPlayerContextMenu(row, playerName)
+-- Resolve a boss name from the selected session by boss id.
+function LH.BossNameById(bossId)
+    if not bossId then return nil end
+    local session = LH.GetSelectedSession()
+    if session and session.bosses then
+        for _, b in ipairs(session.bosses) do
+            if b.id == bossId then return b.name end
+        end
+    end
+    return nil
+end
+
+-- Build the raid/boss/item context for a loot ban, linking it to the current
+-- session id, the boss the item dropped from, and the specific item.
+function LH.BuildLootContext(entry)
+    if not entry then return nil end
+    return {
+        sessionId = LH.SelectedRaid,
+        bossId = entry.bossId,
+        bossName = LH.BossNameById(entry.bossId) or entry.source,
+        itemLink = entry.itemLink,
+        itemName = entry.itemName,
+    }
+end
+
+function LH.ShowPlayerContextMenu(row, playerName, lootContext)
     if not playerName then return end
 
     -- Simple context menu via dropdown
@@ -1516,9 +1618,9 @@ function LH.ShowPlayerContextMenu(row, playerName)
         info.text = "Add to Loot Ban"
         info.notCheckable = true
         info.func = function()
-            -- Open loot ban popup with this player
+            -- Open loot ban popup with this player, linked to the raid/boss/item.
             if AIP.Panels and AIP.Panels.RaidMgmt and AIP.Panels.RaidMgmt.ShowLootBanAddPopup then
-                AIP.Panels.RaidMgmt.ShowLootBanAddPopup(playerName)
+                AIP.Panels.RaidMgmt.ShowLootBanAddPopup(playerName, lootContext)
             end
         end
         UIDropDownMenu_AddButton(info)
@@ -1580,53 +1682,35 @@ function LH.PostBossLootToChat(chatType)
         AIP.Print("Select a raid session first.")
         return
     end
-    if not LH.SelectedBoss then
-        AIP.Print("Select a boss first.")
+
+    -- Post exactly what's shown: honors the selected boss (if any), the active
+    -- category tab, and the quality/search filters via LH.GetLoot().
+    local loot = LH.GetLoot() or {}
+    if #loot == 0 then
+        AIP.Print("No loot to post for the current view.")
         return
     end
 
     local session = LH.GetSelectedSession()
-    if not session then
-        AIP.Print("Could not find the selected session.")
-        return
-    end
 
-    -- Get boss name
-    local bossName = "Unknown Boss"
-    if session.bosses then
+    -- Header reflects the boss when one is selected, else the raid/zone.
+    local headerName
+    if LH.SelectedBoss and session and session.bosses then
         for _, boss in ipairs(session.bosses) do
-            if boss.id == LH.SelectedBoss then
-                bossName = boss.name
-                break
-            end
+            if boss.id == LH.SelectedBoss then headerName = boss.name; break end
         end
     end
+    headerName = headerName or (session and session.zone) or "Raid"
+    local catLabel = LH.CurrentCategory and (" [" .. LH.CurrentCategory .. "]") or ""
 
-    -- Filter loot for selected boss
-    local bossLoot = {}
-    if session.loot then
-        for _, entry in ipairs(session.loot) do
-            if entry.bossId == LH.SelectedBoss then
-                table.insert(bossLoot, entry)
-            end
-        end
+    SendChatMessage("=== " .. headerName .. " Loot" .. catLabel .. " ===", chatType)
+    for _, entry in ipairs(loot) do
+        local who = entry.winner
+        local suffix = (who and who ~= "" and who ~= "Unknown") and (" -> " .. who) or ""
+        SendChatMessage((entry.itemLink or entry.itemName or "?") .. suffix, chatType)
     end
 
-    if #bossLoot == 0 then
-        AIP.Print("No loot recorded for this boss.")
-        return
-    end
-
-    -- Send header
-    SendChatMessage("=== " .. bossName .. " Loot ===", chatType)
-
-    -- Send each item
-    for _, entry in ipairs(bossLoot) do
-        local msg = (entry.itemLink or entry.itemName or "?") .. " -> " .. (entry.winner or "?")
-        SendChatMessage(msg, chatType)
-    end
-
-    AIP.Print("Posted " .. #bossLoot .. " items to " .. chatType .. " chat.")
+    AIP.Print("Posted " .. #loot .. " items to " .. chatType .. " chat.")
 end
 
 -- ============================================================================
@@ -1635,6 +1719,16 @@ end
 
 local lastSource = nil
 local lastSourceTime = 0
+
+-- Loot-event de-duplication.
+-- A single awarded item produces TWO CHAT_MSG_LOOT lines in WotLK: the roll
+-- result ("X won: [item]") and the receipt ("X receives loot: [item]"). Keyed on
+-- item + looter within a short window, these collapse to one entry, while two
+-- GENUINELY separate identical drops are preserved because they go to different
+-- looters (different key) or land outside the window (rolls take longer than
+-- this to resolve). recentLoot maps "itemId:looter" -> last-seen time().
+local recentLoot = {}
+local LOOT_DEDUP_WINDOW = 6  -- seconds
 
 local lootFrame = CreateFrame("Frame")
 lootFrame:RegisterEvent("CHAT_MSG_LOOT")
@@ -1652,7 +1746,7 @@ lootFrame:SetScript("OnEvent", function(self, event, ...)
             for _, item in ipairs(pending) do
                 -- Skip items that have been pending too long
                 if item.timestamp and (now - item.timestamp) < PENDING_TIMEOUT then
-                    LH.AddLootEntry(item.itemLink, item.looter, item.source, item.zone)
+                    LH.AddLootEntry(item.itemLink, item.looter, item.source, item.zone, item.category)
                 end
             end
         end
@@ -1697,24 +1791,53 @@ lootFrame:SetScript("OnEvent", function(self, event, ...)
         local itemLink = message:match("|c%x+|Hitem:[^|]+|h%[[^%]]+%]|h|r")
         if not itemLink then return end
 
-        local looter
-        if message:find("You receive") then
+        -- Resolve looter AND category from the message form:
+        --   "X won:" / "X wins" / "You won:"      -> won   (roll award)
+        --   "X receives loot:" / "You receive..." -> picked (actually received)
+        --   item link but no recognizable recipient -> unassigned (no winner)
+        -- Anything the local player gets is normalized to the player's name.
+        local looter, category
+        if message:find("^You ") then
             looter = UnitName("player")
+            category = message:find("won") and "won" or "picked"
         else
-            looter = message:match("^(%S+) receives") or message:match("^(%S+) receive")
-                or message:match("^(%S+) wins") or message:match("^(%S+) won")
+            local won = message:match("^(%S+) wins") or message:match("^(%S+) won")
+            if won then
+                looter, category = won, "won"
+            else
+                local got = message:match("^(%S+) receives") or message:match("^(%S+) receive")
+                if got then looter, category = got, "picked" end
+            end
         end
-        looter = looter or "Unknown"
+        if not looter then category = "unassigned" end
+
+        -- Collapse an accidental double event (and, only within the SAME category,
+        -- any repeat) for the same item+looter within a short window. The category
+        -- is part of the key so a group-loot "won" line and its "receives loot"
+        -- receipt are kept as separate facts (Won tab vs Picked tab). Genuine
+        -- multiple identical drops survive: they differ in looter or arrive later.
+        local now = time()
+        local itemId = itemLink:match("item:(%d+)") or itemLink
+        local dedupKey = itemId .. ":" .. (looter or "?") .. ":" .. category
+        if recentLoot[dedupKey] and (now - recentLoot[dedupKey]) < LOOT_DEDUP_WINDOW then
+            recentLoot[dedupKey] = now  -- refresh so a trailing 3rd line is also absorbed
+            return
+        end
+        recentLoot[dedupKey] = now
+        -- Opportunistically prune stale keys so the table can't grow unbounded.
+        for k, t in pairs(recentLoot) do
+            if (now - t) >= LOOT_DEDUP_WINDOW then recentLoot[k] = nil end
+        end
 
         -- Source is now resolved authoritatively by RaidSessionManager from the
         -- boss-kill list; lastSource is only a known-boss fallback for the legacy
         -- history within a tight window.
         local source = "Trash"
-        if lastSource and lastSourceTime and (time() - lastSourceTime) < 90 then
+        if lastSource and lastSourceTime and (now - lastSourceTime) < 90 then
             source = lastSource
         end
 
-        LH.AddLootEntry(itemLink, looter, source, GetRealZoneText())
+        LH.AddLootEntry(itemLink, looter, source, GetRealZoneText(), category)
     end
 end)
 

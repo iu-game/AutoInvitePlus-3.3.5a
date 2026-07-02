@@ -130,7 +130,7 @@ local function GetFilteredFavorites()
 
         if match then
             table.insert(results, {
-                name = name,
+                name = entry.name or name,  -- proper-case display name (key is lowercased)
                 note = entry.note or "",
                 source = entry.source or "manual",
                 addedTime = entry.addedTime or 0,
@@ -511,7 +511,9 @@ function FP.ImportGuild()
         if name and online then
             -- Remove realm suffix if present
             local cleanName = name:match("^([^-]+)") or name
-            if AIP.AddToFavorites then
+            -- Skip existing favorites so re-import doesn't overwrite custom notes
+            -- or inflate the count (AddToFavorites always overwrites + returns true).
+            if AIP.AddToFavorites and not (AIP.IsPlayerFavorite and AIP.IsPlayerFavorite(cleanName)) then
                 if AIP.AddToFavorites(cleanName, "Guild member", "guild") then
                     added = added + 1
                 end
@@ -531,7 +533,7 @@ function FP.ImportFriends()
     for i = 1, numFriends do
         local name, _, _, _, connected = GetFriendInfo(i)
         if name and connected then
-            if AIP.AddToFavorites then
+            if AIP.AddToFavorites and not (AIP.IsPlayerFavorite and AIP.IsPlayerFavorite(name)) then
                 if AIP.AddToFavorites(name, "Friend", "friends") then
                     added = added + 1
                 end

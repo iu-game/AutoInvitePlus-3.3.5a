@@ -308,6 +308,10 @@ function GUI.CreateStyledEditBox(parent, width, height, isNumeric)
         editBox:SetNumeric(true)
     else
         editBox:SetMaxLetters(255)
+        -- Allow shift-clicking items/quests/etc. into text fields.
+        if AIP.UI and AIP.UI.MakeEditBoxLinkable then
+            AIP.UI.MakeEditBoxLinkable(editBox)
+        end
     end
 
     editBox:SetScript("OnEscapePressed", function(self)
@@ -461,6 +465,55 @@ function GUI.SetupMessageBoxAchievementTooltips(msgFrame, msgFontString)
     end)
 end
 
+-- Transient notification popup near the minimap icon (e.g. "VOA Listed").
+-- Created lazily; reused across calls. Shows for a few seconds then hides.
+function GUI.ShowMinimapBubble(text)
+    local b = GUI.MinimapBubble
+    if not b then
+        b = CreateFrame("Frame", "AIPMinimapBubble", UIParent)
+        b:SetFrameStrata("DIALOG")
+        b:SetSize(150, 28)  -- solid default size so it never collapses to a square
+        b:SetBackdrop({
+            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 14,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 },
+        })
+        b:SetBackdropColor(0, 0, 0, 0.9)
+        b:SetBackdropBorderColor(1, 0.82, 0)
+        local fs = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        fs:SetPoint("CENTER")
+        fs:SetTextColor(1, 0.82, 0)
+        b.textFS = fs
+        b:Hide()
+        GUI.MinimapBubble = b
+    end
+
+    -- Re-anchor under the (movable) minimap button each time.
+    b:ClearAllPoints()
+    b:SetPoint("TOP", GUI.MinimapButton or Minimap, "BOTTOM", 0, -6)
+
+    b.textFS:SetText(text)
+    -- Fit width to the text with a sane minimum (GetStringWidth can be 0 the
+    -- very first frame, so never trust it alone).
+    local tw = b.textFS:GetStringWidth() or 0
+    b:SetWidth(math.max(100, tw + 28))
+    b:SetHeight(28)
+    b:SetAlpha(1)
+    b:Show()
+
+    -- Hold ~3s at full opacity, then hide. No per-frame alpha changes (that
+    -- flicker read as an "odd flashing square").
+    b.life = 0
+    b:SetScript("OnUpdate", function(self, e)
+        self.life = self.life + (e or 0)
+        if self.life >= 3 then
+            self:SetScript("OnUpdate", nil)
+            self:Hide()
+        end
+    end)
+end
+
 -- Create minimap button
 function GUI.CreateMinimapButton()
     local button = CreateFrame("Button", "AIPMinimapButton", Minimap)
@@ -484,6 +537,18 @@ function GUI.CreateMinimapButton()
 
     -- Highlight texture
     button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+
+    -- VOA alert glow (pulses when VOA listings are available). A ROUND additive
+    -- gold halo sized to the button (not the old square proc-border, which read
+    -- as an odd flashing square on the round minimap). Hidden until VOA is found.
+    local voaGlow = button:CreateTexture(nil, "OVERLAY")
+    voaGlow:SetSize(52, 52)
+    voaGlow:SetPoint("CENTER", 0, 0)
+    voaGlow:SetTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+    voaGlow:SetBlendMode("ADD")
+    voaGlow:SetVertexColor(1, 0.82, 0)
+    voaGlow:Hide()
+    button.voaGlow = voaGlow
 
     -- Position around minimap
     local angle = AIP.db and AIP.db.minimapAngle or 220
@@ -523,7 +588,7 @@ function GUI.CreateMinimapButton()
         self:SetPoint("CENTER", Minimap, "CENTER", x, y)
     end)
 
-    button:SetScript("OnUpdate", function(self)
+    button:SetScript("OnUpdate", function(self, elapsed)
         if self.dragging then
             local mx, my = Minimap:GetCenter()
             local cx, cy = GetCursorPosition()
@@ -538,6 +603,40 @@ function GUI.CreateMinimapButton()
             local y = math.sin(angle) * 80
             self:ClearAllPoints()
             self:SetPoint("CENTER", Minimap, "CENTER", x, y)
+        end
+
+        -- VOA alert: poll listing state (throttled) and pulse the glow
+        self.voaPoll = (self.voaPoll or 0) + (elapsed or 0)
+        self.voaClock = (self.voaClock or 0) + (elapsed or 0)
+        if self.voaPoll >= 3 then
+            self.voaPoll = 0
+            local alertOn = AIP.db and AIP.db.voaAlert
+            local CS = AIP.ChatScanner
+            local listings = (alertOn and CS and CS.GetVOAListings) and CS.GetVOAListings() or {}
+            self.voaCount = #listings
+
+            -- Edge-triggered bubble popups: fire once when a category goes from
+            -- none -> some (not every poll while they persist).
+            local favCount = (CS and CS.GetFavoriteListings) and #CS.GetFavoriteListings() or 0
+            if self.voaCount > 0 and (self.prevVoaCount or 0) == 0 then
+                GUI.ShowMinimapBubble("VOA Listed")
+            end
+            if favCount > 0 and (self.prevFavCount or 0) == 0 then
+                GUI.ShowMinimapBubble("Favorites Listed")
+            end
+            self.prevVoaCount = self.voaCount
+            self.prevFavCount = favCount
+        end
+
+        if self.voaGlow then
+            if (self.voaCount or 0) > 0 then
+                -- Alpha oscillates ~0.25..1.0 for a soft pulse
+                local a = 0.6 + 0.4 * math.sin(self.voaClock * 3)
+                self.voaGlow:SetAlpha(a)
+                if not self.voaGlow:IsShown() then self.voaGlow:Show() end
+            elseif self.voaGlow:IsShown() then
+                self.voaGlow:Hide()
+            end
         end
     end)
 
@@ -554,6 +653,35 @@ function GUI.CreateMinimapButton()
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:AddLine("AutoInvite+")
         GameTooltip:AddLine("|cFF888888by iuGames|r", 0.5, 0.5, 0.5)
+
+        local CS = AIP.ChatScanner
+
+        -- Tree summary: LFM listings broken down by raid (ICC, VOA, TOC, ...),
+        -- plus LFG players and favorites. VOA shows here as one of the rows.
+        local groupCount = (CS and CS.GetGroupCount) and CS.GetGroupCount() or 0
+        local playerCount = (CS and CS.GetPlayerCount) and CS.GetPlayerCount() or 0
+        local favListings = (CS and CS.GetFavoriteListings) and CS.GetFavoriteListings() or {}
+
+        GameTooltip:AddLine(" ")
+        if groupCount > 0 then
+            GameTooltip:AddLine("LFM listings (" .. groupCount .. "):", 0.8, 0.8, 0.8)
+            local counts = (CS and CS.GetCountsByRaid) and CS.GetCountsByRaid() or {}
+            local hierarchy = AIP.Parsers and AIP.Parsers.RaidHierarchy or {}
+            for _, cat in ipairs(hierarchy) do
+                local c = counts[cat.id] or 0
+                if c > 0 then
+                    GameTooltip:AddDoubleLine("  " .. (cat.shortName or cat.name or cat.id), tostring(c), 0.7, 0.7, 0.7, 1, 1, 1)
+                end
+            end
+        else
+            GameTooltip:AddLine("No LFM listings", 0.6, 0.6, 0.6)
+        end
+        GameTooltip:AddDoubleLine("LFG players:", tostring(playerCount), 0.7, 0.7, 0.7, 1, 1, 1)
+        if #favListings > 0 then
+            GameTooltip:AddDoubleLine("From favorites:", tostring(#favListings), 0.7, 0.7, 0.7, 1, 0.82, 0)
+        end
+
+        GameTooltip:AddLine(" ")
         GameTooltip:AddLine("|cFFFFFFFFLeft-click:|r Open main window", 0.7, 0.7, 0.7)
         GameTooltip:AddLine("|cFFFFFFFFRight-click:|r Quick menu", 0.7, 0.7, 0.7)
         GameTooltip:Show()
@@ -581,13 +709,33 @@ function GUI.ShowQuickMenu(anchor)
     local menuList = {
         {text = "AutoInvite+", isTitle = true, notCheckable = true},
         {text = "Open Main Window", func = function() GUI.Toggle() end, notCheckable = true},
-        {text = "Toggle Auto-Invite", func = function()
-            if AIP.db then
-                AIP.db.enabled = not AIP.db.enabled
-                AIP.Print("Auto-invite " .. (AIP.db.enabled and "ENABLED" or "DISABLED"))
-            end
-        end, notCheckable = true},
-        {text = " ", disabled = true, notCheckable = true},
+        {text = "Toggles", isTitle = true, notCheckable = true},
+        -- Both toggles are checkable so the check column is consistent (no lone
+        -- checkmark among plain rows). Their checks reflect the current state.
+        {
+            text = "Auto-Invite",
+            isNotRadio = true,
+            checked = (AIP.db and AIP.db.enabled) and true or false,
+            func = function()
+                if AIP.db then
+                    AIP.db.enabled = not AIP.db.enabled
+                    AIP.Print("Auto-invite " .. (AIP.db.enabled and "ENABLED" or "DISABLED"))
+                end
+            end,
+        },
+        {
+            text = "Raid Tools Bar",
+            isNotRadio = true,
+            checked = (AIP.db and AIP.db.floatingBarEnabled) and true or false,
+            func = function()
+                if AIP.RaidTools and AIP.RaidTools.ToggleBar then
+                    AIP.RaidTools.ToggleBar()
+                else
+                    AIP.Print("Raid Tools not available.")
+                end
+            end,
+        },
+        {text = "Actions", isTitle = true, notCheckable = true},
         {text = "Spam Invite Message", func = function() AIP.SpamInvite() end, notCheckable = true},
         {text = "Invite Guild", func = function() AIP.InviteGuild() end, notCheckable = true},
         {text = "Invite Friends", func = function() AIP.InviteFriends() end, notCheckable = true},
@@ -1248,12 +1396,40 @@ function GUI.CreateBrowserTab(container, tabType)
 
         local hideLockedLabel = treePanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         hideLockedLabel:SetPoint("RIGHT", hideLockedCheck, "LEFT", 0, 0)
-        hideLockedLabel:SetText("Hide Locked")
+        hideLockedLabel:SetText("Locked")
         hideLockedLabel:SetTextColor(0.8, 0.8, 0.8)
         container.hideLockedCheck = hideLockedCheck
 
-        -- Position refresh button to the left of Hide Locked label
-        refreshBtn:SetPoint("RIGHT", hideLockedLabel, "LEFT", -8, 0)
+        -- Hide Viewed checkbox - hides listings we've excluded or already requested
+        local hideViewedCheck = CreateFrame("CheckButton", nil, treePanel, "UICheckButtonTemplate")
+        hideViewedCheck:SetSize(20, 20)
+        hideViewedCheck:SetChecked(AIP.TreeBrowser and AIP.TreeBrowser.HideExcluded)
+        hideViewedCheck:SetScript("OnClick", function(self)
+            if AIP.TreeBrowser then
+                AIP.TreeBrowser.HideExcluded = self:GetChecked()
+            end
+            GUI.RefreshBrowserTab(tabType)
+        end)
+        hideViewedCheck:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine("Hide Viewed")
+            GameTooltip:AddLine("Hide listings you've excluded or already requested", 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        hideViewedCheck:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        local hideViewedLabel = treePanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        hideViewedLabel:SetPoint("RIGHT", hideViewedCheck, "LEFT", 0, 0)
+        hideViewedLabel:SetText("Viewed")
+        hideViewedLabel:SetTextColor(0.8, 0.8, 0.8)
+        container.hideViewedCheck = hideViewedCheck
+
+        -- Chain layout right-to-left on the top row: [Refresh] [Viewed check] [Locked check]
+        hideViewedCheck:SetPoint("RIGHT", hideLockedLabel, "LEFT", -10, 0)
+
+        -- Refresh sits to the left of the Viewed label, vertically centered on the
+        -- same line as the checkboxes (the whole cluster now clears the title).
+        refreshBtn:SetPoint("RIGHT", hideViewedLabel, "LEFT", -10, 0)
     else
         refreshBtn:SetPoint("TOPRIGHT", -8, -6)
     end
@@ -1630,7 +1806,6 @@ function GUI.CreateBrowserTab(container, tabType)
     lookingForValue:SetPoint("TOPLEFT", 0, 0)
     lookingForValue:SetPoint("RIGHT", -5, 0)
     lookingForValue:SetJustifyH("LEFT")
-    lookingForValue:SetWordWrap(true)
     lookingForValue:SetTextColor(0.9, 0.9, 0.9)
     container.lookingForValue = lookingForValue
 
@@ -1672,6 +1847,12 @@ function GUI.CreateBrowserTab(container, tabType)
         -- Send whisper
         SendChatMessage(msg, "WHISPER", nil, data.leader)
         AIP.Print("Invite request sent to " .. data.leader)
+
+        -- Track the request so the row can be marked/hidden until it expires
+        if AIP.ChatScanner and AIP.ChatScanner.MarkRequested then
+            AIP.ChatScanner.MarkRequested(data.leader)
+            GUI.RefreshBrowserTab(tabType)
+        end
     end)
     requestInviteBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -1748,6 +1929,12 @@ function GUI.CreateBrowserTab(container, tabType)
         -- Send keyword whisper
         SendChatMessage(keyword, "WHISPER", nil, data.leader)
         AIP.Print("Quick request sent to " .. data.leader .. " with keyword: |cFF00FFFF" .. keyword .. "|r")
+
+        -- Track the request so the row can be marked/hidden until it expires
+        if AIP.ChatScanner and AIP.ChatScanner.MarkRequested then
+            AIP.ChatScanner.MarkRequested(data.leader)
+            GUI.RefreshBrowserTab(tabType)
+        end
     end)
     quickRequestBtn:SetScript("OnEnter", function(self)
         local data = container.selectedGroupData
@@ -1815,6 +2002,84 @@ function GUI.CreateBrowserTab(container, tabType)
     end)
     whisperBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     container.whisperBtn = whisperBtn
+
+    -- Hide/Unhide button - exclude a listing we can't join (requested/no reply,
+    -- or just not interested). Stays hidden until the listing expires.
+    local hideBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
+    hideBtn:SetSize(60, 24)
+    hideBtn:SetPoint("LEFT", whisperBtn, "RIGHT", 5, 0)
+    hideBtn:SetText("Hide")
+    hideBtn:SetScript("OnClick", function()
+        local data = container.selectedGroupData
+        local CS = AIP.ChatScanner
+        if not data or not data.leader or not CS then
+            AIP.Print("Select a group first")
+            return
+        end
+        if CS.IsExcluded(data.leader) then
+            CS.ClearExcluded(data.leader)
+            AIP.Print("Unhid " .. data.leader .. "'s listing")
+        else
+            CS.MarkExcluded(data.leader)
+            AIP.Print("Hid " .. data.leader .. "'s listing")
+        end
+        GUI.RefreshBrowserTab(tabType)
+    end)
+    hideBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        local data = container.selectedGroupData
+        local hidden = data and data.leader and AIP.ChatScanner
+            and AIP.ChatScanner.IsExcluded(data.leader)
+        if hidden then
+            GameTooltip:AddLine("Unhide")
+            GameTooltip:AddLine("Show this listing again", 1, 1, 1, true)
+        else
+            GameTooltip:AddLine("Hide")
+            GameTooltip:AddLine("Hide this listing until it expires (already requested / not interested)", 1, 1, 1, true)
+        end
+        GameTooltip:Show()
+    end)
+    hideBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    container.hideBtn = hideBtn
+
+    -- Favorite/Unfavorite button - add the leader (or LFG player) to favorites so
+    -- their listings are highlighted and they get priority in the queue.
+    local favBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
+    favBtn:SetSize(55, 24)
+    favBtn:SetPoint("LEFT", hideBtn, "RIGHT", 5, 0)
+    favBtn:SetText("Fav")
+    favBtn:SetScript("OnClick", function()
+        local data = container.selectedGroupData
+        local name = data and (data.leader or data.name)
+        if not name then
+            AIP.Print("Select a listing first")
+            return
+        end
+        local isFav = AIP.IsPlayerFavorite and AIP.IsPlayerFavorite(name)
+        if isFav then
+            if AIP.RemoveFromFavorites then AIP.RemoveFromFavorites(name) end
+        else
+            if AIP.AddToFavorites then AIP.AddToFavorites(name, "", "browser") end
+        end
+        GUI.UpdateDetailsPanel(container, data)  -- refresh this button's label
+        GUI.RefreshBrowserTab(tabType)           -- refresh row highlight
+    end)
+    favBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        local data = container.selectedGroupData
+        local name = data and (data.leader or data.name)
+        local isFav = name and AIP.IsPlayerFavorite and AIP.IsPlayerFavorite(name)
+        if isFav then
+            GameTooltip:AddLine("Remove Favorite")
+            GameTooltip:AddLine("Stop highlighting and prioritizing this player", 1, 1, 1, true)
+        else
+            GameTooltip:AddLine("Add Favorite")
+            GameTooltip:AddLine("Highlight this player's listings and give them queue priority", 1, 1, 1, true)
+        end
+        GameTooltip:Show()
+    end)
+    favBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    container.favBtn = favBtn
 
     -- ========================================================================
     -- FRAME 3: RIGHT BOTTOM - Queue Panel
@@ -3267,7 +3532,7 @@ function GUI.CreateCompositionTab(container)
     container.buffTabFrame = buffTabFrame
 
     -- Use categories from RaidComposition.lua (full 8 tabs)
-    local buffCategories = {"CRITICAL", "STATS", "ATTACK", "SPELLPOWER", "HASTE", "CRIT", "DEBUFFS", "UTILITY"}
+    local buffCategories = {"CRITICAL", "STATS", "ATTACK", "SPELLPOWER", "HASTE", "CRIT", "HEALING", "DEBUFFS", "UTILITY"}
     local buffCategoryNames = {
         CRITICAL = "Crit",
         STATS = "Stats",
@@ -3294,7 +3559,7 @@ function GUI.CreateCompositionTab(container)
     container.selectedBuffCategory = "CRITICAL"
 
     local tabX = 0
-    local tabWidth = 35  -- Reduced to fit 8 tabs
+    local tabWidth = 31  -- Fits 9 tabs (9*31 + 8*2 = 295 <= 304)
     for _, catId in ipairs(buffCategories) do
         local tabBtn = CreateFrame("Button", nil, buffTabFrame)
         tabBtn:SetSize(tabWidth, 18)
@@ -4922,6 +5187,21 @@ function GUI.UpdateDetailsPanel(container, data)
     if container.noSelectText then container.noSelectText:Hide() end
     if container.detContent then container.detContent:Show() end
 
+    -- Reflect exclusion state on the Hide/Unhide button
+    if container.hideBtn then
+        local leader = data.leader or data.name
+        local hidden = leader and AIP.ChatScanner and AIP.ChatScanner.IsExcluded
+            and AIP.ChatScanner.IsExcluded(leader)
+        container.hideBtn:SetText(hidden and "Unhide" or "Hide")
+    end
+
+    -- Reflect favorite state on the Fav/Unfav button
+    if container.favBtn then
+        local name = data.leader or data.name
+        local isFav = name and AIP.IsPlayerFavorite and AIP.IsPlayerFavorite(name)
+        container.favBtn:SetText(isFav and "Unfav" or "Fav")
+    end
+
     if container.leaderValue then
         container.leaderValue:SetText(data.leader or data.name or "-")
     end
@@ -5772,14 +6052,20 @@ function GUI.GuessPlayerRole(name, unit)
     end
 
     -- Check inspection cache for role and spec
-    if AIP.InspectionEngine and AIP.InspectionEngine.Cache then
-        local cached = AIP.InspectionEngine.Cache:get(name)
+    if AIP.InspectionEngine and AIP.InspectionEngine.GetCachedData then
+        local cached = AIP.InspectionEngine.GetCachedData(name)
         if cached then
-            if cached.role == "TANK" or cached.role == "HEALER" then
-                return cached.role
+            -- Local inspects expose role only under performanceEstimate;
+            -- Addon-sourced data may carry a top-level role/spec.
+            local role = cached.role
+            if not role and cached.performanceEstimate then
+                role = cached.performanceEstimate.role
             end
-            if cached.role == "DPS" or cached.role == "MDPS" or cached.role == "RDPS" then
-                -- Check if melee spec
+            local upper = role and role:upper() or nil
+            if upper == "TANK" or upper == "HEALER" then
+                return upper
+            end
+            if upper == "DPS" or upper == "MDPS" or upper == "RDPS" then
                 local class = cached.class
                 local spec = cached.spec
                 if class and spec and GUI.MeleeDPSSpecs[class:upper()] then
@@ -5787,7 +6073,7 @@ function GUI.GuessPlayerRole(name, unit)
                         return "MDPS"
                     end
                 end
-                return cached.role == "MDPS" and "MDPS" or "RDPS"
+                return upper == "MDPS" and "MDPS" or "RDPS"
             end
         end
     end
@@ -6969,6 +7255,14 @@ function GUI.UpdateAchievementDropdown(popup, raidKey)
     if not popup or not popup.achieveDropdown then return end
 
     local achievements = GUI.RaidAchievements[raidKey] or {}
+    -- GetRaidKey() appends an H/N difficulty suffix (and uses TOGC for heroic
+    -- ToC), but RaidAchievements keys most raids without it (only ICC/RS carry
+    -- the suffix). Normalize so ULDUAR/NAXX/VOA/TOC resolve.
+    if #achievements == 0 and raidKey then
+        local altKey = raidKey:gsub("^TOGC", "TOC")
+        altKey = altKey:gsub("([0-9]+)[HN]$", "%1")
+        achievements = GUI.RaidAchievements[altKey] or {}
+    end
 
     UIDropDownMenu_Initialize(popup.achieveDropdown, function()
         local info = UIDropDownMenu_CreateInfo()
@@ -7227,10 +7521,10 @@ GUI.RaidInstanceVariants = {
 GUI.RaidToInstance = {
     ICC25H = "ICC", ICC25N = "ICC", ICC10H = "ICC", ICC10N = "ICC", ICC25 = "ICC", ICC10 = "ICC", ICC = "ICC",
     RS25H = "RS", RS25N = "RS", RS10H = "RS", RS10N = "RS", RS25 = "RS", RS10 = "RS", RS = "RS",
-    TOGC25 = "TOC", TOGC10 = "TOC", TOC25 = "TOC", TOC10 = "TOC", TOC = "TOC", TOGC = "TOC",
-    VOA25 = "VOA", VOA10 = "VOA", VOA = "VOA",
-    ULDUAR25 = "ULDUAR", ULDUAR10 = "ULDUAR", ULDUAR = "ULDUAR",
-    NAXX25 = "NAXX", NAXX10 = "NAXX", NAXX = "NAXX",
+    TOGC25 = "TOC", TOGC10 = "TOC", TOC25 = "TOC", TOC10 = "TOC", TOC25N = "TOC", TOC10N = "TOC", TOC = "TOC", TOGC = "TOC",
+    VOA25 = "VOA", VOA10 = "VOA", VOA25N = "VOA", VOA25H = "VOA", VOA10N = "VOA", VOA10H = "VOA", VOA = "VOA",
+    ULDUAR25 = "ULDUAR", ULDUAR10 = "ULDUAR", ULDUAR25N = "ULDUAR", ULDUAR25H = "ULDUAR", ULDUAR10N = "ULDUAR", ULDUAR10H = "ULDUAR", ULDUAR = "ULDUAR",
+    NAXX25 = "NAXX", NAXX10 = "NAXX", NAXX25N = "NAXX", NAXX25H = "NAXX", NAXX10N = "NAXX", NAXX10H = "NAXX", NAXX = "NAXX",
     EoE25 = "EoE", EoE10 = "EoE", EoE = "EoE",
     OS25 = "OS", OS10 = "OS", OS = "OS",
     ONY25 = "ONY", ONY10 = "ONY", ONY = "ONY",

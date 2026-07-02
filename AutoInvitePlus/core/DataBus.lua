@@ -257,12 +257,14 @@ end
 function DB.Deserialize(str, sender)
     if not str then return nil end
 
-    -- Try new format with ; separator first
-    local version, eventType, timestamp, dataStr = strsplit(";", str, 4)
+    -- 3.3.5a strsplit ignores the limit arg and splits on EVERY delimiter, which
+    -- would truncate any data field containing the separator. Match instead so
+    -- the trailing capture keeps the whole remaining payload intact.
+    local version, eventType, timestamp, dataStr = str:match("^([^;]*);([^;]*);([^;]*);(.*)$")
 
     -- Fallback to legacy | separator for backwards compatibility
     if not eventType or eventType == "" then
-        version, eventType, timestamp, dataStr = strsplit("|", str, 4)
+        version, eventType, timestamp, dataStr = str:match("^([^|]*)|([^|]*)|([^|]*)|(.*)$")
     end
 
     if not version or not eventType then return nil end
@@ -395,6 +397,21 @@ function DB.Broadcast(event, target)
     if not DB.Config.enabled then return false end
     if not event or not event.type then return false end
 
+    -- Directed reply (e.g. PONG): whisper ONLY, never fan out to guild/party/
+    -- channel, and skip the per-type rate gate so replies to distinct pingers in
+    -- the same window aren't dropped. Prevents an O(M^2) heartbeat spam storm.
+    if target then
+        local message = DB.Serialize(event)
+        if not message then return false, "serialize_failed" end
+        if #message > DB.Config.maxMessageLength then
+            AIP.Debug("DataBus: Message too long (" .. #message .. " chars)")
+            return false, "message_too_long"
+        end
+        SendAddonMessage(DB.Config.prefix, message, "WHISPER", target)
+        if AIP.Debug then AIP.Debug("DataBus: Whisper " .. event.type .. " to " .. tostring(target)) end
+        return true
+    end
+
     -- Rate limiting
     local now = GetTime()
     local lastTime = DB.State.lastBroadcast[event.type] or 0
@@ -440,12 +457,6 @@ function DB.Broadcast(event, target)
         end
     end
 
-    -- Send to specific target (whisper)
-    if target then
-        SendAddonMessage(DB.Config.prefix, message, "WHISPER", target)
-        sent = true
-    end
-
     if sent and AIP.Debug then
         AIP.Debug("DataBus: Broadcast " .. event.type)
     end
@@ -474,8 +485,8 @@ function DB.BroadcastLFG(lfgData)
     event.data.class = event.data.class or playerClass
 
     -- Try to get GS from integrations
-    if AIP.Integrations and AIP.Integrations.GetPlayerGS then
-        event.data.gs = event.data.gs or AIP.Integrations.GetPlayerGS(UnitName("player"))
+    if AIP.Integrations and AIP.Integrations.GetGearScore then
+        event.data.gs = event.data.gs or AIP.Integrations.GetGearScore(UnitName("player"))
     end
 
     return DB.Broadcast(event)

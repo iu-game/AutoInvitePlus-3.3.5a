@@ -328,9 +328,9 @@ function Roster.AddToWaitlist(name, role, priority)
 
     AIP.Print("Added " .. name .. " to waitlist (priority " .. (priority or 1) .. ")")
 
-    if AIP.UpdateWaitlistUI then
-        AIP.UpdateWaitlistUI()
-    end
+    -- Refresh the roster's OWN waitlist tab (the global AIP.UpdateWaitlistUI
+    -- belongs to the separate Waitlist module and updates a different frame/store).
+    Roster.UpdateWaitlistUI()
 
     return true
 end
@@ -343,9 +343,7 @@ function Roster.RemoveFromWaitlist(name)
         if entry.name:lower() == name:lower() then
             table.remove(AIP.db.rosters.waitlist, i)
             AIP.Print("Removed " .. name .. " from waitlist")
-            if AIP.UpdateWaitlistUI then
-                AIP.UpdateWaitlistUI()
-            end
+            Roster.UpdateWaitlistUI()
             return true
         end
     end
@@ -377,9 +375,9 @@ function Roster.ClearWaitlist()
     Roster.InitDB()
     AIP.db.rosters.waitlist = {}
     AIP.Print("Waitlist cleared")
-    if AIP.UpdateWaitlistUI then
-        AIP.UpdateWaitlistUI()
-    end
+    -- Refresh the roster's OWN waitlist tab (the global AIP.UpdateWaitlistUI
+    -- belongs to the separate Waitlist module and updates a different frame/store).
+    Roster.UpdateWaitlistUI()
 end
 
 -- Invite next from waitlist
@@ -854,34 +852,37 @@ end
 
 -- Slash command handler
 function Roster.SlashHandler(msg)
-    msg = (msg or ""):lower():trim()
+    -- Preserve original case for names; lowercase only for command matching.
+    msg = (msg or ""):trim()
+    local lc = msg:lower()
 
-    if msg == "" or msg == "show" then
+    if lc == "" or lc == "show" then
         AIP.ToggleRosterUI()
-    elseif msg:find("^save ") then
+    elseif lc:find("^save ") then
         Roster.SaveRoster(msg:sub(6))
-    elseif msg:find("^load ") then
+    elseif lc:find("^load ") then
         Roster.LoadRoster(msg:sub(6))
-    elseif msg:find("^delete ") then
+    elseif lc:find("^delete ") then
         Roster.DeleteRoster(msg:sub(8))
-    elseif msg == "list" then
+    elseif lc == "list" then
         local rosters = Roster.GetSavedRosters()
         AIP.Print("Saved rosters:")
         for _, r in ipairs(rosters) do
             AIP.Print("  " .. r.name .. " (" .. r.count .. " players)")
         end
-    elseif msg:find("^waitlist ") then
+    elseif lc:find("^waitlist ") then
         local subcmd = msg:sub(10)
-        if subcmd == "clear" then
+        local sublc = subcmd:lower()
+        if sublc == "clear" then
             Roster.ClearWaitlist()
-        elseif subcmd:find("^add ") then
+        elseif sublc:find("^add ") then
             Roster.AddToWaitlist(subcmd:sub(5))
-        elseif subcmd:find("^remove ") then
+        elseif sublc:find("^remove ") then
             Roster.RemoveFromWaitlist(subcmd:sub(8))
-        elseif subcmd == "invite" then
+        elseif sublc == "invite" then
             Roster.InviteFromWaitlist()
         end
-    elseif msg == "attendance" then
+    elseif lc == "attendance" then
         Roster.RecordAttendance("Manual Record")
     else
         AIP.Print("Roster commands:")

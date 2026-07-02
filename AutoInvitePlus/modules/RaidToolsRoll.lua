@@ -16,6 +16,7 @@ function RT.StartRoll(itemText, itemLink)
 
     RT.rollActive = true
     RT.rolls = {}
+    RT.bannedRollers = {}   -- name -> ban reason for loot-banned players who rolled
     RT.rollItem = itemText
     RT.rollItemLink = itemLink
     RT.rollEndTime = time() + duration
@@ -43,18 +44,57 @@ function RT.GetSortedRolls()
     return sorted
 end
 
+-- Is this roller loot-banned? Uses the Raid Mgmt loot-ban list, checked against
+-- the currently-tracked boss (falls back to all-boss bans). Returns banned, boss.
+function RT.IsRollerBanned(name)
+    local RM = AIP.Panels and AIP.Panels.RaidMgmt
+    if not RM or not RM.IsPlayerLootBanned then return false end
+    return RM.IsPlayerLootBanned(name, RM.CurrentBoss)
+end
+
+-- Highest roller who is NOT loot-banned. Returns winnerEntry, skippedCount, total.
+function RT.GetEligibleWinner()
+    local sorted = RT.GetSortedRolls()
+    local banned = RT.bannedRollers or {}
+    local skipped = 0
+    for _, r in ipairs(sorted) do
+        if banned[r.name] then
+            skipped = skipped + 1
+        else
+            return r, skipped, #sorted
+        end
+    end
+    return nil, skipped, #sorted
+end
+
 function RT.FinishRoll()
     if not RT.rollActive then return end
     RT.rollActive = false
     RT.rollEndTime = nil
 
-    local sorted = RT.GetSortedRolls()
-    if sorted[1] then
-        local top = sorted[1]
-        RT.Send("WINNER: " .. top.name .. " rolled " .. top.value .. " for " ..
-            (RT.rollItemLink or tostring(RT.rollItem)) .. " (" .. #sorted .. " rolls)", "RAID_WARNING")
+    -- The winner is the highest roller who is NOT loot-banned.
+    local winner, skipped, total = RT.GetEligibleWinner()
+
+    local itemText = RT.rollItemLink or tostring(RT.rollItem)
+    if winner then
+        local note = skipped > 0 and (" [" .. skipped .. " loot-banned skipped]") or ""
+        RT.Send("WINNER: " .. winner.name .. " rolled " .. winner.value .. " for " ..
+            itemText .. " (" .. total .. " rolls)" .. note, "RAID_WARNING")
+
+        -- Record the win in the loot history (Won tab). Only when we have a real
+        -- item link to log; a bare /roll has no item to attribute.
+        if RT.rollItemLink then
+            local LH = AIP.Panels and AIP.Panels.LootHistory
+            if LH and LH.AddLootEntry then
+                LH.AddLootEntry(RT.rollItemLink, winner.name, nil, GetRealZoneText(), "won")
+            end
+        end
+    elseif total > 0 then
+        -- Everyone who rolled is loot-banned.
+        RT.Send("No eligible winner for " .. itemText ..
+            " - all " .. total .. " rollers are loot-banned.", "RAID_WARNING")
     else
-        RT.Send("No valid rolls for " .. (RT.rollItemLink or tostring(RT.rollItem)) .. ".", "RAID_WARNING")
+        RT.Send("No valid rolls for " .. itemText .. ".", "RAID_WARNING")
     end
     if RT.RefreshRollWindow then RT.RefreshRollWindow() end
 end
@@ -84,12 +124,13 @@ function RT.AnnounceWinners(n)
 end
 
 function RT.TradeWinner()
-    local sorted = RT.GetSortedRolls()
-    if not sorted[1] then
-        AIP.Print("No winner to trade with.")
+    -- Trade the eligible (non-loot-banned) winner, consistent with FinishRoll.
+    local eligible = RT.GetEligibleWinner()
+    if not eligible then
+        AIP.Print("No eligible winner to trade with.")
         return
     end
-    local winner = sorted[1].name
+    local winner = eligible.name
     local itemText = RT.rollItemLink or tostring(RT.rollItem or "loot")
     RT.Send("Trading " .. winner .. " for " .. itemText .. ".", "RAID")
     if TargetByName then TargetByName(winner, true) end
@@ -108,6 +149,17 @@ function RT.OnSystemMessage(message)
     if roll and not RT.rolls[name] then
         RT.rolls[name] = roll
         if AIP.Debug then AIP.Debug("RaidTools: roll " .. name .. " = " .. roll) end
+
+        -- Flag loot-banned rollers so they can't win and the ML is warned.
+        local banned, banBoss = RT.IsRollerBanned(name)
+        if banned then
+            RT.bannedRollers = RT.bannedRollers or {}
+            RT.bannedRollers[name] = banBoss or true
+            local where = (type(banBoss) == "string") and (" (" .. banBoss .. ")") or ""
+            AIP.Print("|cFFFF0000LOOT BANNED:|r " .. name .. " rolled " .. roll ..
+                " but is banned" .. where .. " - excluded from winning.")
+        end
+
         if RT.RefreshRollWindow then RT.RefreshRollWindow() end
     end
 end

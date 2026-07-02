@@ -160,6 +160,9 @@ Parsers.RoleKeywords = {
     },
 }
 
+-- Deterministic detection order (pairs() order is unspecified in Lua 5.1).
+Parsers.RoleOrder = {"tank", "healer", "dps"}
+
 -- ============================================================================
 -- CLASS DETECTION KEYWORDS
 -- ============================================================================
@@ -176,6 +179,10 @@ Parsers.ClassKeywords = {
     WARLOCK = {"warlock", "lock", "affli", "demo", "destro"},
     DRUID = {"druid", "boomkin", "moonkin", "balance", "feral", "cat"},
 }
+
+-- Deterministic detection order. WARLOCK before WARRIOR so ambiguous hints
+-- resolve consistently (pairs() order is unspecified in Lua 5.1).
+Parsers.ClassOrder = {"WARLOCK", "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "DEATHKNIGHT", "SHAMAN", "MAGE", "DRUID"}
 
 -- ============================================================================
 -- LFG/LFM DETECTION KEYWORDS
@@ -283,9 +290,12 @@ function Parsers.DetectRole(message)
     if not message then return nil end
     local msg = message:lower()
 
-    for role, data in pairs(Parsers.RoleKeywords) do
+    -- Word-boundary (frontier) match in a fixed order so short codes like
+    -- "ot"/"mt"/"dd" don't match inside common words ("not", "add", ...).
+    for _, role in ipairs(Parsers.RoleOrder) do
+        local data = Parsers.RoleKeywords[role]
         for _, keyword in ipairs(data.patterns) do
-            if msg:find(keyword, 1, true) then
+            if msg:find("%f[%w]" .. keyword .. "%f[%W]") then
                 return role:upper()
             end
         end
@@ -299,9 +309,11 @@ function Parsers.DetectClass(message)
     if not message then return nil end
     local msg = message:lower()
 
-    for class, keywords in pairs(Parsers.ClassKeywords) do
-        for _, keyword in ipairs(keywords) do
-            if msg:find(keyword, 1, true) then
+    -- Frontier match in a fixed order so short codes like "ele"/"war"/"cat"
+    -- don't match inside unrelated words ("melee", "warlock", "locate").
+    for _, class in ipairs(Parsers.ClassOrder) do
+        for _, keyword in ipairs(Parsers.ClassKeywords[class]) do
+            if msg:find("%f[%w]" .. keyword .. "%f[%W]") then
                 return class
             end
         end
@@ -413,8 +425,9 @@ function Parsers.ParseAchievement(message)
     -- Skip patterns that look like role compositions [T:...] or class codes [T:BD,BDK...]
     local lastBracket = message:match("%[([^%]]+)%]%s*$")
     if lastBracket then
-        -- Skip if it looks like role composition (contains T: H: M: R: with numbers)
-        if lastBracket:match("T:%d") or lastBracket:match("H:%d") then
+        -- Skip role/composition brackets, both numeric [T:0/2 H:0/6...] and
+        -- spec-code [T:BD,BDK H:HPal...] (T:/H:/M:/R: followed by a letter or digit).
+        if lastBracket:match("^[THMR]:[%a%d]") then
             return nil
         end
         -- Skip if it looks like class codes (short comma-separated codes)

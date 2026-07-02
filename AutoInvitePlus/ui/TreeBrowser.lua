@@ -58,9 +58,85 @@ TB.KnownCategories = {}
 -- Settings for hiding locked instances
 TB.HideLocked = false
 
--- Stale entry timeout (seconds) - entries older than this are hidden from tree
--- Default: 180 seconds (3 minutes). Set to 0 to disable filtering.
+-- Hide listings we've already dealt with (manually excluded or already requested).
+-- Runtime flag mirroring HideLocked; defaults on.
+TB.HideExcluded = true
+
+-- Should this LFM group be hidden from the tree right now?
+-- Never hide our own listing. Hidden when either:
+--   * the leader is blacklisted and "Hide blacklisted" (persistent) is on, or
+--   * the listing is manually excluded and the "Hide Viewed" filter is on.
+function TB.IsGroupHidden(group)
+    if not group or group.isOwn then return false end
+    -- Blacklisted leaders (persistent setting)
+    if AIP.db and AIP.db.hideBlacklistedListings and AIP.IsBlacklisted
+       and AIP.IsBlacklisted(group.leader) then
+        return true
+    end
+    -- Manually excluded / already requested (runtime "Hide Viewed" filter)
+    if TB.HideExcluded then
+        local CS = AIP.ChatScanner
+        if CS and CS.IsExcluded and CS.IsExcluded(group.leader) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Decorate a freshly-built group node with favorite / requested / excluded state:
+--   favorite -> gold star prefix + gold text
+--   requested -> "(requested Xm ago)" appended + dimmed
+--   excluded (only visible when the filter is off) -> "[hidden]" prefix + dimmed
+function TB.ApplyListingDecor(node, group)
+    if not node or not group or not group.leader then return end
+    local CS = AIP.ChatScanner
+
+    local isFav = AIP.IsPlayerFavorite and AIP.IsPlayerFavorite(group.leader) or false
+    if isFav then
+        node.text = "|cFFFFD100\226\152\133|r " .. (node.text or "")
+        -- Gold, unless a higher-priority color (own=green, locked=red) is set.
+        if not node.textColor then
+            node.textColor = {r = 1, g = 0.82, b = 0}
+        end
+    end
+
+    local reqTime = CS and CS.GetRequested and CS.GetRequested(group.leader)
+    if reqTime then
+        local mins = math.floor((time() - reqTime) / 60)
+        local ago = mins <= 0 and "just now" or (mins .. "m ago")
+        node.compText = (node.compText and node.compText ~= "" and (node.compText .. "  ") or "")
+            .. "|cFF888888(requested " .. ago .. ")|r"
+        if not isFav and not group.isOwn then
+            node.textColor = {r = 0.5, g = 0.5, b = 0.5}
+        end
+    end
+
+    if CS and CS.IsExcluded and CS.IsExcluded(group.leader) and not group.isOwn then
+        node.text = "|cFF888888[hidden]|r " .. (node.text or "")
+        if not isFav then
+            node.textColor = {r = 0.5, g = 0.5, b = 0.5}
+        end
+    end
+end
+
+-- Stale entry timeout (seconds) - entries older than this are hidden from tree.
+-- Kept only as a last-resort fallback; the real value comes from the user's
+-- Cache Duration setting via TB.GetDisplayTimeout (see below).
 TB.StaleTimeout = 180
+
+-- How long a listing stays visible in the tree. Driven by the "Cache Duration"
+-- setting (minutes) so listings and their timers behave exactly as configured -
+-- the same value that prunes the scanner cache (CS.GetExpiry). This is what makes
+-- the timeout actually controllable from Settings instead of a fixed 3 minutes.
+function TB.GetDisplayTimeout()
+    if AIP.ChatScanner and AIP.ChatScanner.GetExpiry then
+        return AIP.ChatScanner.GetExpiry()
+    end
+    if AIP.db and AIP.db.cacheDuration and AIP.db.cacheDuration > 0 then
+        return AIP.db.cacheDuration * 60
+    end
+    return TB.StaleTimeout or 180
+end
 
 -- Instance name to saved instance mapping for WotLK 3.3.5a (+ TBC and Classic)
 TB.InstanceMapping = {
@@ -440,7 +516,7 @@ function TB.BuildLFMTree(preserveState)
 
     -- Filter out stale entries if timeout is set
     local now = time()
-    local staleTimeout = TB.StaleTimeout or 180  -- Default 3 min
+    local staleTimeout = TB.GetDisplayTimeout()  -- from Cache Duration setting
     if staleTimeout > 0 then
         local freshGroups = {}
         for _, group in ipairs(allGroups) do
@@ -507,7 +583,8 @@ function TB.BuildLFMTree(preserveState)
             for _, group in ipairs(catGroups) do
                 local isLocked = TB.IsLockedToInstance(group.raid)
                 if isLocked then lockedCount = lockedCount + 1 end
-                if not TB.HideLocked or not isLocked or group.isOwn then
+                if (not TB.HideLocked or not isLocked or group.isOwn)
+                   and not TB.IsGroupHidden(group) then
                     group.isLocked = isLocked  -- Store lock state for coloring
                     table.insert(filteredGroups, group)
                 end
@@ -595,6 +672,7 @@ function TB.BuildLFMTree(preserveState)
                         data = group,
                         isLocked = group.isLocked,
                     }
+                    TB.ApplyListingDecor(groupNode, group)
                     table.insert(catNode.children, groupNode)
                 end
 
@@ -646,7 +724,8 @@ function TB.BuildLFMTree(preserveState)
         local filteredUnmatched = {}
         for _, group in ipairs(unmatchedGroups) do
             local isLocked = TB.IsLockedToInstance(group.raid)
-            if not TB.HideLocked or not isLocked or group.isOwn then
+            if (not TB.HideLocked or not isLocked or group.isOwn)
+               and not TB.IsGroupHidden(group) then
                 group.isLocked = isLocked
                 table.insert(filteredUnmatched, group)
             end
@@ -731,6 +810,7 @@ function TB.BuildLFMTree(preserveState)
                     data = group,
                     isLocked = group.isLocked,
                 }
+                TB.ApplyListingDecor(groupNode, group)
                 table.insert(otherNode.children, groupNode)
             end
 
@@ -757,7 +837,7 @@ function TB.BuildLFGTree(preserveState)
 
     -- Filter out stale entries if timeout is set
     local now = time()
-    local staleTimeout = TB.StaleTimeout or 180  -- Default 3 min
+    local staleTimeout = TB.GetDisplayTimeout()  -- from Cache Duration setting
     if staleTimeout > 0 then
         local freshPlayers = {}
         for _, player in ipairs(allPlayers) do
@@ -767,6 +847,17 @@ function TB.BuildLFGTree(preserveState)
             end
         end
         allPlayers = freshPlayers
+    end
+
+    -- Hide blacklisted players' listings if the setting is on
+    if AIP.db and AIP.db.hideBlacklistedListings and AIP.IsBlacklisted then
+        local visible = {}
+        for _, player in ipairs(allPlayers) do
+            if not AIP.IsBlacklisted(player.name) then
+                table.insert(visible, player)
+            end
+        end
+        allPlayers = visible
     end
 
     -- If no fresh players remain, return empty tree
@@ -802,6 +893,10 @@ function TB.BuildLFGTree(preserveState)
                         break
                     end
                 end
+                -- Only place each player in ONE category: otherwise the same
+                -- node id "lfg_player_<name>" appears in multiple categories and
+                -- selecting one row highlights all of them.
+                if matched then break end
             end
         end
 
@@ -1252,10 +1347,12 @@ function TB.CreateTreeView(parent, width, height)
                         timerStr = math.floor(elapsed / 3600) .. "h"
                     end
                     row.timerText:SetText(timerStr)
-                    -- Color based on age (green=fresh, yellow=aging, red=stale)
-                    if elapsed < 120 then
+                    -- Color based on age relative to the configured display timeout
+                    -- (green=fresh, yellow=aging, red=about to expire).
+                    local timeout = TB.GetDisplayTimeout()
+                    if elapsed < timeout / 3 then
                         row.timerText:SetTextColor(0.4, 0.8, 0.4)  -- Green
-                    elseif elapsed < 300 then
+                    elseif elapsed < timeout * 2 / 3 then
                         row.timerText:SetTextColor(0.8, 0.8, 0.4)  -- Yellow
                     else
                         row.timerText:SetTextColor(0.8, 0.4, 0.4)  -- Red
@@ -1301,6 +1398,32 @@ function TB.CreateTreeView(parent, width, height)
                         if group.tanks or group.healers or group.mdps or group.rdps or group.dps then
                             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                             GameTooltip:AddLine(group.leader or group.name or "Group", 1, 0.82, 0)
+
+                            -- Favorite / requested / excluded status
+                            local CS = AIP.ChatScanner
+                            local leaderName = group.leader or group.name
+                            local isFav, favEntry = false, nil
+                            if AIP.IsPlayerFavorite then
+                                isFav, favEntry = AIP.IsPlayerFavorite(leaderName)
+                            end
+                            if isFav then
+                                local note = favEntry and favEntry.note
+                                if note and note ~= "" then
+                                    GameTooltip:AddLine("\226\152\133 Favorite - " .. note, 1, 0.82, 0)
+                                else
+                                    GameTooltip:AddLine("\226\152\133 Favorite", 1, 0.82, 0)
+                                end
+                            end
+                            local reqTime = CS and CS.GetRequested and CS.GetRequested(leaderName)
+                            if reqTime then
+                                local mins = math.floor((time() - reqTime) / 60)
+                                local ago = mins <= 0 and "just now" or (mins .. "m ago")
+                                GameTooltip:AddLine("Invite requested " .. ago .. " (no reply yet)", 0.7, 0.7, 0.7)
+                            end
+                            if CS and CS.IsExcluded and CS.IsExcluded(leaderName) then
+                                GameTooltip:AddLine("Hidden (excluded)", 0.6, 0.6, 0.6)
+                            end
+
                             GameTooltip:AddLine(" ")
                             GameTooltip:AddLine("Composition (Filled/Needed):", 0.8, 0.8, 0.8)
 
@@ -1593,10 +1716,11 @@ function TB.CreateTreeView(parent, width, height)
                                 timerStr = math.floor(elapsed / 3600) .. "h"
                             end
                             row.timerText:SetText(timerStr)
-                            -- Color based on age
-                            if elapsed < 120 then
+                            -- Color based on age relative to the display timeout
+                            local timeout = TB.GetDisplayTimeout()
+                            if elapsed < timeout / 3 then
                                 row.timerText:SetTextColor(0.4, 0.8, 0.4)
-                            elseif elapsed < 300 then
+                            elseif elapsed < timeout * 2 / 3 then
                                 row.timerText:SetTextColor(0.8, 0.8, 0.4)
                             else
                                 row.timerText:SetTextColor(0.8, 0.4, 0.4)
