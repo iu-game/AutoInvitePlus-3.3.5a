@@ -105,9 +105,11 @@ SP.Tooltips = {
     -- Section 10: Test Mode
     testMode = "Populate all panels with dummy test data to preview how the UI looks when filled.\n\n|cFF00FF00Use when:|r You want to see the layout with data without being in an actual raid.\n\n|cFFFFFFFFPopulate:|r Adds fake players, groups, loot, etc.\n|cFFFFFFFFClear:|r Removes all test data\n\n|cFFFFFF00Note:|r Test data is NOT saved. It's cleared on logout.",
 
-    debuffAnnounce = "Calls out important raid debuffs/curses on YOU to chat (default /say), with the stack count and a short note on what to do.\n\n|cFFFFFFFFExamples:|r\n- 'Necrotic Plague - run to adds + dispel me!'\n- 'Mutated Infection x3 - spread out + dispel me!'\n- 'Mystic Buffet x5 - LoS behind ice block!'\n\nOnly speaks on a new debuff or when its stack increases, and only while in a group.\n\n|cFF00FF00Enable when:|r You want to warn the raid/healers about debuffs you can't always see in time.",
+    debuffAnnounce = "Calls out important raid debuffs/curses on YOU to chat (default /say), with the stack count and a short note on what to do.\n\n|cFFFFFFFFExamples:|r\n- 'Necrotic Plague - run to adds + dispel me!'\n- 'Mutated Infection x3 - move away from raid, then dispel me!'\n- 'Mystic Buffet x5 - hide behind an Ice Tomb to drop your stacks!'\n\nOnly speaks on a new debuff or when its stack increases, and only requests a dispel when the debuff is actually removable. Only fires inside a dungeon/raid.\n\n|cFF00FF00Enable when:|r You want to warn the raid/healers about debuffs you can't always see in time.",
 
-    mechanicAnnounce = "A lightweight automatic boss-mechanic announcer (a mini-DBM). It reacts to trackable in-game events:\n\n|cFFFFFFFFBoss spell casts|r - 'Defile - move out!', 'Frost Breath - LoS!', 'Rockets - move!'\n|cFFFFFFFFBoss health|r - 'Lich King at 35%!' (the target/focus boss)\n|cFFFFFFFFBoss emotes/yells|r - 'Festergut inhales - spores soon!'\n|cFFFFFFFFRaid health|r - 'Raid low - heal up!'\n|cFFFFFFFFCountdown bars|r - Bloodlust/Heroism duration + lockout, and signature boss abilities (drag the 'AIP Timers' anchor to position; /aip timertest to preview).\n\n|cFFFFFF00Channel:|r 'SELF' shows a center-screen heads-up only YOU see (recommended - no chat spam); SAY/Raid/RW broadcast it.\n\nNot a replacement for DBM timers, but a handy reactive callout layer.",
+    mechanicAnnounce = "A lightweight automatic boss-mechanic announcer (a mini-DBM). It reacts to trackable in-game events, and only inside a dungeon/raid:\n\n|cFFFFFFFFBoss spell casts|r - 'Defile - move OUT, it grows!', 'Blistering Cold - run AWAY from Sindragosa!'\n|cFFFFFFFFBoss health|r - 'Lich King at 35%!' (the target/focus boss)\n|cFFFFFFFFBoss emotes|r - 'Festergut inhales - Gas Spore soon, group up!'\n|cFFFFFFFFRaid health|r - 'Raid low - heal up!'\n|cFFFFFFFFCountdown bars|r - Bloodlust/Heroism duration + lockout, and signature boss abilities (drag the 'AIP Timers' anchor to position; /aip timertest to preview).\n\n|cFFFFFF00Channel:|r 'SELF' shows a center-screen heads-up only YOU see (recommended - no chat spam); SAY/Raid/RW broadcast it.\n\nNot a replacement for DBM timers, but a handy reactive callout layer.",
+
+    classDutyAnnounce = "Adds class-specific duty call-outs to the mechanic announcer. When a mechanic fires, it tells the classes present in your group what to do with a class ability.\n\n|cFFFFFFFFExamples:|r\n- Jaraxxus casts Nether Power -> 'Mage: Spellsteal it off Jaraxxus! (Bob)'\n- Lady Deathwhisper Dominate Mind -> 'Mage: Polymorph the mind-controlled player!'\n- Onyxia Bellowing Roar -> 'Shaman: drop Tremor Totem for the fear!'\n\n|cFFFFFF00Delivery follows the mechanic channel:|r on SELF you get a personal heads-up only for YOUR class's duty (no spam); on a raid channel it names each present class + member(s), but only if you're raid leader/assistant.\n\n|cFF00FF00Requires|r the mechanic announcer to be enabled.",
 }
 
 -- Helper: Fix UIDropDownMenu strata issues in WotLK
@@ -267,7 +269,7 @@ function SP.Create(parent)
     scrollFrame:SetPoint("BOTTOMRIGHT", -28, 5)
 
     local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetHeight(1710)  -- Height for all sections including test mode
+    content:SetHeight(1822)  -- Height for all sections including test mode
     scrollFrame:SetScrollChild(content)
 
     -- Dynamic width - initially set and updated on resize
@@ -1174,6 +1176,24 @@ function SP.Create(parent)
     frame.unfocusedSlider = unfocusedSlider
     y = y - 40
 
+    -- Dungeon Finder (RDF) queue window
+    local rdfCheck = CreateCheckbox(content, 15, y, "lfgWatch", "Show the Dungeon Finder queue window", function(self)
+        AIP.db.lfgWatch = (self:GetChecked() == 1 or self:GetChecked() == true)
+        if AIP.LFGWatch and AIP.LFGWatch.UpdateWidget then AIP.LFGWatch.UpdateWidget() end
+    end)
+    rdfCheck:SetChecked(AIP.db and AIP.db.lfgWatch)
+    y = y - 26
+    local rdfShareCheck = CreateCheckbox(content, 15, y, "lfgShare", "Share my queue status with addon peers (DataBus)", function(self)
+        AIP.db.lfgShare = (self:GetChecked() == 1 or self:GetChecked() == true)
+    end)
+    rdfShareCheck:SetChecked(AIP.db and AIP.db.lfgShare)
+    y = y - 26
+    local rdfRequeueCheck = CreateCheckbox(content, 15, y, "lfgAutoRequeue", "Auto leave + re-queue if no group in 2 min (resets queue position)", function(self)
+        AIP.db.lfgAutoRequeue = (self:GetChecked() == 1 or self:GetChecked() == true)
+    end)
+    rdfRequeueCheck:SetChecked(AIP.db and AIP.db.lfgAutoRequeue)
+    y = y - 34
+
     -- ========================================================================
     -- [9] DEBUG & DATA
     -- ========================================================================
@@ -1332,7 +1352,13 @@ function SP.Create(parent)
     UIDropDownMenu_Initialize(mechChanDropdown, MechChan_Init)
     FixDropdownStrata(mechChanDropdown)
 
-    y = y - 108
+    -- Sub-option of the mechanic announcer: class-targeted duty call-outs.
+    local dutyCheck, dutyLabel = CreateCheckbox(content, 30, y - 104, "classDutyAnnounce", "...also call out class-specific duties (Spellsteal, Tranq, Tremor, CC)")
+    frame.checks.classDutyAnnounce = dutyCheck
+    local dutyTooltip = CreateTooltipButton(content, "classDutyAnnounce")
+    dutyTooltip:SetPoint("LEFT", dutyLabel, "RIGHT", 2, 0)
+
+    y = y - 134
 
     -- Quick actions
     local quickLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")

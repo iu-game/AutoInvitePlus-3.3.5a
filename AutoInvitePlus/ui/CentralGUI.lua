@@ -30,6 +30,7 @@ GUI.Tabs = {
     {id = "composition", name = "Composition", tooltip = "Raid composition advisor with templates"},
     {id = "raidmgmt", name = "Raid Mgmt", tooltip = "Raid warnings, loot rules, buff checker, MS/OS tracking"},
     {id = "loothistory", name = "Loot History", tooltip = "Historical loot drops from raids and dungeons"},
+    {id = "character", name = "Character", tooltip = "Gear upgrades, spec advisor, readiness and coaching"},
     {id = "settings", name = "Settings", tooltip = "Auto-invite and broadcast settings"},
 }
 
@@ -284,8 +285,42 @@ GUI.Backdrops = {
 function GUI.ApplyBackdrop(frame, backdropType, bgAlpha, borderAlpha)
     local bd = GUI.Backdrops[backdropType] or GUI.Backdrops.Panel
     frame:SetBackdrop(bd)
-    frame:SetBackdropColor(0.05, 0.05, 0.05, bgAlpha or 0.95)
-    frame:SetBackdropBorderColor(0.4, 0.4, 0.4, borderAlpha or 1)
+    -- Cohesive theme: subtle dark-navy fill + soft slate border (was flat grey).
+    frame:SetBackdropColor(0.045, 0.05, 0.072, bgAlpha or 0.95)
+    frame:SetBackdropBorderColor(0.34, 0.37, 0.46, borderAlpha or 1)
+end
+
+-- Beautify a popup dialog to match the main window: dark-navy fill, soft slate
+-- border, and a gold-accented title strip. Cosmetic only; idempotent.
+function GUI.StylePopup(popup, titleHeight)
+    if not popup then return end
+    popup:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 16,
+        insets = { left = 5, right = 5, top = 5, bottom = 5 },
+    })
+    popup:SetBackdropColor(0.05, 0.055, 0.085, 1)
+    popup:SetBackdropBorderColor(0.4, 0.42, 0.52, 1)
+    if not popup._aipBg then
+        -- Solid backing layer so nothing behind the popup bleeds through (the dark
+        -- dialog texture alone is semi-transparent).
+        local bg = popup:CreateTexture(nil, "BACKGROUND", nil, -8)
+        bg:SetPoint("TOPLEFT", 5, -5); bg:SetPoint("BOTTOMRIGHT", -5, 5)
+        bg:SetTexture(0.045, 0.05, 0.072, 1)
+        popup._aipBg = bg
+    end
+    if not popup._aipStrip then
+        local strip = popup:CreateTexture(nil, "BORDER")
+        strip:SetPoint("TOPLEFT", 6, -6); strip:SetPoint("TOPRIGHT", -6, -6)
+        strip:SetHeight(titleHeight or 28)
+        strip:SetTexture(0.11, 0.12, 0.18, 0.95)
+        local div = popup:CreateTexture(nil, "ARTWORK")
+        div:SetPoint("TOPLEFT", strip, "BOTTOMLEFT", 0, 0)
+        div:SetPoint("TOPRIGHT", strip, "BOTTOMRIGHT", 0, 0)
+        div:SetHeight(2); div:SetTexture(1, 0.82, 0, 0.5)
+        popup._aipStrip = strip
+    end
 end
 
 -- Helper: Create properly styled edit box for WotLK
@@ -807,11 +842,11 @@ function GUI.CreateFrame()
     })
     frame:SetBackdropColor(0, 0, 0, 1)
 
-    -- Add an additional solid background layer for guaranteed opacity
+    -- Add an additional solid background layer for guaranteed opacity (dark navy).
     local solidBg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
     solidBg:SetPoint("TOPLEFT", 11, -11)
     solidBg:SetPoint("BOTTOMRIGHT", -11, 11)
-    solidBg:SetTexture(0.05, 0.05, 0.05, 1)
+    solidBg:SetTexture(0.045, 0.05, 0.072, 1)
 
     -- Title bar
     local titleBar = CreateFrame("Frame", nil, frame)
@@ -819,9 +854,17 @@ function GUI.CreateFrame()
     titleBar:SetPoint("TOPLEFT", 10, -10)
     titleBar:SetPoint("TOPRIGHT", -10, -10)
 
+    -- Title strip + gold accent divider (visual polish; purely cosmetic).
+    local titleStrip = titleBar:CreateTexture(nil, "BACKGROUND")
+    titleStrip:SetAllPoints(); titleStrip:SetTexture(0.10, 0.11, 0.17, 0.92)
+    local titleDivider = titleBar:CreateTexture(nil, "ARTWORK")
+    titleDivider:SetPoint("TOPLEFT", titleBar, "BOTTOMLEFT", 2, -1)
+    titleDivider:SetPoint("TOPRIGHT", titleBar, "BOTTOMRIGHT", -2, -1)
+    titleDivider:SetHeight(2); titleDivider:SetTexture(1, 0.82, 0, 0.5)
+
     -- Main title
     local titleText = titleBar:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    titleText:SetPoint("LEFT", 5, 2)
+    titleText:SetPoint("LEFT", 8, 1)
     titleText:SetText("AutoInvite+")
     titleText:SetTextColor(1, 0.82, 0)
 
@@ -872,6 +915,33 @@ function GUI.CreateFrame()
         GameTooltip:Show()
     end)
     minBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- Quick raid buttons in the title bar - stay visible even when minimized.
+    local function titleBtn(text, w, ref, ofs, onClick, tip)
+        local b = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+        b:SetSize(w, 18); b:SetText(text)
+        b:SetPoint("RIGHT", ref, "LEFT", ofs, 0)
+        b:SetScript("OnClick", onClick)
+        b:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:AddLine(tip); GameTooltip:Show() end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        return b
+    end
+    local qTools = titleBtn("Tools", 46, minBtn, -8,
+        function() if AIP.RaidTools and AIP.RaidTools.ToggleRollWindow then AIP.RaidTools.ToggleRollWindow() end end,
+        "Raid Tools (roll window)")
+    local qBreak = titleBtn("Break", 44, qTools, -3,
+        function() if AIP.DBMBridge then AIP.DBMBridge.SendBreak(5) end end, "5-minute break timer")
+    local qPull = titleBtn("Pull", 40, qBreak, -3,
+        function() if AIP.DBMBridge then AIP.DBMBridge.SendPull(10) end end, "Pull timer (10s, DBM-synced)")
+    local qRDF = titleBtn("RDF", 40, qPull, -3,
+        function() if AIP.LFGWatch and AIP.LFGWatch.Toggle then AIP.LFGWatch.Toggle() end end,
+        "Toggle the Dungeon Finder queue window")
+    local qBar = titleBtn("Bar", 38, qRDF, -3,
+        function() if AIP.RaidTools and AIP.RaidTools.ToggleBar then AIP.RaidTools.ToggleBar() end end,
+        "Toggle the floating announcement bar")
+    titleBtn("Ready", 52, qBar, -3,
+        function() if AIP.RaidTools and AIP.RaidTools.StartReadyCheck then AIP.RaidTools.StartReadyCheck() end end,
+        "Start a ready check")
 
     -- Drag to move
     frame:RegisterForDrag("LeftButton")
@@ -989,10 +1059,10 @@ function GUI.CreateFrame()
         local container = CreateFrame("Frame", "AIPContent" .. tab.id, content)
         container:SetAllPoints()
 
-        -- Add background to content area for visibility
+        -- Add background to content area for visibility (dark navy, theme-matched)
         local contentBg = container:CreateTexture(nil, "BACKGROUND")
         contentBg:SetAllPoints()
-        contentBg:SetTexture(0.05, 0.05, 0.05, 1)
+        contentBg:SetTexture(0.045, 0.05, 0.072, 1)
 
         container:Hide()
         frame.tabContents[tab.id] = container
@@ -1005,10 +1075,13 @@ function GUI.CreateFrame()
     statusBar:SetPoint("BOTTOMRIGHT", -10, 5)
     frame.statusBar = statusBar
 
-    -- Status bar background for visibility
+    -- Status bar background + a subtle accent divider along its top edge.
     local statusBarBg = statusBar:CreateTexture(nil, "BACKGROUND")
     statusBarBg:SetAllPoints()
-    statusBarBg:SetTexture(0.08, 0.08, 0.08, 0.9)
+    statusBarBg:SetTexture(0.10, 0.11, 0.16, 0.92)
+    local statusDivider = statusBar:CreateTexture(nil, "ARTWORK")
+    statusDivider:SetPoint("TOPLEFT", 0, 1); statusDivider:SetPoint("TOPRIGHT", 0, 1)
+    statusDivider:SetHeight(1); statusDivider:SetTexture(1, 0.82, 0, 0.35)
 
     local statusText = statusBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     statusText:SetPoint("LEFT", 5, 0)
@@ -1322,6 +1395,31 @@ function GUI.InitializeTabs(frame)
         info:SetPoint("CENTER")
         info:SetText("Panel not loaded.\nCheck that LootHistoryPanel.lua is in the addon folder.")
         info:SetTextColor(1, 0.4, 0.4)
+    end
+
+    -- Character Tab (gear/upgrade/spec/coaching)
+    local characterContainer = frame.tabContents["character"]
+    if AIP.Panels.Character and type(AIP.Panels.Character.Create) == "function" then
+        local success, err = pcall(function()
+            AIP.Panels.Character.Create(characterContainer)
+        end)
+        if not success then
+            AIP.Debug("Character panel creation failed: " .. tostring(err))
+            local errorText = characterContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            errorText:SetPoint("CENTER")
+            errorText:SetText("|cFFFF4444Panel Error:|r " .. tostring(err))
+        end
+    else
+        -- Panel file not registered: on 3.3.5a, newly ADDED addon files are only
+        -- loaded on a fresh login, not by /reload. Tell the user instead of blank.
+        local title = characterContainer:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        title:SetPoint("TOP", 0, -40)
+        title:SetText("Character")
+        local info = characterContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        info:SetPoint("CENTER")
+        info:SetText("|cFFFFCC00Character panel not loaded yet.|r\n\nNewly added addon files aren't picked up by /reload on 3.3.5a.\nLog out to the character-selection screen and back in\n(or restart the client) once, then reopen this tab.")
+        info:SetTextColor(0.85, 0.85, 0.85)
+        info:SetJustifyH("CENTER")
     end
 
     -- Settings Tab
@@ -4688,7 +4786,8 @@ end
 -- Refresh browser tab (preserves scroll position and expand/collapse state)
 function GUI.RefreshBrowserTab(tabType, forceReset)
     if not GUI.Frame or not GUI.Frame.tabContents then return end
-    local container = GUI.Frame.tabContents[tabType]
+    -- LFM and LFG both render into the single "lfm" browser container.
+    local container = GUI.Frame.tabContents[tabType == "lfg" and "lfm" or tabType]
     if not container then return end
 
     -- Save current scroll position before refresh
@@ -6478,12 +6577,7 @@ function GUI.CreateAddGroupPopup()
     popup:SetScript("OnDragStart", popup.StartMoving)
     popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
     popup:SetClampedToScreen(true)
-    popup:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = {left = 8, right = 8, top = 8, bottom = 8}
-    })
+    GUI.StylePopup(popup)
 
     local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -15)
@@ -7576,12 +7670,7 @@ function GUI.CreateEnrollPopup()
     popup:SetScript("OnDragStart", popup.StartMoving)
     popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
     popup:SetClampedToScreen(true)
-    popup:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = {left = 8, right = 8, top = 8, bottom = 8}
-    })
+    GUI.StylePopup(popup)
 
     local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -15)
@@ -8179,12 +8268,7 @@ function GUI.CreateAddToQueuePopup()
     popup:SetScript("OnDragStart", popup.StartMoving)
     popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
     popup:SetClampedToScreen(true)
-    popup:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = {left = 8, right = 8, top = 8, bottom = 8}
-    })
+    GUI.StylePopup(popup)
 
     local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -15)
@@ -8311,12 +8395,7 @@ function GUI.CreateAddToWaitlistPopup()
     popup:SetScript("OnDragStart", popup.StartMoving)
     popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
     popup:SetClampedToScreen(true)
-    popup:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = {left = 8, right = 8, top = 8, bottom = 8}
-    })
+    GUI.StylePopup(popup)
 
     local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -15)
@@ -8570,12 +8649,7 @@ function GUI.ShowRecommendations()
         popup:SetMovable(true); popup:EnableMouse(true); popup:RegisterForDrag("LeftButton")
         popup:SetScript("OnDragStart", popup.StartMoving)
         popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
-        popup:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-            tile = true, tileSize = 32, edgeSize = 32,
-            insets = {left = 11, right = 12, top = 12, bottom = 11},
-        })
+        GUI.StylePopup(popup)
 
         local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
         title:SetPoint("TOP", 0, -14)
@@ -8701,16 +8775,23 @@ end
 
 -- Select a tab
 function GUI.SelectTab(tabId)
+    -- The LFM and LFG browsers share the single "lfm" container (LFG is a mode of
+    -- the browser, not its own tab). Map it, and hard-guard against ANY tab id that
+    -- has no container - otherwise the loop below hides every tab -> blank window.
+    local containerId = (tabId == "lfg") and "lfm" or tabId
+    if not (GUI.Frame.tabContents and GUI.Frame.tabContents[containerId]) then
+        tabId, containerId = "lfm", "lfm"
+    end
     GUI.CurrentTab = tabId
 
     for id, container in pairs(GUI.Frame.tabContents) do
         local tabBtn = GUI.Frame.tabButtons[id]
-        if id == tabId then
+        if id == containerId then
             container:Show()
             -- Highlight selected tab with custom styling
             if tabBtn then
                 if tabBtn.bg then
-                    tabBtn.bg:SetTexture(0.25, 0.25, 0.35, 1)
+                    tabBtn.bg:SetTexture(0.30, 0.26, 0.12, 1)   -- selected: warm gold-tinted
                 end
                 if tabBtn.text then
                     tabBtn.text:SetTextColor(1, 0.82, 0)  -- Gold color for selected
@@ -8721,7 +8802,7 @@ function GUI.SelectTab(tabId)
             -- Deselect tab with custom styling
             if tabBtn then
                 if tabBtn.bg then
-                    tabBtn.bg:SetTexture(0.15, 0.15, 0.15, 0.9)
+                    tabBtn.bg:SetTexture(0.11, 0.12, 0.17, 0.9)   -- unselected: dark navy
                 end
                 if tabBtn.text then
                     tabBtn.text:SetTextColor(0.8, 0.8, 0.8)  -- Gray for unselected
@@ -8750,6 +8831,8 @@ function GUI.UpdateCurrentTab()
         AIP.Panels.RaidMgmt.Update()
     elseif tabId == "loothistory" and AIP.Panels and AIP.Panels.LootHistory then
         AIP.Panels.LootHistory.Update()
+    elseif tabId == "character" and AIP.Panels and AIP.Panels.Character then
+        AIP.Panels.Character.Update()
     elseif tabId == "settings" and AIP.Panels and AIP.Panels.Settings then
         AIP.Panels.Settings.Update()
     end
@@ -8907,10 +8990,25 @@ function GUI.Show(tabId)
 end
 
 -- Update function called when data changes
+-- Debounced "data changed -> refresh UI". Background triggers (group inspections
+-- completing, peer addon data, chat scans) fire this constantly; refreshing the
+-- current tab every time rebuilt the browser tree at random. Coalesce bursts into
+-- a single deferred refresh so the tree doesn't flicker/reset.
 function AIP.UpdateCentralGUI()
-    if GUI.Frame and GUI.Frame:IsVisible() then
-        GUI.UpdateCurrentTab()
-        GUI.UpdateGearScoreDisplay()
+    if not (GUI.Frame and GUI.Frame:IsVisible()) then return end
+    if GUI._updatePending then return end
+    GUI._updatePending = true
+    local function doUpdate()
+        GUI._updatePending = false
+        if GUI.Frame and GUI.Frame:IsVisible() then
+            GUI.UpdateCurrentTab()
+            GUI.UpdateGearScoreDisplay()
+        end
+    end
+    if AIP.Utils and AIP.Utils.DelayedCall then
+        AIP.Utils.DelayedCall(0.4, doUpdate)
+    else
+        doUpdate()
     end
 end
 

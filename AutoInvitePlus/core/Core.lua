@@ -4,7 +4,7 @@
 -- Refactored with DRY principle and OOP patterns
 
 local ADDON_NAME = "AutoInvitePlus"
-local VERSION = "6.1.2"
+local VERSION = "6.3.0"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
 local DB_VERSION = 5  -- Increment when saved variables structure changes (5.5: raid sessions, 5.4: mdps/rdps split, 4: loot history retention)
 
 -- Create main addon namespace (may already exist from Utils.lua)
@@ -25,7 +25,9 @@ local defaults = {
     enabled = false,
     debugLogging = false,   -- persistent debug logging to db.debugLog (Settings toggle)
     triggers = "invme-auto",
-    spamMessage = 'LFM <raid> <roles> | <gs>+ | Whisper "<key>" for invite',
+    -- Only <key> is auto-substituted (with your trigger words); other tokens would
+    -- broadcast literally, so the default keeps just <key>.
+    spamMessage = 'LFM - looking for more! Whisper "<key>" for an invite.',
     maxRaiders = 25,
     useMaxLimit = false,
     autoRaid = true,
@@ -163,16 +165,33 @@ local defaults = {
     rollDuration = 10,              -- Roll countdown seconds
 
     -- Self debuff/curse announcer: /say important raid debuffs on you (with stacks)
-    -- and a short note on what to do about them.
-    debuffAnnounce = false,
+    -- and a short note on what to do about them. ON by default (instance-gated, so
+    -- it only speaks inside 5-mans/raids - never out in the world).
+    debuffAnnounce = true,
     debuffAnnounceChannel = "SAY",
 
     -- Auto mechanic announcer: short call-outs for boss casts, boss health
     -- milestones, boss emotes/yells, and low raid health. Default "SELF" shows a
-    -- personal center-screen heads-up (no raid-chat spam).
-    mechanicAnnounce = false,
+    -- personal center-screen heads-up (no raid-chat spam). ON by default.
+    mechanicAnnounce = true,
     mechanicAnnounceChannel = "SELF",
+    classDutyAnnounce = true,       -- within the mechanic announcer, also call out class-specific duties
+    dbmBridge = true,               -- listen to DBM (D4) pull/break/combat-res timers and render them on AIP bars
+    threatCoach = false,            -- opt-in: warn me (heads-up) when I'm about to pull aggro off the tank
+    readyCheckScan = true,          -- auto-run the pre-pull readiness self-check when a ready check starts
+    gearShare = true,               -- broadcast my own gear-readiness summary so peers needn't inspect me
+    statScales = nil,               -- {archetype = {stat=weight}} user overrides from a pasted Pawn string
+    recBuild = nil,                 -- imported recommended talent build string (Wowhead digit format)
+    postPull = false,               -- opt-in: print a post-pull "how'd that go" report after boss fights
+    tooltipScore = true,            -- append an AIP score + upgrade verdict to every item tooltip
+    paperdollAudit = true,          -- mark missing-enchant (E) / empty-socket (G) slots on the character sheet
+    rotationHelper = false,         -- opt-in: live next-ability rotation advisor + DPS overlay
+    rotationPos = nil,              -- {point, relPoint, x, y} for the rotation overlay
     timerBarPos = nil,              -- {point, relPoint, x, y} for the countdown timer bars
+    lfgWatch = true,                -- show the Dungeon Finder (RDF) queue-status widget while queued
+    lfgWatchPos = nil,              -- {point, relPoint, x, y} for the LFGWatch widget
+    lfgShare = false,               -- opt-in: broadcast my RDF queue status to addon peers over the DataBus
+    lfgAutoRequeue = false,         -- opt-in: auto leave + re-queue if no group forms within 2 min (resets queue position!)
 
     -- Loot History (v5.3)
     lootHistory = {},               -- Historical loot drops (legacy, migrated to raidSessions)
@@ -368,12 +387,24 @@ AIP.GetGroupSize = GetGroupSize
 
 -- Convert to raid if needed
 local function ConvertToRaidIfNeeded()
-    if not AIP.db.autoRaid then return end
     if UnitInRaid("player") then return end
     if not IsPartyLeader() then return end
 
     local numParty = GetNumPartyMembers()
-    if numParty >= 4 then  -- 5 total players including self
+    if numParty < 1 then return end   -- solo: nothing to convert
+
+    -- While an LFM broadcast is running we're actively recruiting, so convert to
+    -- raid as soon as the FIRST person joins - a party caps at 5, and converting
+    -- early means every later invite lands in the raid instead of being refused.
+    local gui = AIP.CentralGUI
+    if gui and gui.Broadcast and gui.Broadcast.active and gui.Broadcast.mode == "lfm" then
+        Print("LFM active - converting party to raid so you can keep inviting.")
+        ConvertToRaid()
+        return
+    end
+
+    -- Otherwise (opt-in) only convert once the party is full (5 total).
+    if AIP.db.autoRaid and numParty >= 4 then
         Print("Converting to raid...")
         ConvertToRaid()
     end
@@ -529,6 +560,7 @@ function AIP.ResetDefaults()
         nextRaidSessionId = true, currentRaidSessionId = true,
         raidWarningTemplates = true, lfmTemplates = true,
         lootBans = true, msTracking = true,
+        announceDefaultsFixed = true,   -- keep the one-time announcer-migration flag
     }
 
     -- Drop every non-preserved key, then re-seed from defaults.
@@ -847,6 +879,8 @@ function AIP.SpamInvite()
     local triggers = AIP.db.triggers:gsub(";", " or ")
     -- Use plain string replacement to avoid pattern interpretation
     msg = msg:gsub("<key>", function() return triggers end)
+    -- Strip tokens we don't fill so a customized template can't broadcast them raw.
+    msg = msg:gsub("%s*<raid>", ""):gsub("%s*<roles>", ""):gsub("%s*<gs>", "")
 
     -- Build message queue with staggered delays
     local messageQueue = {}
@@ -1182,6 +1216,16 @@ local function OnEvent(self, event, ...)
                 end
             end
 
+            -- One-time fix: the debuff/mechanic announcers shipped defaulted OFF and
+            -- were persisted false on existing saves, so they never fired (even in
+            -- RDFs). The merge above only fills nil keys, so flip them on once here;
+            -- the flag persists (and survives Reset) so later manual toggles stick.
+            if not AutoInvitePlusDB.announceDefaultsFixed then
+                AutoInvitePlusDB.debuffAnnounce = true
+                AutoInvitePlusDB.mechanicAnnounce = true
+                AutoInvitePlusDB.announceDefaultsFixed = true
+            end
+
             AIP.db = AutoInvitePlusDB
 
             -- Apply the persisted chat-scanner enable to the live scanner config
@@ -1406,6 +1450,28 @@ local function SlashHandler(msg)
             AIP.CentralGUI.Show("lfg")
         end
 
+    -- Dungeon Finder (RDF) queue status
+    elseif cmd == "rdf" or cmd == "dungeon" then
+        if AIP.LFGWatch then
+            local sub = rest and rest:lower()
+            if sub == "status" or sub == "info" then
+                AIP.LFGWatch.Print()
+            elseif sub == "share" then
+                AIP.db.lfgShare = not AIP.db.lfgShare
+                if AIP.db.lfgShare and AIP.LFGWatch.BroadcastMine then AIP.LFGWatch.BroadcastMine() end
+                Print("Sharing my queue status with addon peers: " .. (AIP.db.lfgShare and "ON" or "OFF"))
+            elseif sub == "requeue" then
+                AIP.db.lfgAutoRequeue = not AIP.db.lfgAutoRequeue
+                Print("Auto leave + re-queue after 2 min: " .. (AIP.db.lfgAutoRequeue and "ON" or "OFF")
+                    .. (AIP.db.lfgAutoRequeue and " |cff888888(note: re-queuing resets your place in line)|r" or ""))
+            else
+                local on = AIP.LFGWatch.Toggle()   -- bare /aip rdf toggles the window
+                Print("Dungeon Finder window " .. (on and "ON" or "OFF") .. ". (status=details, share=peers, requeue=auto re-queue)")
+            end
+        else
+            Print("Dungeon Finder module not loaded - log out to character select and back in.")
+        end
+
     -- Central GUI (new)
     elseif cmd == "gui" or cmd == "central" or cmd == "main" then
         if AIP.CentralGUI then
@@ -1520,6 +1586,44 @@ local function SlashHandler(msg)
             Print("Started demo timer bars (drag the 'AIP Timers' anchor). Run /aip timertest again to clear.")
         end
 
+    elseif cmd == "pull" then
+        -- Synced pull timer in DBM's format (DBM users see it on their own bar).
+        if AIP.DBMBridge then AIP.DBMBridge.SendPull(rest) end
+    elseif cmd == "break" then
+        if AIP.DBMBridge then AIP.DBMBridge.SendBreak(rest) end
+    elseif cmd == "threat" then
+        if AIP.db then
+            AIP.db.threatCoach = not AIP.db.threatCoach
+            Print("Threat coach " .. (AIP.db.threatCoach and "|cFF00FF00enabled|r - warns before you pull aggro" or "|cFFFF0000disabled|r") .. ".")
+        end
+    elseif cmd == "check" or cmd == "ready" then
+        if AIP.Readiness then AIP.Readiness.Check(false) end
+    elseif cmd == "gear" then
+        if rest and rest:lower():match("^raid") then
+            if AIP.GearAdvisor then AIP.GearAdvisor.RaidReport() end
+        elseif AIP.GearAdvisor then AIP.GearAdvisor.Report() end
+    elseif cmd == "upgrade" or cmd == "upgrades" then
+        if AIP.UpgradePath then
+            if rest and rest ~= "" then AIP.UpgradePath.CheckItem(rest) else AIP.UpgradePath.Report() end
+        end
+    elseif cmd == "spec" or cmd == "talents" then
+        if AIP.SpecAdvisor then AIP.SpecAdvisor.SlashHandler(rest) end
+    elseif cmd == "pawn" then
+        if AIP.ItemScore and AIP.ItemScore.ImportPawn then
+            local ok, arch, n = AIP.ItemScore.ImportPawn(rest)
+            Print(ok and ("Imported " .. n .. " stat weights for profile '" .. arch .. "'.")
+                or "Paste a Pawn scale string: /aip pawn ( Pawn: v1: \"X\": Stat=Val, ... )")
+        end
+    elseif cmd == "postpull" then
+        if AIP.db then
+            AIP.db.postPull = not AIP.db.postPull
+            Print("Post-pull report " .. (AIP.db.postPull and "|cFF00FF00enabled|r" or "|cFFFF0000disabled|r") .. ".")
+        end
+    elseif cmd == "rotation" or cmd == "rot" then
+        if AIP.Rotation then AIP.Rotation.Toggle() end
+    elseif cmd == "dps" then
+        if AIP.Rotation then Print(string.format("Live DPS: %.0f", AIP.Rotation.DPS())) end
+
     elseif cmd == "update" or cmd == "updates" then
         if AIP.Updater then AIP.Updater.SlashHandler() end
 
@@ -1550,6 +1654,7 @@ local function SlashHandler(msg)
         Print("|cFFFFFF00LFM/LFG Browser:|r")
         Print("  /aip lfm - LFM groups browser")
         Print("  /aip lfg - LFG players browser")
+        Print("  /aip rdf - toggle the Dungeon Finder window (status = details, share = share with peers)")
         Print("|cFFFFFF00Raid Organization:|r")
         Print("  /aip comp - Raid composition advisor")
         Print("  /aip comp recommend - Suggest classes to recruit")
@@ -1561,7 +1666,18 @@ local function SlashHandler(msg)
         Print("  /aip rw - Announce reserved loot")
         Print("  /aip rc - Start a ready check")
         Print("  /aip buffs - Announce buff assignments")
+        Print("  /aip pull [sec] - Synced pull timer (DBM-compatible; default 10)")
+        Print("  /aip break [min] - Synced break timer (DBM-compatible; default 5)")
+        Print("  /aip threat - Toggle threat coach (warns before you pull aggro)")
+        Print("  /aip check - Pre-pull readiness self-check (flask/food/durability/talents/glyphs)")
         Print("  /aip timertest - Preview countdown timer bars")
+        Print("|cFFFFFF00Character & Coaching:|r")
+        Print("  /aip gear - Best-from-bags upgrades + enchant/gem audit  (/aip gear raid = shared)")
+        Print("  /aip upgrade [item] - Weakest slots + what to run; or score a shift-clicked item")
+        Print("  /aip spec [import <str>|diff|apply] - Talent build advisor + one-click learn")
+        Print("  /aip pawn <string> - Import Pawn stat weights for your spec")
+        Print("  /aip rotation - Toggle the live rotation advisor + DPS overlay")
+        Print("  /aip postpull - Toggle the post-pull DPS/mistakes report")
         Print("|cFFFFFF00Utilities:|r")
         Print("  /aip lockouts - Your raid lockouts")
         Print("  /aip summons - Summon status")

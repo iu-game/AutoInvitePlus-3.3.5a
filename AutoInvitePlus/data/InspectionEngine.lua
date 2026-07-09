@@ -132,6 +132,19 @@ local function IsItemEnchanted(link)
     return enchantID and tonumber(enchantID) > 0
 end
 
+-- Count filled gems from the item link's gem fields (item:id:enchant:g1:g2:g3:g4:...).
+-- Reliable, unlike scanning "+N stat" tooltip lines (which also match the item's
+-- own base stats and grossly over-count sockets).
+local function countGems(link)
+    local g1, g2, g3, g4 = link:match("item:%d+:%d*:(%d*):(%d*):(%d*):(%d*)")
+    local n = 0
+    for _, g in ipairs({ g1, g2, g3, g4 }) do
+        local id = tonumber(g)
+        if id and id > 0 then n = n + 1 end
+    end
+    return n
+end
+
 -- Count gem slots and filled gems from tooltip
 local function AnalyzeGems(link)
     if not link then return 0, 0 end
@@ -147,7 +160,7 @@ local function AnalyzeGems(link)
     tooltip:SetHyperlink(link)
 
     local emptySlots = 0
-    local filledSlots = 0
+    local filledSlots = countGems(link)   -- from the link's gem fields, not "+N" lines
     local socketTypes = {"Red Socket", "Yellow Socket", "Blue Socket", "Meta Socket", "Prismatic Socket"}
 
     for i = 1, tooltip:NumLines() do
@@ -155,17 +168,12 @@ local function AnalyzeGems(link)
         if line then
             local text = line:GetText() or ""
 
-            -- Check for empty socket
+            -- Empty sockets still come from the tooltip's socket lines.
             for _, socketType in ipairs(socketTypes) do
                 if text:find(socketType) then
                     emptySlots = emptySlots + 1
                     break
                 end
-            end
-
-            -- Check for filled gem (has stats like "+20 Strength" but not socket bonus)
-            if text:match("^%+%d+") and not text:find("Socket Bonus") then
-                filledSlots = filledSlots + 1
             end
         end
     end
@@ -403,8 +411,16 @@ local function ProcessInspectionQueue()
     local now = GetTime()
     if now - IE.Queue.lastInspect < IE.Config.inspectCooldown then return end
 
-    -- Check if we're already inspecting
-    if IE.Queue.inProgress then return end
+    -- Already inspecting? Clear a STUCK inspect whose INSPECT_TALENT_READY never
+    -- fired (target left / went out of range), else all future inspects halt.
+    if IE.Queue.inProgress then
+        if (now - (IE.Queue.lastInspect or 0)) > 5 then
+            IE.Queue.inProgress = nil
+            if ClearInspectPlayer then ClearInspectPlayer() end
+        else
+            return
+        end
+    end
 
     -- Get next in queue
     local next = table.remove(IE.Queue.pending, 1)

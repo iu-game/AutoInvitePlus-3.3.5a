@@ -82,6 +82,32 @@ DB.EventTypes = {
             "version",      -- string: addon version
         },
     },
+
+    -- GEAR: a player's own gear-readiness summary (so peers don't inspect them)
+    GEAR = {
+        id = "GEAR",
+        name = "Gear Readiness",
+        fields = {
+            "arch",         -- string: spec archetype (casterDPS, tank, ...)
+            "missing",      -- number: count of missing permanent enchants
+            "sockets",      -- number: count of empty gem sockets
+            "gs",           -- number: GearScore (if available)
+        },
+    },
+
+    -- LFGQUEUE: a player's Dungeon Finder (RDF) queue status, shared with peers
+    LFGQUEUE = {
+        id = "LFGQUEUE",
+        name = "Dungeon Finder Status",
+        fields = {
+            "mode",         -- string: queued / suspended / rolecheck / proposal
+            "instance",     -- string: dungeon/instance name
+            "needTank",     -- bool: forming group still needs a tank
+            "needHealer",   -- bool
+            "needDPS",      -- bool
+            "wait",         -- number: personal est. wait in seconds
+        },
+    },
 }
 
 -- ============================================================================
@@ -516,7 +542,11 @@ local function OnAddonMessage(prefix, message, channel, sender)
     DispatchEvent(event)
 
     -- Track peer for all event types (they're all addon users)
-    local peerVersion = event.data and event.data.version or event.version or "unknown"
+    -- Only PING/PONG carry the real addon version (event.data.version); LFM/LFG
+    -- events don't, so keep any previously-learned version rather than clobbering
+    -- it with the protocol version (event.version = "1.0").
+    local peerVersion = (event.data and event.data.version)
+        or (DB.State.onlinePeers[sender] and DB.State.onlinePeers[sender].version) or "unknown"
     DB.State.onlinePeers[sender] = {
         version = peerVersion,
         lastSeen = time(),
@@ -772,7 +802,11 @@ local function OnChannelMessage(message, sender, _, _, _, _, _, _, channelName)
     DispatchEvent(event)
 
     -- Track peer
-    local peerVersion = event.data and event.data.version or event.version or "unknown"
+    -- Only PING/PONG carry the real addon version (event.data.version); LFM/LFG
+    -- events don't, so keep any previously-learned version rather than clobbering
+    -- it with the protocol version (event.version = "1.0").
+    local peerVersion = (event.data and event.data.version)
+        or (DB.State.onlinePeers[sender] and DB.State.onlinePeers[sender].version) or "unknown"
     DB.State.onlinePeers[sender] = {
         version = peerVersion,
         lastSeen = time(),

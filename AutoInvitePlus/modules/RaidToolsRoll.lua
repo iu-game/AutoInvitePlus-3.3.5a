@@ -140,10 +140,24 @@ function RT.TradeWinner()
     end
 end
 
+-- Locale-agnostic roll matcher derived from the client's RANDOM_ROLL_RESULT
+-- ("%s rolls %d (%d-%d)") so roll capture also works on non-enUS clients.
+local ROLL_PATTERN = (function()
+    local fmt = RANDOM_ROLL_RESULT or "%s rolls %d (%d-%d)"
+    fmt = fmt:gsub("([%(%)%.%+%-%*%?%[%]%^%$])", "%%%1")   -- escape magic chars (leave % specifiers)
+    fmt = fmt:gsub("%%s", "(.-)", 1)                        -- name capture
+    local seen = false
+    fmt = fmt:gsub("%%d", function()                        -- first %d = roll capture, rest = digits
+        if not seen then seen = true; return "(%d+)" end
+        return "%d+"
+    end)
+    return "^" .. fmt .. "$"
+end)()
+
 -- Scan system messages for "<name> rolls <n> (1-100)" while a roll is active.
 function RT.OnSystemMessage(message)
     if not RT.rollActive or not message then return end
-    local name, roll = message:match("^(.-) rolls (%d+) %(1%-100%)$")
+    local name, roll = message:match(ROLL_PATTERN)
     if not name then return end
     roll = tonumber(roll)
     if roll and not RT.rolls[name] then

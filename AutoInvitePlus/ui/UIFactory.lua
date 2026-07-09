@@ -5,6 +5,13 @@ local AIP = AutoInvitePlus
 AIP.UI = {}
 local UI = AIP.UI
 
+-- Unique-name generator. Scroll templates (UIPanelScrollFrameTemplate,
+-- FauxScrollFrameTemplate) embed a scrollbar named "$parentScrollBar" whose
+-- OnLoad does self:GetName()..".." - which ERRORS if the scroll frame is
+-- created with a nil name. So any templated scroll frame MUST be named.
+local _seq = 0
+local function uname(prefix) _seq = _seq + 1; return "AIP" .. (prefix or "F") .. _seq end
+
 -- ============================================================================
 -- STANDARD BACKDROP CONFIGURATIONS
 -- ============================================================================
@@ -256,7 +263,7 @@ end
 
 -- Create a multi-line edit box
 function UI.CreateMultiLineEditBox(parent, width, height)
-    local scrollFrame = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
+    local scrollFrame = CreateFrame("ScrollFrame", uname("MLE"), parent, "UIPanelScrollFrameTemplate")
     scrollFrame:SetSize(width, height)
 
     local editBox = CreateFrame("EditBox", nil, scrollFrame)
@@ -440,8 +447,9 @@ function UI.CreateScrollList(parent, rowCount, rowHeight, width, createRowFunc)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(width, rowCount * rowHeight)
 
-    -- Create scroll frame
-    local scrollFrame = CreateFrame("ScrollFrame", nil, container, "FauxScrollFrameTemplate")
+    -- Create scroll frame (named: FauxScrollFrameTemplate's scrollbar OnLoad
+    -- errors on an unnamed frame)
+    local scrollFrame = CreateFrame("ScrollFrame", uname("SL"), container, "FauxScrollFrameTemplate")
     scrollFrame:SetSize(width - 20, rowCount * rowHeight)
     scrollFrame:SetPoint("TOPLEFT", 0, 0)
 

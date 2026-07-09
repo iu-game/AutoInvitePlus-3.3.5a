@@ -791,6 +791,7 @@ function Utils.PlayerList:add(name, data)
     if not storage then return false end
 
     name = Utils.NormalizeName(name)
+    if not name then return false end   -- NormalizeName returns nil for whitespace-only input
     local key = self.useArray and nil or name:lower()
 
     if self.useArray then

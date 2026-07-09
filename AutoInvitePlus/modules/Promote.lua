@@ -6,7 +6,7 @@ local AIP = AutoInvitePlus
 -- Handle promote request from whisper
 -- Usage: player whispers "!promote <key>"
 function AIP.HandlePromote(author, key)
-    if not AIP.db.promoteEnabled then
+    if not (AIP.db and AIP.db.promoteEnabled) then
         AIP.Debug("Promote system disabled")
         return
     end

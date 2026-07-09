@@ -2767,12 +2767,23 @@ RM.CurrentBoss = nil
 
 -- Roll detection event handler
 local rollEventFrame = CreateFrame("Frame")
+-- Locale-agnostic roll matcher derived from the client's RANDOM_ROLL_RESULT
+-- ("%s rolls %d (%d-%d)"), same as RaidToolsRoll - the enUS-only literal never
+-- matched on non-English clients.
+local RM_ROLL_PATTERN = (function()
+    local fmt = RANDOM_ROLL_RESULT or "%s rolls %d (%d-%d)"
+    fmt = fmt:gsub("([%(%)%.%+%-%*%?%[%]%^%$])", "%%%1")
+    fmt = fmt:gsub("%%s", "(.-)", 1)
+    local seen = false
+    fmt = fmt:gsub("%%d", function() if not seen then seen = true; return "(%d+)" end return "%d+" end)
+    return "^" .. fmt .. "$"
+end)()
+
 rollEventFrame:RegisterEvent("CHAT_MSG_SYSTEM")
 rollEventFrame:SetScript("OnEvent", function(self, event, message)
     if not AIP.db or not AIP.db.lootBans or #AIP.db.lootBans == 0 then return end
 
-    -- Pattern for roll messages: "PlayerName rolls X (1-100)"
-    local playerName, roll = message:match("^(.+) rolls (%d+) %(1%-100%)")
+    local playerName, roll = message:match(RM_ROLL_PATTERN)
     if not playerName or not roll then return end
 
     -- Check if player is loot banned

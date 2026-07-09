@@ -233,7 +233,7 @@ MC.CurrentTemplate = nil
 -- Format GearScore for display (e.g., 5800 -> "5.8k")
 function MC.FormatGS(gs)
     if not gs or gs < 1000 then return tostring(gs or 0) end
-    return string.format("%.1fk", gs / 1000):gsub("%.0k", "k")
+    return (string.format("%.1fk", gs / 1000):gsub("%.0k", "k"))   -- parens: drop gsub's count
 end
 
 -- Generate LFM message from template

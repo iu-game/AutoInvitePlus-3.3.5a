@@ -811,12 +811,11 @@ function Int.ImportRaidBrowserToLFG()
         end
     end
 
-    -- Update UI if open
-    if AIP.UpdateCentralGUI then
-        AIP.UpdateCentralGUI()
-    end
-
+    -- Only touch the UI when something actually changed. This runs on EVERY
+    -- LFG_UPDATE (which fires constantly while in the Dungeon Finder queue), so an
+    -- unconditional refresh here rebuilt the browser tree at random.
     if imported > 0 then
+        if AIP.UpdateCentralGUI then AIP.UpdateCentralGUI() end
         AIP.Print("Imported " .. imported .. " listings from Raid Browser")
     end
 
@@ -851,13 +850,14 @@ end
 local raidBrowserFrame = CreateFrame("Frame")
 raidBrowserFrame:RegisterEvent("ADDON_LOADED")
 raidBrowserFrame:RegisterEvent("LFG_UPDATE")
-raidBrowserFrame:RegisterEvent("LFG_LIST_SEARCH_RESULTS_RECEIVED")
+-- NOTE: LFG_LIST_SEARCH_RESULTS_RECEIVED is a Legion (7.0+) event; registering it
+-- on a strict 3.3.5a client raises "unknown event" and aborts the rest of this file.
 raidBrowserFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" then
         if arg1 == "Blizzard_LookingForGroupUI" or arg1 == "AutoInvitePlus" then
             HookRaidBrowser()
         end
-    elseif event == "LFG_UPDATE" or event == "LFG_LIST_SEARCH_RESULTS_RECEIVED" then
+    elseif event == "LFG_UPDATE" then
         -- Auto-import when LFG data updates
         if AIP.CentralGUI and AIP.CentralGUI.Frame and AIP.CentralGUI.Frame:IsVisible() then
             Int.ImportRaidBrowserToLFG()

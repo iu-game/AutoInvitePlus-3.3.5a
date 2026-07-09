@@ -559,8 +559,9 @@ function FP.ShowEditDialog(name, currentNote)
         end,
         OnAccept = function(self)
             local newNote = self.editBox:GetText()
-            if AIP.db and AIP.db.whitelist and AIP.db.whitelist[name] then
-                AIP.db.whitelist[name].note = newNote
+            local key = name and name:lower()   -- whitelist is keyed lowercase everywhere
+            if AIP.db and AIP.db.whitelist and key and AIP.db.whitelist[key] then
+                AIP.db.whitelist[key].note = newNote
                 FP.Update()
             end
         end,

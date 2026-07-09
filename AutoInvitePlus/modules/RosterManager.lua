@@ -262,28 +262,31 @@ function Roster.RecordAttendance(raidName)
     end
 
     local timestamp = time()
-    local recorded = 0
 
+    -- Who's present this raid.
+    local present = {}
     for i = 1, numRaid do
         local pName = GetRaidRosterInfo(i)
-        if pName then
-            if not AIP.db.rosters.attendance[pName] then
-                AIP.db.rosters.attendance[pName] = {raids = {}, totalRaids = 0, attended = 0}
-            end
-
-            local att = AIP.db.rosters.attendance[pName]
-            table.insert(att.raids, {
-                name = raidName,
-                time = timestamp,
-                present = true,
-            })
-            att.totalRaids = att.totalRaids + 1
-            att.attended = att.attended + 1
-            recorded = recorded + 1
-        end
+        if pName then present[pName] = true end
     end
 
-    AIP.Print("Recorded attendance for " .. recorded .. " players in " .. raidName)
+    local attendance = AIP.db.rosters.attendance
+    -- Ensure every present player has a record.
+    for pName in pairs(present) do
+        if not attendance[pName] then attendance[pName] = { raids = {}, totalRaids = 0, attended = 0 } end
+    end
+
+    -- Record this raid for EVERY known player: present -> attended, otherwise a
+    -- logged absence. Without the absence pass the percentage is always 100%.
+    local recorded = 0
+    for pName, att in pairs(attendance) do
+        local here = present[pName] or false
+        table.insert(att.raids, { name = raidName, time = timestamp, present = here })
+        att.totalRaids = att.totalRaids + 1
+        if here then att.attended = att.attended + 1; recorded = recorded + 1 end
+    end
+
+    AIP.Print("Recorded attendance for " .. recorded .. " present players in " .. raidName)
     return true
 end
 

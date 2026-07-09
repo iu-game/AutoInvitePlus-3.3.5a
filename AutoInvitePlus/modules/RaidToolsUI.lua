@@ -376,12 +376,17 @@ function RT.CreateAnnounceConfig()
     win:SetPoint("CENTER", 120, 0)
     win:SetFrameStrata("DIALOG")
     win:SetToplevel(true)
-    win:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = {left = 11, right = 12, top = 12, bottom = 11},
-    })
+    if AIP.CentralGUI and AIP.CentralGUI.StylePopup then
+        AIP.CentralGUI.StylePopup(win)   -- theme-matched: dark navy, solid backing, gold title strip
+    else
+        win:SetBackdrop({
+            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 16,
+            insets = {left = 5, right = 5, top = 5, bottom = 5},
+        })
+        win:SetBackdropColor(0.05, 0.055, 0.085, 1)
+    end
     win:SetMovable(true); win:EnableMouse(true); win:RegisterForDrag("LeftButton")
     win:SetScript("OnDragStart", win.StartMoving)
     win:SetScript("OnDragStop", win.StopMovingOrSizing)
@@ -620,8 +625,18 @@ function RT.CreateBar()
         tile = true, tileSize = 16, edgeSize = 12,
         insets = {left = 4, right = 4, top = 4, bottom = 4},
     })
-    bar:SetBackdropColor(0.05, 0.05, 0.05, 0.85)
-    bar:SetBackdropBorderColor(0.4, 0.4, 0.4)
+    bar:SetBackdropColor(0.045, 0.05, 0.072, 0.96)
+    bar:SetBackdropBorderColor(0.34, 0.37, 0.46)
+    -- Solid backing + gold-accented header strip (theme-matched, like the window).
+    local barBg = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
+    barBg:SetPoint("TOPLEFT", 4, -4); barBg:SetPoint("BOTTOMRIGHT", -4, 4)
+    barBg:SetTexture(0.045, 0.05, 0.072, 1)
+    local hdr = bar:CreateTexture(nil, "BORDER")
+    hdr:SetPoint("TOPLEFT", 5, -5); hdr:SetPoint("TOPRIGHT", -5, -5); hdr:SetHeight(18)
+    hdr:SetTexture(0.11, 0.12, 0.18, 0.95)
+    local hdrDiv = bar:CreateTexture(nil, "ARTWORK")
+    hdrDiv:SetPoint("TOPLEFT", hdr, "BOTTOMLEFT", 0, 0); hdrDiv:SetPoint("TOPRIGHT", hdr, "BOTTOMRIGHT", 0, 0)
+    hdrDiv:SetHeight(1); hdrDiv:SetTexture(1, 0.82, 0, 0.4)
     bar:SetMovable(true); bar:EnableMouse(true); bar:RegisterForDrag("LeftButton")
     bar:SetScript("OnDragStart", bar.StartMoving)
     bar:SetScript("OnDragStop", function(self)
@@ -721,13 +736,21 @@ function RT.RefreshBar()
         local ann = anns[offset + i]
         local btn = RT.Bar.buttons[i]
         if not btn then
-            btn = CreateFrame("Button", nil, RT.Bar, "UIPanelButtonTemplate")
+            -- Flat list row (not a chunky red button): dark fill, gold left-accent,
+            -- gold hover, left-aligned label - reads as a clean announcement list.
+            btn = CreateFrame("Button", nil, RT.Bar)
             btn:SetSize(BTN_W, BTN_H)
             btn:SetPoint("TOP", RT.Bar, "TOP", 0, -46 - (i - 1) * BTN_SPACING)
+            local bg = btn:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints(); bg:SetTexture(0.11, 0.12, 0.17, 0.92)
+            local accent = btn:CreateTexture(nil, "ARTWORK"); accent:SetPoint("TOPLEFT"); accent:SetPoint("BOTTOMLEFT"); accent:SetWidth(2); accent:SetTexture(1, 0.82, 0, 0.5)
+            local hl = btn:CreateTexture(nil, "HIGHLIGHT"); hl:SetAllPoints(); hl:SetTexture(1, 0.82, 0, 0.16)
+            local txt = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            txt:SetPoint("LEFT", 8, 0); txt:SetPoint("RIGHT", -6, 0); txt:SetJustifyH("LEFT"); txt:SetTextColor(0.92, 0.92, 0.96)
+            btn.txt = txt
             RT.Bar.buttons[i] = btn
         end
         if ann then
-            btn:SetText(ann.name or ann.label or ann.message or "?")
+            btn.txt:SetText(ann.name or ann.label or ann.message or "?")
             btn:SetScript("OnClick", function() RT.Send(ann.message, ann.channel or "RAID_WARNING") end)
             btn:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")

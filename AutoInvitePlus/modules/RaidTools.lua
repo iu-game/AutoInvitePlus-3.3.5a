@@ -25,6 +25,19 @@ RT.manualItems = {}
 RT.selectedKey = nil
 RT.warnedItems = {}
 
+-- True only inside a 5-man or raid instance. Every encounter call-out (mechanic
+-- announcer, debuff announcer, boss-ability timer bars) is gated on this. Without
+-- it, generic spell/emote names shared with world and city content ("Frenzy",
+-- "Fire Bomb", "Frost Breath", "Overcharge", "Vortex", "Freeze", "Deep Breath")
+-- fire call-outs while questing, in town, or in battlegrounds. IsInInstance()
+-- exists in 3.3.5a and returns (inInstance, instanceType).
+function RT.InPveInstance()
+    if not IsInInstance then return false end
+    local inInstance, instanceType = IsInInstance()
+    if not inInstance then return false end
+    return instanceType == "party" or instanceType == "raid"
+end
+
 -- ============================================================================
 -- CHAT SENDER (smart channel with safe fallbacks)
 -- ============================================================================
@@ -239,10 +252,10 @@ RT.KnownDebuffs = {
     ["Boiling Blood"]            = "dot on me - heal!",            -- Saurfang
     ["Gastric Bloat"]            = "stop - swap eaters!",          -- Festergut
     ["Gas Spore"]                = "share spore with group!",      -- Festergut
-    ["Mutated Infection"]        = "spread out + dispel me!",      -- Rotface
+    ["Mutated Infection"]        = "move away from raid, then dispel me!", -- Rotface
     ["Vile Gas"]                 = "spread - vile gas!",           -- Rotface / Putricide
     ["Volatile Ooze Adhesive"]   = "run! ranged stack on me!",     -- Putricide
-    ["Gaseous Bloat"]            = "kite the ooze to me!",         -- Putricide
+    ["Gaseous Bloat"]            = "run - lead the gas cloud away from raid!", -- Putricide
     ["Unbound Plague"]           = "pass it - run to partner!",    -- Putricide
     ["Mutated Plague"]           = "tank - stacking, swap soon!",  -- Putricide
     ["Shock Vortex"]             = "spread out!",                  -- Blood Princes
@@ -250,9 +263,9 @@ RT.KnownDebuffs = {
     ["Swarming Shadows"]         = "move - trail away from raid!", -- Blood Queen
     ["Pact of the Darkfallen"]   = "stack with linked players!",   -- Blood Queen
     ["Frenzied Bloodthirst"]     = "bite a DPS now!",              -- Blood Queen
-    ["Uncontrollable Frenzy"]    = "frenzied - CC me!",            -- Blood Queen
+    ["Uncontrollable Frenzy"]    = "mind-controlled until death - raid KILL me!", -- Blood Queen
     ["Shadow Prison"]            = "STOP MOVING!",                 -- Blood Queen
-    ["Mystic Buffet"]            = "LoS behind ice block!",        -- Sindragosa
+    ["Mystic Buffet"]            = "hide behind an Ice Tomb to drop your stacks!", -- Sindragosa
     ["Unchained Magic"]          = "slow casts - watch Instability!", -- Sindragosa
     ["Instability"]              = "STOP casting NOW!",            -- Sindragosa
     ["Frost Beacon"]             = "Ice Tomb - everyone clear!",   -- Sindragosa
@@ -289,9 +302,8 @@ RT.KnownDebuffs = {
     ["Overwhelming Power"]       = "tank - run out at expire!",    -- Steelbreaker
     ["Stone Grip"]               = "DPS free me!",                 -- Kologarn
     ["Focused Eyebeam"]          = "move - eyebeam on me!",        -- Kologarn
-    ["Flash Freeze"]             = "get freed fast!",              -- Hodir
-    ["Freeze"]                   = "move - dispel me!",            -- Hodir
-    ["Biting Cold"]              = "keep moving!",                 -- Hodir
+    ["Flash Freeze"]             = "frozen in ice - allies break me out fast!", -- Hodir
+    ["Biting Cold"]              = "keep moving - stacks while you stand still!", -- Hodir
     ["Iron Roots"]               = "DPS free me!",                 -- Freya
     ["Nature's Fury"]            = "move away from raid!",         -- Freya
     ["Rocket Strike"]            = "MOVE - rocket!",               -- Mimiron
@@ -327,13 +339,20 @@ RT.KnownDebuffs = {
 RT.debuffState = {}  -- name -> {stacks, t}
 local DEBUFF_MIN_INTERVAL = 2  -- seconds between re-announces of the same debuff
 
--- Intuitive dispel call-out: the action verb plus which classes can remove it.
+-- Dispel call-out: the action verb plus the classes that can actually remove
+-- this debuff type in WotLK (3.3.5a). Friendly-dispel matrix (verified):
+--   Magic   -> Priest, Paladin                (Shaman's Purge is offensive-only)
+--   Curse   -> Mage, Druid, Shaman
+--   Poison  -> Druid, Paladin, Shaman
+--   Disease -> Priest, Paladin, Shaman
+-- Returns nil for a nil/empty dtype, i.e. a debuff NO class can dispel - the
+-- caller MUST NOT then ask another player to remove it.
 local function debuffDispelVerb(dtype)
-    if dtype == "Curse" then return "DECURSE me! (Mage/Druid)"
-    elseif dtype == "Poison" then return "CLEANSE me! (Pala/Druid/Sham)"
-    elseif dtype == "Disease" then return "CURE me! (Pala/Priest)"
-    elseif dtype == "Magic" then return "DISPEL me! (Priest/Pala)"
-    else return "DISPEL me!" end
+    if dtype == "Curse" then return "DECURSE me! (Mage/Druid/Shaman)"
+    elseif dtype == "Poison" then return "CLEANSE poison off me! (Druid/Pala/Shaman)"
+    elseif dtype == "Disease" then return "CURE disease on me! (Priest/Pala/Shaman)"
+    elseif dtype == "Magic" then return "DISPEL magic off me! (Priest/Pala)"
+    else return nil end
 end
 
 function RT.SayDebuff(name, stacks, action, channel)
@@ -347,8 +366,8 @@ end
 -- application or when a stack count actually increases.
 function RT.ScanSelfDebuffs()
     if not (AIP.db and AIP.db.debuffAnnounce) then return end
-    -- These are raid mechanics; only run in a group.
-    if (GetNumRaidMembers() or 0) == 0 and (GetNumPartyMembers() or 0) == 0 then return end
+    -- Encounter mechanic: never fire out in the world / in a battleground.
+    if not RT.InPveInstance() then return end
 
     local channel = AIP.db.debuffAnnounceChannel or "SAY"
     local now = GetTime()
@@ -359,10 +378,26 @@ function RT.ScanSelfDebuffs()
         if not name then break end
         local stacks = (count and count > 0) and count or 1
         local known = RT.KnownDebuffs[name]
-        -- Track known encounter debuffs, any curse, or anything that stacks.
-        if known or dtype == "Curse" or stacks > 1 then
+        local dispelHint = debuffDispelVerb(dtype)  -- nil = nobody can remove it
+
+        -- Decide the action, and crucially DO NOT ask another player to remove a
+        -- debuff that no class can dispel:
+        --   * a known encounter debuff uses its hand-tuned call-out;
+        --   * an unknown but dispellable debuff asks the correct class;
+        --   * an unknown, non-dispellable debuff that merely stacks gets a
+        --     neutral self-directed note (no false "dispel me" request);
+        --   * anything else is ignored.
+        local action
+        if known then
+            action = known
+        elseif dispelHint then
+            action = dispelHint
+        elseif stacks > 1 then
+            action = "stacking on you - react!"
+        end
+
+        if action then
             seen[name] = true
-            local action = known or debuffDispelVerb(dtype)
             local st = RT.debuffState[name]
             if not st then
                 RT.SayDebuff(name, stacks, action, channel)
@@ -394,74 +429,189 @@ end
 -- Boss ability (exact combat-log spell name) -> short call-out. Fires on the
 -- boss's SPELL_CAST_START / SPELL_AURA_APPLIED.
 RT.MechanicSpells = {
-    -- ICC
-    ["Bone Storm"]            = "Bone Storm - run from boss!",
-    ["Coldflame"]            = "Coldflame - move!",
-    ["Bone Spike Graveyard"] = "free the spiked players!",
-    ["Death and Decay"]      = "move out of D&D!",
-    ["Dominate Mind"]        = "mind control - CC them!",
-    ["Blood Beasts"]         = "beasts up - kill fast!",
-    ["Pungent Blight"]       = "Blight - stacks reset!",
-    ["Malleable Goo"]        = "Goo - move out!",
-    ["Choking Gas Bomb"]     = "gas bombs - reposition!",
-    ["Unstable Experiment"]  = "ooze spawning - watch!",
-    ["Ooze Flood"]           = "ooze flood - move!",
-    ["Unstable Ooze Explosion"] = "explosion - spread!",
-    ["Empowered Shock Vortex"] = "SPREAD - shock vortex!",
-    ["Bloodbolt Whirl"]      = "spread - bloodbolt!",
-    ["Frost Breath"]         = "Frost Breath - LoS!",
-    ["Blistering Cold"]      = "run IN to the boss!",
-    ["Defile"]               = "Defile - move out, it grows!",
-    ["Soul Reaper"]          = "Soul Reaper on the tank!",
-    ["Remorseless Winter"]   = "transition - stack in!",
-    ["Quake"]                = "Quake - spread out!",
-    ["Vile Spirits"]         = "spirits up - watch them!",
-    ["Harvest Soul"]         = "Harvest - kill the spirits!",
-    -- Ruby Sanctum
-    ["Twilight Cutter"]      = "beam - move out!",
-    ["Meteor Strike"]        = "Meteor - clear the spot!",
-    -- Ulduar
-    ["Tympanic Tantrum"]     = "Tantrum - heal up!",
-    ["Gravity Bomb"]         = "bomb - move from raid!",
-    ["Searing Light"]        = "light - move from raid!",
-    ["Rocket Strike"]        = "ROCKETS - move!",
-    ["Plasma Blast"]         = "tank - use a cooldown!",
-    ["Shock Blast"]          = "Shock Blast - LoS/avoid!",
-    ["Frost Bomb"]           = "kill the Frost Bomb!",
-    ["Saronite Vapors"]      = "vapors up - careful!",
-    ["Shadow Crash"]         = "move from the crash!",
-    ["Death Ray"]            = "Death Ray - move!",
-    ["Flash Freeze"]         = "spread - flash freeze!",
-    ["Nature Bomb"]          = "kill the Nature Bombs!",
-    -- ToC / ToGC
-    ["Fire Bomb"]            = "bombs - move out!",
-    ["Massive Crash"]        = "run from the center!",
-    ["Nether Power"]         = "dispel the boss!",
-    ["Legion Flame"]         = "flame - move from raid!",
-    ["Incinerate Flesh"]     = "burst heal the target!",
-    -- Naxxramas
-    ["Mutating Injection"]   = "move out, then dispel!",
-    ["Frost Blast"]          = "free the frozen player!",
-    ["Polarity Shift"]       = "check charge - swap side!",
-    ["Shadow Fissure"]       = "move from the void!",
-    -- Obsidian Sanctum / EoE / Onyxia / VoA
-    ["Flame Tsunami"]        = "wave - jump/move!",
-    ["Surge of Power"]       = "Surge - spread / LoS!",
-    ["Vortex"]               = "Vortex - get ready!",
-    ["Deep Breath"]          = "Deep Breath - clear middle!",
-    ["Bellowing Roar"]       = "fear - tremor/zerk!",
-    ["Overcharge"]           = "move away - overcharged!",
+    -- ===== Icecrown Citadel =====
+    ["Bone Storm"]            = "Bone Storm - run away from Marrowgar!",
+    ["Coldflame"]            = "Coldflame - step off the fire lines!",
+    ["Bone Spike Graveyard"] = "Bone Spike - DPS the impaled players free!",
+    ["Death and Decay"]      = "move out of Death and Decay (the ground pool)!",
+    ["Dominate Mind"]        = "Mind Control - crowd-control the charmed player!",
+    ["Blood Beasts"]         = "Blood Beasts up - AoE them down fast!",
+    ["Pungent Blight"]       = "Pungent Blight - spore stacks reset (Festergut)!",
+    ["Malleable Goo"]        = "Malleable Goo thrown - dodge the green blob!",
+    ["Choking Gas Bomb"]     = "Gas Bombs dropped - move out of the gas!",
+    ["Unstable Experiment"]  = "Ooze/Gas spawned - kite it to its matching side!",
+    ["Ooze Flood"]           = "Ooze Flood - move away from the flooding side!",
+    ["Unstable Ooze Explosion"] = "Ooze Explosion - spread out, it chains between players!",
+    ["Empowered Shock Vortex"] = "Empowered Shock Vortex - SPREAD OUT NOW!",
+    ["Bloodbolt Whirl"]      = "Bloodbolt Whirl - spread out (hits nearby players)!",
+    ["Frost Breath"]         = "Frost Breath on the tank - do NOT stand in front of Sindragosa!",
+    ["Blistering Cold"]      = "Blistering Cold - run 25yd AWAY from Sindragosa NOW!",
+    ["Defile"]               = "Defile - move OUT of the black circle (it grows if stood in)!",
+    ["Soul Reaper"]          = "Soul Reaper on the tank - healers big cooldown!",
+    ["Remorseless Winter"]   = "Transition - spread, dodge Ice Spheres, kill Raging Spirits!",
+    ["Vile Spirits"]         = "Vile Spirits up - ranged shoot them before they reach the raid!",
+    ["Harvest Soul"]         = "Harvest Soul - target pulled in, kill the spirit in Frostmourne!",
+    -- ===== Ruby Sanctum =====
+    ["Twilight Cutter"]      = "Twilight beam - move out from between the orbs!",
+    ["Meteor Strike"]        = "Meteor marked - clear that spot, stack behind the flame wall!",
+    -- ===== Ulduar =====
+    ["Tympanic Tantrum"]     = "Tympanic Tantrum - raid-wide damage, heal through it!",
+    ["Gravity Bomb"]         = "Gravity Bomb - marked player moves away from the raid!",
+    ["Searing Light"]        = "Searing Light - marked player moves away from the raid!",
+    ["Rocket Strike"]        = "Rockets incoming - move off the target lines!",
+    ["Plasma Blast"]         = "Plasma Blast - tank pop a big cooldown!",
+    ["Shock Blast"]          = "Shock Blast - get OUT of melee range of Leviathan Mk II!",
+    ["Frost Bomb"]           = "Frost Bomb - destroy it before it detonates!",
+    ["Saronite Vapors"]      = "Saronite Vapors up - careful, they heal mana but hurt (Vezax)!",
+    ["Shadow Crash"]         = "Shadow Crash - move out of the shadow void zone!",
+    ["Death Ray"]            = "Death Ray - move out of its path!",
+    ["Flash Freeze"]         = "Flash Freeze - spread and get to a Snowpack/marker (Hodir)!",
+    ["Nature Bomb"]          = "Nature Bombs up - destroy them before they explode (Freya)!",
+    -- ===== Trial of the (Grand) Crusader =====
+    ["Fire Bomb"]            = "Fire Bombs dropping - move out of the fire!",
+    ["Massive Crash"]        = "Massive Crash - run away from Icehowl (charge incoming)!",
+    ["Nether Power"]         = "Nether Power - dispel the magic buff OFF Jaraxxus!",
+    ["Legion Flame"]         = "Legion Flame - marked player runs it away (leaves a fire trail)!",
+    ["Incinerate Flesh"]     = "Incinerate Flesh - burst-heal the target before it blows!",
+    -- ===== Naxxramas =====
+    ["Mutating Injection"]   = "Mutating Injection - move out, THEN get dispelled (spawns cloud+slime)!",
+    ["Frost Blast"]          = "Frost Blast - a player is encased, break them out fast!",
+    ["Polarity Shift"]       = "Polarity Shift - group with players of your SAME charge (+/-)!",
+    ["Shadow Fissure"]       = "Shadow Fissure - move out of the purple void zone!",
+    -- ===== Obsidian Sanctum / Eye of Eternity / Onyxia / VoA =====
+    ["Flame Tsunami"]        = "Flame Tsunami - jump/move over the lava wave!",
+    ["Surge of Power"]       = "Surge of Power - spread out / get to max range!",
+    ["Vortex"]               = "Vortex - raid pulled in and takes damage, heal up!",
+    ["Deep Breath"]          = "Deep Breath - Onyxia is about to breathe, clear the middle NOW!",
+    ["Bellowing Roar"]       = "Bellowing Roar = FEAR - use Tremor Totem / Fear Ward / Berserker Rage!",
+    ["Overcharge"]           = "Overcharge - move away from the overcharged player!",
 }
 
--- Boss emote/yell substrings (lowercased) -> short call-out. Catches mechanics
--- that fire as a raid-boss emote/yell rather than a clean spell cast.
+-- Boss emote substrings (lowercased) -> short call-out. Only matched against the
+-- CHAT_MSG_RAID_BOSS_EMOTE channel (scripted boss emotes), NOT monster
+-- emotes/yells - those carry trash-mob and world-mob text, so generic words like
+-- "frenzy" / "channel" / "submerge" there caused false call-outs. Keep every
+-- phrase here specific enough that essentially only the intended boss emits it.
 RT.BossEmotes = {
-    ["inhales deeply"]         = "Festergut inhales - spores soon!",
-    ["spores"]                 = "spores - get into a group!",
-    ["frenzy"]                 = "boss frenzy - burst/soothe!",
-    ["begins to channel"]      = "channel - interrupt/react!",
-    ["submerge"]               = "boss submerging - adds!",
-    ["fixate"]                 = "fixated - kite it!",
+    ["inhales deeply"] = "Festergut inhales - Gas Spore soon, get into a group!",    -- Festergut
+    ["frost beacon"]   = "Frost Beacon on a player - Ice Tomb incoming, clear away!", -- Sindragosa
+    ["deep breath"]    = "Deep Breath - Onyxia is about to breathe, clear the middle!", -- Onyxia
+    ["fixate"]         = "boss is fixating on a player - kite it, don't face-tank it!", -- Blood Queen / adds
+}
+
+-- ============================================================================
+-- CLASS-TARGETED MECHANIC DUTIES
+-- When a mechanic fires, tell the SPECIFIC classes present in the group what to
+-- do with a class ability (Spellsteal the boss, Tranq a frenzy, Tremor the fear,
+-- CC the mind-controlled player, etc.). Keyed by the same combat-log spell name
+-- as RT.MechanicSpells; each duty is {class = "<CLASSFILE>", action = "<verb>"}.
+-- Only classes with a REAL, commonly-used WotLK 3.3.5a ability for that mechanic
+-- are listed. Delivery is handled by RT.EmitClassDuties (personal heads-up for
+-- your own class on SELF; leader-gated per-class raid lines on a chat channel).
+-- Entries are verified against encounter/class guides; expanded from research.
+-- ============================================================================
+-- CC set reused for mind-control mechanics (charmed player is a Humanoid).
+-- Ordered by how commonly the class is assigned; Cyclone is best (damage-immune).
+local MC_CC = {
+    {class = "DRUID",   action = "Cyclone the mind-controlled player (best)!"},
+    {class = "MAGE",    action = "Polymorph the mind-controlled player!"},
+    {class = "WARLOCK", action = "Fear the mind-controlled player!"},
+    {class = "SHAMAN",  action = "Hex the mind-controlled player!"},
+    {class = "PALADIN", action = "Repentance the mind-controlled player!"},
+    {class = "HUNTER",  action = "Freezing Trap the mind-controlled player!"},
+    {class = "ROGUE",   action = "Blind the mind-controlled player!"},
+}
+
+RT.MechanicClassDuties = {
+    -- ===== Icecrown Citadel =====
+    -- Lady Deathwhisper: Dominate Mind is UNDISPELLABLE - CC only (not "dispel").
+    ["Dominate Mind"] = MC_CC,
+    ["Curse of Torpor"] = {  -- Curse -> Mage/Druid/Shaman only
+        {class = "MAGE",   action = "Remove Curse it off the player fast!"},
+        {class = "DRUID",  action = "Remove Curse it off the player fast!"},
+        {class = "SHAMAN", action = "Cleanse Spirit it off the player fast!"},
+    },
+    -- Deathbringer Saurfang: Blood Beasts have Resistant Skin -> single-target
+    -- SLOW/CC them off the healers, do NOT try to AoE them down.
+    ["Blood Beasts"] = {
+        {class = "MAGE",        action = "Frost Nova / slow the Blood Beasts off healers!"},
+        {class = "DEATHKNIGHT", action = "Chains of Ice / Death Grip the Blood Beasts!"},
+        {class = "HUNTER",      action = "Frost Trap / Concussive the Blood Beasts!"},
+        {class = "SHAMAN",      action = "Earthbind / Frost Shock the Blood Beasts!"},
+    },
+    -- The Lich King: Vile Spirits = raid-wide Shadow burst -> magic mitigation CDs.
+    ["Vile Spirits"] = {
+        {class = "DEATHKNIGHT", action = "Anti-Magic Zone for the Vile Spirit burst!"},
+        {class = "PALADIN",     action = "Divine Sacrifice / Aura Mastery for the burst!"},
+        {class = "WARLOCK",     action = "Shadow Ward (self) for the burst!"},
+    },
+
+    -- ===== Ruby Sanctum — Halion (Fiery Combustion / Soul Consumption = Magic) =====
+    ["Fiery Combustion"] = {
+        {class = "PRIEST",  action = "Dispel Magic the marked player at the room edge!"},
+        {class = "PALADIN", action = "Cleanse the marked player at the room edge!"},
+    },
+    ["Soul Consumption"] = {
+        {class = "PRIEST",  action = "Dispel Magic the marked player (Twilight realm)!"},
+        {class = "PALADIN", action = "Cleanse the marked player (Twilight realm)!"},
+    },
+
+    -- ===== Trial of the (Grand) Crusader =====
+    -- Jaraxxus Nether Power: boss Magic buff -> OFFENSIVE dispel (Warriors can't).
+    ["Nether Power"] = {
+        {class = "MAGE",    action = "Spellsteal it off Jaraxxus!"},
+        {class = "SHAMAN",  action = "Purge it off Jaraxxus!"},
+        {class = "PRIEST",  action = "offensive Dispel Magic off Jaraxxus!"},
+        {class = "HUNTER",  action = "Tranquilizing Shot the boss!"},
+        {class = "WARLOCK", action = "Felhunter Devour Magic the boss!"},
+    },
+    ["Impale"] = {  -- Gormok tank bleed (Physical) -> HoP wipes it (or tank-swap)
+        {class = "PALADIN", action = "Hand of Protection wipes the bleed (or tank-swap)!"},
+    },
+    ["Pursue"] = {  -- Anub'arak spike fixate -> HoP nullifies the spike hit
+        {class = "PALADIN", action = "Hand of Protection the pursued player (blocks the spike)!"},
+    },
+
+    -- ===== Ulduar — Assembly of Iron (Fusion Punch leaves a MAGIC DoT on tank) =====
+    ["Fusion Punch"] = {
+        {class = "PRIEST",  action = "Dispel the Fusion Punch DoT off the tank!"},
+        {class = "PALADIN", action = "Cleanse the Fusion Punch DoT off the tank!"},
+        {class = "WARLOCK", action = "Devour Magic the Fusion Punch DoT off the tank!"},
+    },
+
+    -- ===== Naxxramas =====
+    ["Chains of Kel'Thuzad"] = MC_CC,  -- P2 mind control -> CC the charmed player
+    ["Mutating Injection"] = {  -- Grobbulus: MAGIC, dispel ONLY after they run out
+        {class = "PRIEST",  action = "Dispel it AFTER they run 20yd out!"},
+        {class = "PALADIN", action = "Cleanse it AFTER they run 20yd out!"},
+    },
+    ["Necrotic Poison"] = {  -- Maexxna: Poison -> Druid/Paladin/Shaman
+        {class = "DRUID",   action = "Abolish Poison off the tank!"},
+        {class = "PALADIN", action = "Cleanse the poison off the tank!"},
+        {class = "SHAMAN",  action = "Poison Cleansing Totem by the tank!"},
+    },
+    ["Curse of the Plaguebringer"] = {  -- Noth: Curse, explodes if not removed
+        {class = "MAGE",   action = "Remove Curse fast (raid-wide blast if not)!"},
+        {class = "DRUID",  action = "Remove Curse fast (raid-wide blast if not)!"},
+        {class = "SHAMAN", action = "Cleanse Spirit fast (raid-wide blast if not)!"},
+    },
+    ["Decrepit Fever"] = {  -- Heigan: Disease -> Priest/Paladin/Shaman
+        {class = "PRIEST",  action = "Abolish Disease it!"},
+        {class = "PALADIN", action = "Cleanse the disease!"},
+        {class = "SHAMAN",  action = "Disease Cleansing Totem!"},
+    },
+
+    -- ===== Onyxia — Bellowing Roar (Physical fear: prevent/break, can't dispel) =====
+    ["Bellowing Roar"] = {
+        {class = "SHAMAN",  action = "drop Tremor Totem for the fear!"},
+        {class = "PRIEST",  action = "Fear Ward the tank (Priest-only)!"},
+        {class = "WARRIOR", action = "Berserker Rage to break/prevent the fear!"},
+    },
+    -- ===== Blood-Queen Lana'thel — Incite Terror (Magic fear) =====
+    ["Incite Terror"] = {
+        {class = "PRIEST", action = "Fear Ward the tank / Mass Dispel the fear!"},
+        {class = "SHAMAN", action = "drop Tremor Totem for the fear!"},
+    },
 }
 
 -- Bloodlust family -> show a duration + lockout countdown when applied.
@@ -516,8 +666,10 @@ RT.AbilityTimers = {
     ["Plasma Blast"]           = 30,    -- Mimiron (64529)
     ["Shadow Crash"]           = 10,    -- General Vezax (62660)
     ["Mark of the Faceless"]   = 20,    -- General Vezax (63276)
-    ["Malady of the Mind"]     = 18,    -- Yogg-Saron (63830)
-    ["Brain Link"]             = 32,    -- Yogg-Saron (63802)
+    -- Yogg-Saron's Malady of the Mind (63830) and Brain Link (63802) are
+    -- brain-phase-gated with no steady cadence - DBM keeps their CD timers
+    -- commented out for exactly this reason, so a fixed countdown here would be
+    -- misleading. They still fire a debuff call-out via RT.KnownDebuffs.
     ["Cosmic Smash"]           = 25,    -- Algalon (64596)
     ["Phase Punch"]            = 16,    -- Algalon (64412)
     ["Big Bang"]               = 90,    -- Algalon (64584)
@@ -542,8 +694,9 @@ RT.AbilityTimers = {
     ["Vortex"]                 = 60,    -- Malygos (56105)
     ["Arcane Breath"]          = 59,    -- Malygos (56505)
 
-    -- ===== Onyxia's Lair =====
-    ["Deep Breath"]            = 35,    -- Onyxia (18584)
+    -- Onyxia's Deep Breath has a VARIABLE cooldown, so a fixed "next cast"
+    -- countdown would be misleading - it is announced off its cast/emote via
+    -- MechanicSpells/BossEmotes instead of shown as a recast bar.
 
     -- ===== Naxxramas =====
     ["Polarity Shift"]         = 30,    -- Thaddius (28089)
@@ -580,9 +733,71 @@ local function mechThrottled(key, interval)
     return false
 end
 
+-- May the local player BROADCAST duty call-outs to the group without causing
+-- multi-user spam (when several people run the addon)? Only the raid
+-- leader/assistant, or the party leader in a 5-man, does. Solo returns true so
+-- previews work.
+function RT.CanBroadcast()
+    if (GetNumRaidMembers() or 0) > 0 then
+        return IsRaidLeader() or IsRaidOfficer()
+    elseif (GetNumPartyMembers() or 0) > 0 then
+        return IsPartyLeader() == 1 or IsPartyLeader() == true
+    end
+    return true
+end
+
+-- Class-targeted duty call-outs for a mechanic. Delivery follows
+-- mechanicAnnounceChannel, mirroring EmitMechanic:
+--   * SELF (default), or a chat channel while you are NOT leader: a personal
+--     center-screen heads-up for the LOCAL PLAYER'S OWN class only -> no spam.
+--   * a chat channel while you ARE raid leader/assistant (or party leader): one
+--     staggered line per PRESENT class, naming its member(s), so even players
+--     without the addon get told what to do.
+-- A duty line is emitted only for a class that is actually in the group.
+function RT.EmitClassDuties(key)
+    if not (AIP.db and AIP.db.classDutyAnnounce) then return end
+    local duties = key and RT.MechanicClassDuties[key]
+    if not duties then return end
+
+    local byClass = RT.GetRaidByClass()
+    local channel = (AIP.db and AIP.db.mechanicAnnounceChannel) or "SELF"
+
+    if channel ~= "SELF" and RT.CanBroadcast() then
+        -- Stagger so several duties for one mechanic don't trip the chat throttle.
+        local delay = 0
+        for _, d in ipairs(duties) do
+            local members = byClass[d.class]
+            if members and #members > 0 then
+                local line = RT.ClassLabel(d.class) .. ": " .. d.action
+                    .. " (" .. table.concat(members, ", ") .. ")"
+                if AIP.Utils and AIP.Utils.DelayedCall then
+                    AIP.Utils.DelayedCall(delay, function() RT.Send(line, channel) end)
+                    delay = delay + 0.3
+                else
+                    RT.Send(line, channel)
+                end
+            end
+        end
+    else
+        -- Personal: only the local player's own class duty, as a heads-up (never
+        -- a chat send - so a non-leader on a raid channel doesn't spam).
+        local _, myClass = UnitClass("player")
+        for _, d in ipairs(duties) do
+            if d.class == myClass then
+                local text = "Your duty: " .. d.action
+                if RaidNotice_AddMessage and RaidWarningFrame and ChatTypeInfo then
+                    RaidNotice_AddMessage(RaidWarningFrame, text, ChatTypeInfo["RAID_WARNING"])
+                end
+                if AIP.Print then AIP.Print("|cFF33FF99[Your duty]|r " .. d.action) end
+            end
+        end
+    end
+end
+
 -- Combat-log driven boss ability detection + signature-ability countdowns.
 function RT.OnMechanicCombatLog(...)
     if not (AIP.db and AIP.db.mechanicAnnounce) then return end
+    if not RT.InPveInstance() then return end
     local sub = select(2, ...)
 
     -- Bloodlust/Heroism (a friendly buff) -> duration + lockout timers.
@@ -603,12 +818,16 @@ function RT.OnMechanicCombatLog(...)
     if not spellName then return end
     local msg = RT.MechanicSpells[spellName]
     local interval = RT.AbilityTimers[spellName]
-    if not msg and not (interval and interval > 0) then return end
+    local duties = RT.MechanicClassDuties[spellName]
+    if not msg and not (interval and interval > 0) and not duties then return end
     -- Only react to a hostile caster (the boss), never the player/allies.
     if srcFlags and bit and bit.band and bit.band(srcFlags, 0x00000040) == 0 then return end
 
     if msg and not mechThrottled("s:" .. spellName, 3) then
         RT.EmitMechanic(msg)
+    end
+    if duties and not mechThrottled("c:" .. spellName, 3) then
+        RT.EmitClassDuties(spellName)
     end
     if interval and interval > 0 and not mechThrottled("t:" .. spellName, math.max(5, interval * 0.5)) then
         RT.StartTimer("t:" .. spellName, spellName, interval, 1, 0.6, 0.1, "~" .. spellName .. " soon!")
@@ -618,6 +837,7 @@ end
 -- Boss yell/emote detection.
 function RT.OnMechanicEmote(text)
     if not (AIP.db and AIP.db.mechanicAnnounce) then return end
+    if not RT.InPveInstance() then return end
     if not text then return end
     local lower = text:lower()
     for pattern, msg in pairs(RT.BossEmotes) do
@@ -633,12 +853,19 @@ end
 -- Target/focus boss health milestones (phase/execute awareness).
 function RT.OnMechanicHealth(uId)
     if not (AIP.db and AIP.db.mechanicAnnounce) then return end
+    if not RT.InPveInstance() then return end
     if uId ~= "target" and uId ~= "focus" then return end
     if not UnitExists(uId) or UnitIsDead(uId) or not UnitCanAttack("player", uId) then return end
     -- Boss-level only: skull level (-1) or worldboss/rareelite classification.
+    -- 5-man dungeon bosses are plain "elite" at a numeric level, so also accept an
+    -- at/above-level elite while inside a PvE instance (throttled per-GUID below).
     local lvl = UnitLevel(uId)
     local cls = UnitClassification(uId)
-    if lvl ~= -1 and cls ~= "worldboss" and cls ~= "rareelite" then return end
+    local isBoss = (lvl == -1) or cls == "worldboss" or cls == "rareelite"
+    if not isBoss and cls == "elite" and RT.InPveInstance() and (lvl or 0) >= (UnitLevel("player") or 80) then
+        isBoss = true
+    end
+    if not isBoss then return end
     local maxHP = UnitHealthMax(uId)
     if not maxHP or maxHP == 0 then return end
     local pct = UnitHealth(uId) / maxHP * 100
@@ -658,6 +885,7 @@ end
 -- Raid health monitor (called on a throttle from the events OnUpdate).
 function RT.CheckRaidHealth()
     if not (AIP.db and AIP.db.mechanicAnnounce) then return end
+    if not RT.InPveInstance() then return end
     local n = GetNumRaidMembers() or 0
     if n < 5 then return end
     if not UnitAffectingCombat("player") then return end
@@ -854,7 +1082,9 @@ end
 -- Start (or restart) a countdown bar. Gated by the mechanic-announcer toggle.
 -- `icon` is optional; otherwise we try the spell's own icon, then a clock.
 function RT.StartTimer(key, label, duration, r, g, b, prewarn, icon)
-    if not (AIP.db and AIP.db.mechanicAnnounce) then return end
+    -- NOT gated on mechanicAnnounce: the mechanic callers gate themselves before
+    -- calling, while pull/break bars (DBM bridge) and /aip timertest must render
+    -- regardless of the mechanic-announcer toggle.
     if not duration or duration <= 0 then return end
     if not icon then
         icon = select(3, GetSpellInfo(label))  -- nil for non-player spells; that's fine

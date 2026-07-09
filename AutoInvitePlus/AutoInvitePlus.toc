@@ -2,7 +2,7 @@
 ## Title: AutoInvite Plus
 ## Notes: Complete raid organization suite with LFM/LFG browser and inspection engine
 ## Author: iuGames
-## Version: 6.2.0
+## Version: 6.3.0
 ## SavedVariables: AutoInvitePlusDB
 ## OptionalDeps: GearScore, GearScoreLite, PlayerScore
 
@@ -20,6 +20,9 @@ core\Core.lua
 data\ChatScanner.lua
 data\InspectionEngine.lua
 data\RaidComposition.lua
+data\ItemScore.lua
+data\BiSData.lua
+data\SpecGuides.lua
 
 # ============================================
 # Modules (feature implementations)
@@ -37,6 +40,16 @@ modules\RaidTools.lua
 modules\RaidToolsRoll.lua
 modules\RaidToolsUI.lua
 modules\RaidToolsEvents.lua
+modules\DBMBridge.lua
+modules\ThreatCoach.lua
+modules\Readiness.lua
+modules\GearAdvisor.lua
+modules\GearHooks.lua
+modules\UpgradePath.lua
+modules\SpecAdvisor.lua
+modules\PostPull.lua
+modules\Rotation.lua
+modules\LFGWatch.lua
 modules\TestData.lua
 
 # ============================================
@@ -51,4 +64,5 @@ ui\panels\FavoritesPanel.lua
 ui\panels\RaidManagementPanel.lua
 ui\panels\LootHistoryPanel.lua
 ui\panels\SettingsPanel.lua
+ui\panels\CharacterPanel.lua
 ui\CentralGUI.lua

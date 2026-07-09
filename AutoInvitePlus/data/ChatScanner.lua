@@ -292,13 +292,14 @@ function CS.AddPlayer(info)
     CS.NotifyUpdate("lfg")
 end
 
--- Notify UI of updates
+-- Notify UI of updates. Route through the debounced AIP.UpdateCentralGUI only -
+-- it refreshes the *current* tab. The old direct RefreshBrowserTab(tab) here fired
+-- an immediate tree rebuild on every LFM/LFG chat line (constant on a busy realm),
+-- which is what made the tree refresh at random. The other tab refreshes when you
+-- switch to it (SelectTab), so nothing is lost.
 function CS.NotifyUpdate(tab)
     if AIP.UpdateCentralGUI then
         AIP.UpdateCentralGUI()
-    end
-    if AIP.CentralGUI and AIP.CentralGUI.RefreshBrowserTab then
-        AIP.CentralGUI.RefreshBrowserTab(tab)
     end
 end
 
@@ -831,7 +832,8 @@ local function OnEvent(self, event, message, author, ...)
     -- Get channel info for channel messages
     local channel = event
     if event == "CHAT_MSG_CHANNEL" then
-        local _, _, _, _, _, _, _, channelIndex = ...
+        -- CHAT_MSG_CHANNEL: within ... (arg3+), channelIndex is the 6th value.
+        local _, _, _, _, _, channelIndex = ...
         channel = "Channel " .. (channelIndex or "?")
     end
 

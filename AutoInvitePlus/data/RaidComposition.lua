@@ -2224,11 +2224,25 @@ function Comp.DetectRole(unit)
         end
     end
 
-    -- Simple detection based on class and common behaviors
-    -- In a full implementation, we'd inspect talents
-
-    -- Check for tank-like behavior (has Righteous Fury, Defensive Stance, Bear Form, etc.)
-    -- This is a simplified version
+    -- For the player we can read talents directly (argmax tree -> role), which
+    -- correctly separates Holy vs Ret, Resto vs Balance, Shadow vs Disc/Holy, etc.
+    -- rather than collapsing every hybrid to the class default. Feral/DK tanks are
+    -- still caught by the raid MAINTANK/OFFTANK flag handled above.
+    local roleByTree = {
+        PALADIN = { "HEALER", "TANK", "DPS" },
+        PRIEST  = { "HEALER", "HEALER", "DPS" },
+        SHAMAN  = { "DPS", "DPS", "HEALER" },
+        DRUID   = { "DPS", "DPS", "HEALER" },   -- balance / feral(cat) / resto
+        WARRIOR = { "DPS", "DPS", "TANK" },
+    }
+    if UnitIsUnit(unit, "player") and GetNumTalentTabs and roleByTree[class] then
+        local best, bestPts = 1, -1
+        for t = 1, (GetNumTalentTabs() or 3) do
+            local _, _, pts = GetTalentTabInfo(t)
+            if (pts or 0) > bestPts then bestPts, best = pts or 0, t end
+        end
+        if roleByTree[class][best] then return roleByTree[class][best] end
+    end
 
     local classInfo = Comp.ClassRoles[class]
     if classInfo then

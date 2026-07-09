@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This repo ships **two separate World of Warcraft 3.3.5a (WotLK, Interface `30300`) addons**, each in its own top-level folder:
 
-- **`AutoInvitePlus/`** — the primary addon (v6.1.2). Raid-organization suite: keyword auto-invite, LFM/LFG chat browser, gear-tiered composition advisor, queue/waitlist, blacklist/favorites, loot history, and in-raid assist tools. This is where nearly all development happens.
+- **`AutoInvitePlus/`** — the primary addon (v6.2.0). Raid-organization suite: keyword auto-invite, LFM/LFG chat browser, gear-tiered composition advisor, queue/waitlist, blacklist/favorites, loot history, and in-raid assist tools. This is where nearly all development happens.
 - **`GearScoreLite/`** — a **vendored third-party addon** (v1.84, by Mirrikat45 & Leo), bundled because it is one of AutoInvitePlus's optional GearScore dependencies (`## OptionalDeps: GearScore, GearScoreLite, PlayerScore`). Treat it as an external dependency — don't refactor it as if it were our code; upstream it only.
 
 Also at the root: `README.md` (user-facing feature/command overview), `Screenshots/`, `LICENSE`, and `.github/workflows/main.yml` (release CI).
@@ -27,7 +27,7 @@ For UI work without live chat, AutoInvitePlus provides fixtures: `/aip testdata`
 
 CI is `.github/workflows/main.yml`, triggered on **any git tag push** (`tags: "*"`). It zips both `AutoInvitePlus/` and `GearScoreLite/` and publishes them as GitHub Release assets. To cut a release:
 
-1. Bump `## Version` in the relevant addon's `.toc` (for AutoInvitePlus, `AutoInvitePlus/AutoInvitePlus.toc`).
+1. Bump `## Version` in the relevant addon's `.toc` (for AutoInvitePlus, `AutoInvitePlus/AutoInvitePlus.toc`). **For AutoInvitePlus, also bump the `VERSION` constant in `core/Core.lua`** — it's a *separate* source of truth that `AIP.Version` broadcasts to peers for the update checker, and it takes precedence over the `.toc` metadata. The two drift easily (they are currently out of sync: `.toc` 6.2.0 vs `Core.lua` 6.1.2) — keep them equal.
 2. Commit, then `git tag <version>` and push the tag → CI creates the release.
 
 Note: the GearScoreLite release asset name is **hardcoded** in `main.yml` (`GearScoreLite-1.84.zip`) — if you ever bump GSL's version, update that `asset_name` too.
