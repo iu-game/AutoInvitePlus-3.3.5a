@@ -120,7 +120,9 @@ function GA.BestFromBags()
     -- to classes that can't dual-wield.
     local mhLink = GetInventoryItemLink("player", 16)
     local mh2H = mhLink and select(9, GetItemInfo(mhLink)) == "INVTYPE_2HWEAPON" or false
-    local canDW = (class == "WARRIOR" or class == "ROGUE" or class == "DEATHKNIGHT" or class == "HUNTER" or class == "SHAMAN")
+    -- Classes that can equip an off-hand weapon. Hunters CANNOT dual-wield or use
+    -- an off-hand in 3.3.5a (main-hand melee + ranged only), so they're excluded.
+    local canDW = (class == "WARRIOR" or class == "ROGUE" or class == "DEATHKNIGHT" or class == "SHAMAN")
 
     -- Pre-score equipped items per slot.
     local equippedScore = {}

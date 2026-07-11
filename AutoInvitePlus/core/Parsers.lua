@@ -505,6 +505,24 @@ function Parsers.IsLFM(message)
     return false
 end
 
+-- A STRONG LFM signal = an unambiguous "group looking for members" marker. Used to
+-- disambiguate messages that trip BOTH the LFG and LFM keyword sets - e.g. a solo
+-- player's "LFG dps, need a spot" also matches the broad "need" LFM keyword, which
+-- used to leak the LFG promotion into the LFM group tree. Only these markers mean a
+-- real group on their own; the weak ones ("need", "pst for") do not.
+Parsers.StrongLFMKeywords = {
+    "lfm", "looking for more", "spots open", "spots left", "recruiting", "recruit ",
+}
+function Parsers.IsStrongLFM(message)
+    if not message then return false end
+    local msg = message:lower()
+    for _, kw in ipairs(Parsers.StrongLFMKeywords) do
+        if msg:find(kw, 1, true) then return true end
+    end
+    if msg:match("lf%d+m") then return true end  -- lf1m, lf2m, ...
+    return false
+end
+
 -- Check if a message is a guild recruitment / promotion (not a real raid LFM).
 -- These advertise a guild rather than a specific group, e.g.
 --   "PvE Guild <Untergotten Memories> is recruiting active new members!"

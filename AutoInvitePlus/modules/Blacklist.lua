@@ -512,6 +512,104 @@ function AIP.FormatBlacklistDate(timestamp)
 end
 
 -- ============================================================================
+-- Peer blacklist sharing (on demand, over the DataBus). Push model: you Share
+-- your blacklist to peers; each peer gets a prompt and merges it EXPLICITLY
+-- (never silent - it mutates their saved data). Paged to fit the 255-char cap.
+-- ============================================================================
+local pendingShares = {}   -- sender -> { entries = {{name,reason},...}, ts, total, promptArmed }
+
+-- Broadcast your blacklist to all peers (target=nil) or one peer (target=name).
+function AIP.ShareBlacklist(target)
+    if not (AIP.DataBus and AIP.DataBus.CreateEvent and AIP.DataBus.Broadcast) then
+        AIP.Print("DataBus not available - can't share the blacklist."); return
+    end
+    local list = {}
+    for _, entry in pairs(AIP.db.blacklist or {}) do
+        list[#list + 1] = { n = entry.name, r = (entry.reason or ""):gsub("[;|\n\r]", " "):sub(1, 40) }
+    end
+    if #list == 0 then AIP.Print("Your blacklist is empty - nothing to share."); return end
+    local PAGE = 4
+    local total = math.ceil(#list / PAGE)
+    local pages = {}
+    for i = 1, #list, PAGE do
+        local page = {}
+        for j = i, math.min(i + PAGE - 1, #list) do page[#page + 1] = list[j] end
+        pages[#pages + 1] = page
+    end
+    local function sendPage(idx)
+        local ev = AIP.DataBus.CreateEvent("BLACKLIST", { seq = idx, total = total, entries = pages[idx] })
+        if ev then AIP.DataBus.Broadcast(ev, target) end
+    end
+    sendPage(1)
+    -- Stagger remaining pages (~2.2s) so the per-type fan-out rate gate doesn't drop them.
+    for idx = 2, total do
+        if AIP.Utils and AIP.Utils.DelayedCall then
+            AIP.Utils.DelayedCall(2.2 * (idx - 1), function() sendPage(idx) end)
+        else
+            sendPage(idx)
+        end
+    end
+    AIP.Print(string.format("Sharing %d blacklist entr%s to %s...", #list, #list == 1 and "y" or "ies", target or "peers"))
+end
+
+-- Receive a page: accumulate, then (debounced) prompt the user to accept.
+local function onBlacklistShared(event)
+    if not (event and event.sender and event.data) then return end
+    if event.sender == UnitName("player") then return end
+    local buf = pendingShares[event.sender] or { entries = {}, ts = time() }
+    pendingShares[event.sender] = buf
+    for _, en in ipairs(event.data.entries or {}) do
+        if en.n then buf.entries[#buf.entries + 1] = { name = en.n, reason = en.r or "" } end
+    end
+    buf.ts = time()
+    buf.total = event.data.total
+    buf.promptArmed = true
+    if AIP.Utils and AIP.Utils.DelayedCall then
+        AIP.Utils.DelayedCall(3, function()
+            if buf.promptArmed and #buf.entries > 0 then
+                buf.promptArmed = false
+                AIP.Print(string.format("|cFF00CCFF%s|r offers %d blacklist entr%s. Type |cFFFFFF00/aip bl accept %s|r to merge them in.",
+                    event.sender, #buf.entries, #buf.entries == 1 and "y" or "ies", event.sender))
+            end
+        end)
+    end
+end
+
+-- Merge a received share into your blacklist (explicit, from the prompt or button).
+function AIP.AcceptSharedBlacklist(sender)
+    local key = sender
+    if not key or key == "" then
+        local best, bestTs
+        for s, b in pairs(pendingShares) do
+            if #b.entries > 0 and (not bestTs or b.ts > bestTs) then best, bestTs = s, b.ts end
+        end
+        key = best
+    end
+    local buf = key and pendingShares[key]
+    if not (buf and #buf.entries > 0) then AIP.Print("No shared blacklist waiting to accept."); return end
+    local lines = {}
+    for _, en in ipairs(buf.entries) do
+        lines[#lines + 1] = en.name .. ";" .. (en.reason ~= "" and en.reason or ("shared by " .. key))
+    end
+    AIP.ImportBlacklist(table.concat(lines, "\n"), "merge")
+    pendingShares[key] = nil
+end
+
+function AIP.HasPendingBlacklistShare()
+    for _, b in pairs(pendingShares) do if #b.entries > 0 then return true end end
+    return false
+end
+
+-- Subscribe on login (DataBus loads before this module, but guard anyway).
+local blShareFrame = CreateFrame("Frame")
+blShareFrame:RegisterEvent("PLAYER_LOGIN")
+blShareFrame:SetScript("OnEvent", function()
+    if AIP.DataBus and AIP.DataBus.Subscribe then
+        AIP.DataBus.Subscribe("BLACKLIST", onBlacklistShared, "Blacklist")
+    end
+end)
+
+-- ============================================================================
 -- LEGACY UI (standalone window)
 -- ============================================================================
 local blacklistFrame = nil

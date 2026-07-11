@@ -4,7 +4,7 @@
 -- guide and the Readiness cap-status readout. Rating constants @80:
 --   spell hit 26.23/1% (17%=446, 14%=368, 11%=289 with 3% talent+debuff)
 --   melee/ranged hit 32.79/1% (8% special cap = 263)
---   expertise 8.20/1 (26 = ~214 rating), ArP 13.99/1% (1400 hard cap)
+--   expertise 8.20/1 (26 = ~214 rating), ArP 15.39/1% (1400 hard cap)
 --   defense 4.92/1 (540 skill for crit immunity)
 
 local AIP = AutoInvitePlus
@@ -17,11 +17,11 @@ SG.Caps = {
     DK_Blood_DPS   = { hit = 263, hitType = "melee", expertise = 214, arp = "yes", defense = nil, notes = "8% melee first; ArP to 1400 late; Str core." },
     DK_Frost_DPS   = { hit = 263, hitType = "melee", expertise = 214, arp = "yes", defense = nil, notes = "DW but specials only need 8%; hit+exp stressed." },
     DK_Unholy_DPS  = { hit = 263, hitType = "melee", expertise = 214, arp = "yes", defense = nil, notes = "2H; Hit>Str>Haste>ArP; haste scales Ghoul/Gargoyle." },
-    DK_Tank        = { hit = 0,   hitType = "spell", expertise = 214, arp = "no",  defense = 540, notes = "540 def = crit-immune first; then Stamina." },
+    DK_Tank        = { hit = 0,   hitType = "melee", expertise = 214, arp = "no",  defense = 540, notes = "540 def = crit-immune first; then Stamina." },
     War_Arms_DPS   = { hit = 263, hitType = "melee", expertise = 214, arp = "yes", defense = nil, notes = "8% first; ArP soft-cap 1400 with proc then beats Str." },
     War_Fury_DPS   = { hit = 263, hitType = "melee", expertise = 214, arp = "yes", defense = nil, notes = "8% covers yellow; white DW cap not chased." },
     War_Prot_Tank  = { hit = 0,   hitType = "melee", expertise = 214, arp = "no",  defense = 540, notes = "540 def then Stam; Hit/Exp threat-only." },
-    Druid_Balance  = { hit = 368, hitType = "spell", expertise = 0,   arp = "no",  defense = nil, notes = "~289 (11%) with Misery/IFF debuff, 368 without." },
+    Druid_Balance  = { hit = 263, hitType = "spell", expertise = 0,   arp = "no",  defense = nil, notes = "10%/263 with own Improved Faerie Fire (Balance of Power gives +4%); 341 (13%) with no spell-hit debuff." },
     Druid_FeralCat = { hit = 263, hitType = "melee", expertise = 214, arp = "yes", defense = nil, notes = "8%; Primal Precision eases exp; ArP best late." },
     Druid_FeralBear= { hit = 263, hitType = "melee", expertise = 214, arp = "no",  defense = 540, notes = "540 def uncrittable; Hit/Exp threat only." },
     Druid_Resto    = { hit = 0,   hitType = "none",  expertise = 0,   arp = "no",  defense = nil, notes = "Haste breakpoints 65/735 (Celestial Focus) or 165/856." },
@@ -62,7 +62,7 @@ SG.Rotations = {
     Druid_Resto = { "Keep Lifebloom on tank and Rejuvenation rolling on damaged targets (favor melee for Revitalize).", "Wild Growth on CD when 3+ hurt; fit 4-5 Rejuvs between casts.", "Fill with Nourish (scales with your HoTs), not spammed Regrowth.", "Emergency: Nature's Swiftness + Healing Touch; Swiftmend when NS is on CD.", "Don't overwrite a fresh Lifebloom stack." },
     Pala_Holy = { "Beacon of Light on tank + Sacred Shield refreshed; spam max-rank Holy Light on a 2nd target.", "Judge Seal of Wisdom every ~60s to keep Judgements of the Pure haste.", "Flash of Light only for spot heals; Holy Shock instant on the move.", "CDs: Divine Illumination heavy phases, Divine Favor clutch crit, Lay on Hands to save a life.", "Mistake: main-healing with Flash or letting Beacon/Sacred Shield/Judgement drop." },
     Pala_Prot_Tank = { "969: alternate a 9s ability (ShoR/Holy Shield) with a 6s (HotR/Judgement/Consecration/Avenger's Shield).", "Open: Judgement or Avenger's Shield, drop Consecration + Holy Shield before the boss lands.", "Single: ShoR > HotR > Judgement > Consecration > Holy Shield ~100% uptime.", "AoE: Seal of Command, lead Avenger's Shield + Consecration + HotR.", "Avenging Wrath threat, Divine Protection for spikes." },
-    Pala_Ret_DPS = { "Seal of Vengeance single-target (Glyph of SoV mandatory); Seal of Command on 2+.", "FCFS: Crusader Strike > Judgement > Divine Storm > Exorcism (Art of War) > Consecration > Holy Wrath.", "Art of War -> instant free Exorcism, but never clip a higher-priority ability.", "Avenging Wrath in burn phases (locks bubble ~1 min).", "Divine Plea for mana; never let the GCD idle." },
+    Pala_Ret_DPS = { "Seal of Vengeance single-target (Glyph of SoV mandatory); Seal of Command on 2+.", "FCFS: Crusader Strike > Judgement > Divine Storm > Exorcism (Art of War) > Consecration > Holy Wrath.", "Art of War -> instant free Exorcism, but never clip a higher-priority ability.", "Avenging Wrath in burn phases (triggers Forbearance ~2 min - can't bubble/LoH).", "Divine Plea for mana; never let the GCD idle." },
     Hunter_BM = { "Open: Hunter's Mark + Dragonhawk, Serpent Sting, Bestial Wrath + Rapid Fire + Kill Command.", "Priority: Kill Shot > Kill Command on CD (macro off-GCD) > Serpent Sting > Steady Shot filler.", "Bestial Wrath every ~2 min.", "Keep pet alive/on-target, 5 Frenzy stacks, Mend Pet up.", "Don't over-Arcane-Shot into mana starvation." },
     Hunter_MM = { "Open: Mark + Dragonhawk, Serpent Sting, all CDs, Kill Command > Chimera > Aimed, Readiness for double burst.", "Priority: Kill Shot > Kill Command > Serpent Sting up > Chimera > Aimed > Steady filler.", "Chimera auto-refreshes Serpent Sting - never reapply manually.", "Careful Aim: Int -> ranged AP; Rapid Fire on CD.", "Don't clip Steady Shot casts." },
     Hunter_SV = { "Open: Mark + Dragonhawk, Serpent Sting, Black Arrow, Explosive Shot + Rapid Fire.", "Priority: Kill Shot > Explosive on CD > Black Arrow (feeds Lock and Load) > Serpent Sting > Kill Command > Steady.", "Lock and Load: fire the free Explosive Shots immediately.", "Never let Explosive Shot or Black Arrow sit off CD.", "(True 3.3.5a keeps Black Arrow.)" },
@@ -79,7 +79,7 @@ SG.Rotations = {
     Priest_Holy = { "Prayer of Mending on CD and Renew rolling; Circle of Healing on CD for group AoE.", "Build Serendipity with Flash/Binding Heal to speed Greater Heal / Prayer of Healing.", "Flash filler, Greater Heal big hits, Binding Heal when also hurt, Prayer of Healing on stacked raid.", "Guardian Spirit tank; Divine Hymn emergency; Hymn of Hope mana.", "Don't spam slow Greater Heals into overheal." },
     Priest_Shadow = { "Open: build 5 Shadow Weaving, then VT > Devouring Plague > SW:Pain > Mind Blast > Mind Flay.", "Priority: VT 100% (feeds Replenishment) > Devouring Plague on CD > Mind Blast on CD > Mind Flay filler.", "SW:Pain is refreshed free by Mind Flay - never re-hardcast it.", "SW:Death only while moving; keep DoTs from ever dropping." },
     Warlock_Affli = { "Open: pre-pot, Haunt > Unstable Affliction > Corruption > Curse of Agony (Doom long fights) > Shadow Bolt.", "Keep Haunt, UA, Corruption and Curse up 100% without clipping.", "Below 25% swap filler to Drain Soul (huge execute) while keeping DoTs rolling.", "Don't clip UA early or let Haunt drop; AoE = Seed of Corruption (watch threat)." },
-    Warlock_Demo = { "Open: pre-pot, Life Tap, Metamorphosis, Immolate, Corruption, Curse, Shadow Bolt filler.", "Keep Immolate + Corruption up 100% for Molten Core; spend each Molten Core on Incinerate.", "Below 35% switch filler to Soul Fire (also consumes Molten Core).", "Pop Metamorphosis with trinket/pot; keep the 5% crit debuff up for the raid." },
+    Warlock_Demo = { "Open: pre-pot, Life Tap, Metamorphosis, Immolate, Corruption, Curse, Shadow Bolt filler.", "Keep Immolate + Corruption up 100% for Molten Core; spend each Molten Core on Incinerate.", "Below 35% switch filler to Soul Fire (also consumes Molten Core).", "Pop Metamorphosis with trinket/pot; keep Demonic Pact (spell power) up for the raid." },
     Warlock_Destro = { "Open: pre-cast Soul Fire to land on the pull, pre-pot, Curse of Doom + Immolate.", "Keep Immolate 100%; Conflagrate on CD for Backdraft; Chaos Bolt on CD; Incinerate filler.", "Corruption is a DPS loss full-time - cast only while moving.", "Don't let Conflagrate/Chaos Bolt sit off-CD; dump Backdraft into Incinerate/Chaos Bolt." },
 }
 
@@ -157,15 +157,20 @@ SG.AoE = {
 }
 
 -- Talent build variations - { name, whenToUse }. Empty = single cookie-cutter.
+-- Each variant = { name, whenToUse, talentBuild }. The 3rd field is a verified
+-- Wowhead-format talent digit string (tree1-tree2-tree3) so the Spec view can
+-- PREVIEW that variant's talent tree (click it) and detect which one you're running
+-- ("in use"). Web-verified (Wowhead/Icy-Veins/wowsims talent-calc; every string sums
+-- to 71 in the correct in-game tree order).
 SG.Variants = {
-    DK_Frost_DPS   = { { "Blood/Frost 2H (17/54/0)", "strong in lower gear; 15s diseases" }, { "Unholy/Frost DW (0/54/17)", "scales with strong 1H; 21s diseases" } },
-    DK_Unholy_DPS  = { { "Unholy DW", "standard most phases" }, { "Scourge Strike 2H", "late-phase with Shadowmourne + Sigil of Virulence" } },
-    Rogue_Combat   = { { "Combat Swords", "Sword Specialization" }, { "Combat Daggers / CQC", "Close Quarters Combat - match your best weapons" } },
-    Druid_Balance  = { { "Standard Eclipse (deep Balance ~57)", "max single-target throughput" }, { "Typhoon / Starfall utility", "Gale Winds for heavy AoE / movement" } },
-    Druid_FeralCat = { { "Standard bleed w/ Berserk (0/55/16)", "max DPS on patchwerk fights" }, { "No-Berserk mobility", "survivability on high-movement fights" } },
-    Pala_Ret_DPS   = { { "Standard 0/18/53", "Prot dip for Divine Sacrifice / Improved Judgements - best utility" }, { "Deeper Ret 0/15/56", "pure personal DPS, less utility" } },
-    Hunter_MM      = { { "MM 7/57/7", "standard" }, { "Focused Aim <-> Imp. Steady Shot", "swap by your hit rating" } },
-    Mage_Fire      = { { "Standard Fireball / TTW", "highest ceiling" }, { "Frostfire Bolt (FFB) build", "more forgiving on some gear" } },
+    DK_Frost_DPS   = { { "Blood/Frost 2H (17/54/0)", "strong in lower gear; 15s diseases", "235502-32005050352203112301203101351-" }, { "Unholy/Frost DW (0/54/17)", "scales with strong 1H; 21s diseases", "-32005350352003012300033101351-230200305002" } },
+    DK_Unholy_DPS  = { { "Unholy DW", "standard most phases", "0-320043500002-2300303050032152000150013133051" }, { "Scourge Strike 2H", "late-phase with Shadowmourne + Sigil of Virulence", "-320050500002-2302003350032052000150013133151" } },
+    Rogue_Combat   = { { "Combat Swords", "Sword Specialization", "00532000514-0252051000035015223100501251-0" }, { "Combat Daggers / CQC", "Close Quarters Combat - match your best weapons", "00532000514-0252051050035010223100501251-0" } },
+    Druid_Balance  = { { "Standard Eclipse (deep Balance ~57)", "max single-target throughput", "5102233115331303213305311031-0-205003002" }, { "Typhoon / Starfall utility", "Gale Winds for heavy AoE / movement", "5012203115331303213305311231-0-205003012" } },
+    Druid_FeralCat = { { "Standard bleed w/ Berserk (0/55/16)", "max DPS on patchwerk fights", "0-553202132322010053110030310511-203503012" }, { "No-Berserk mobility", "survivability on high-movement fights", "-54320213232201015312003031051-203503012" } },
+    Pala_Ret_DPS   = { { "Standard 0/18/53", "Prot dip for Divine Sacrifice / Improved Judgements - best utility", "-053251002-05230051203331302133231331" }, { "Deeper Ret 0/15/56", "pure personal DPS, less utility", "-053151-05232151203331302133231331" } },
+    Hunter_MM      = { { "MM 7/57/7", "standard", "502-035335131030013233035031051-5000002" }, { "Focused Aim <-> Imp. Steady Shot", "swap by your hit rating", "502-005335101230013233135031351-5000002" } },
+    Mage_Fire      = { { "Standard Fireball / TTW", "highest ceiling", "23000503110003-0055032012303330053120300351-0" }, { "Frostfire Bolt (FFB) build", "more forgiving on some gear", "0-2305032012303331053120311351-023303031" } },
 }
 
 -- class + primary tree -> guide key (tank overrides via archetype).

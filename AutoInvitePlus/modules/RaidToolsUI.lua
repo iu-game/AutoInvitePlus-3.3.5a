@@ -611,13 +611,26 @@ end
 local BTN_W = 150
 local BTN_H = 20
 local BTN_SPACING = 22
-local BAR_VISIBLE = 6   -- message buttons shown at once; the rest scroll (wheel)
+local BAR_BASE = 46        -- header + action row above the message list
+local BAR_FOOT = 14        -- scroll-position footer strip
+local BAR_DEFAULT_ROWS = 6 -- default message rows (bar is user-resizable)
+
+-- How many message rows fit the bar's current (or saved, or default) height. The
+-- bar is user-resizable via a corner grip, so this replaces the old fixed
+-- BAR_VISIBLE constant - the visible count follows the height the user dragged.
+function RT.BarVisibleRows()
+    local h = RT.Bar and RT.Bar:GetHeight()
+    if (not h or h < 40) and AIP.db and AIP.db.floatingBarSize then h = AIP.db.floatingBarSize.h end
+    if not h or h < 40 then h = BAR_BASE + BAR_DEFAULT_ROWS * BTN_SPACING + BAR_FOOT end
+    return math.max(1, math.floor((h - BAR_BASE - BAR_FOOT) / BTN_SPACING))
+end
 
 function RT.CreateBar()
     if RT.Bar then return RT.Bar end
 
     local bar = CreateFrame("Frame", "AIPAnnounceBar", UIParent)
-    bar:SetSize(BTN_W + 16, 60)
+    local sz = AIP.db and AIP.db.floatingBarSize
+    bar:SetSize((sz and sz.w) or (BTN_W + 16), (sz and sz.h) or (BAR_BASE + BAR_DEFAULT_ROWS * BTN_SPACING + BAR_FOOT))
     bar:SetFrameStrata("MEDIUM")
     bar:SetBackdrop({
         bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
@@ -644,6 +657,10 @@ function RT.CreateBar()
         local point, _, relPoint, x, y = self:GetPoint()
         if AIP.db then AIP.db.floatingBarPos = {point = point, relPoint = relPoint, x = x, y = y} end
     end)
+    -- Resizable: drag the corner grip to change how many messages show + width.
+    bar:SetResizable(true)
+    bar:SetMinResize(120, BAR_BASE + BTN_SPACING + BAR_FOOT)   -- >= 1 message row
+    bar:SetScript("OnSizeChanged", function() if RT.Bar then RT.RefreshBar() end end)
 
     local pos = AIP.db and AIP.db.floatingBarPos
     bar:ClearAllPoints()
@@ -684,7 +701,7 @@ function RT.CreateBar()
     bar:EnableMouseWheel(true)
     bar:SetScript("OnMouseWheel", function(self, delta)
         local total = #RT.GetAnnouncements()
-        local maxOff = math.max(0, total - BAR_VISIBLE)
+        local maxOff = math.max(0, total - RT.BarVisibleRows())
         self.scrollOffset = math.min(maxOff, math.max(0, (self.scrollOffset or 0) - delta))
         RT.RefreshBar()
     end)
@@ -716,6 +733,25 @@ function RT.CreateBar()
     scrollInfo:Hide()
     bar.scrollInfo = scrollInfo
 
+    -- Resize grip (bottom-right corner), mirrors the main window's pattern. On
+    -- release it persists the size and reflows the message list to the new height.
+    local grip = CreateFrame("Button", nil, bar)
+    grip:SetSize(16, 16); grip:SetPoint("BOTTOMRIGHT", -2, 2)
+    grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    grip:SetScript("OnMouseDown", function() bar:StartSizing("BOTTOMRIGHT") end)
+    grip:SetScript("OnMouseUp", function()
+        bar:StopMovingOrSizing()
+        if AIP.db then AIP.db.floatingBarSize = { w = bar:GetWidth(), h = bar:GetHeight() } end
+        RT.RefreshBar()
+    end)
+    grip:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:AddLine("Drag to resize (more messages / wider)"); GameTooltip:Show()
+    end)
+    grip:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    bar.grip = grip
+
     bar.buttons = {}
     RT.Bar = bar
     return bar
@@ -725,61 +761,66 @@ function RT.RefreshBar()
     if not RT.Bar then return end
     local anns = RT.GetAnnouncements()
     local total = #anns
+    local visible = RT.BarVisibleRows()               -- follows the user-dragged height
+    local btnW = math.max(120, RT.Bar:GetWidth() - 16) -- follows the user-dragged width
 
-    -- Clamp the scroll window to the current list.
-    local maxOff = math.max(0, total - BAR_VISIBLE)
+    -- Clamp the scroll window to the current list + current visible-row count.
+    local maxOff = math.max(0, total - visible)
     local offset = math.min(maxOff, math.max(0, RT.Bar.scrollOffset or 0))
     RT.Bar.scrollOffset = offset
 
-    -- Render only the visible window into a fixed pool of BAR_VISIBLE buttons.
-    for i = 1, BAR_VISIBLE do
-        local ann = anns[offset + i]
-        local btn = RT.Bar.buttons[i]
-        if not btn then
-            -- Flat list row (not a chunky red button): dark fill, gold left-accent,
-            -- gold hover, left-aligned label - reads as a clean announcement list.
-            btn = CreateFrame("Button", nil, RT.Bar)
-            btn:SetSize(BTN_W, BTN_H)
-            btn:SetPoint("TOP", RT.Bar, "TOP", 0, -46 - (i - 1) * BTN_SPACING)
-            local bg = btn:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints(); bg:SetTexture(0.11, 0.12, 0.17, 0.92)
-            local accent = btn:CreateTexture(nil, "ARTWORK"); accent:SetPoint("TOPLEFT"); accent:SetPoint("BOTTOMLEFT"); accent:SetWidth(2); accent:SetTexture(1, 0.82, 0, 0.5)
-            local hl = btn:CreateTexture(nil, "HIGHLIGHT"); hl:SetAllPoints(); hl:SetTexture(1, 0.82, 0, 0.16)
-            local txt = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            txt:SetPoint("LEFT", 8, 0); txt:SetPoint("RIGHT", -6, 0); txt:SetJustifyH("LEFT"); txt:SetTextColor(0.92, 0.92, 0.96)
-            btn.txt = txt
-            RT.Bar.buttons[i] = btn
-        end
-        if ann then
-            btn.txt:SetText(ann.name or ann.label or ann.message or "?")
-            btn:SetScript("OnClick", function() RT.Send(ann.message, ann.channel or "RAID_WARNING") end)
-            btn:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine(ann.name or ann.label or "Announcement", 1, 0.82, 0)
-                GameTooltip:AddLine(ann.message or "", 1, 1, 1, true)
-                GameTooltip:AddLine("-> " .. (ann.channel or "RAID_WARNING"), 0.6, 0.8, 1)
-                GameTooltip:Show()
-            end)
-            btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            btn:Show()
-        else
-            btn:Hide()
+    local pool = RT.Bar.buttons
+    -- Render the visible window; size/position each row to the current bar size.
+    for i = 1, math.max(visible, #pool) do
+        local btn = pool[i]
+        if i <= visible then
+            if not btn then
+                -- Flat list row (not a chunky red button): dark fill, gold left-accent,
+                -- gold hover, left-aligned label - reads as a clean announcement list.
+                btn = CreateFrame("Button", nil, RT.Bar)
+                local bg = btn:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints(); bg:SetTexture(0.11, 0.12, 0.17, 0.92)
+                local accent = btn:CreateTexture(nil, "ARTWORK"); accent:SetPoint("TOPLEFT"); accent:SetPoint("BOTTOMLEFT"); accent:SetWidth(2); accent:SetTexture(1, 0.82, 0, 0.5)
+                local hl = btn:CreateTexture(nil, "HIGHLIGHT"); hl:SetAllPoints(); hl:SetTexture(1, 0.82, 0, 0.16)
+                local txt = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                txt:SetPoint("LEFT", 8, 0); txt:SetPoint("RIGHT", -6, 0); txt:SetJustifyH("LEFT"); txt:SetTextColor(0.92, 0.92, 0.96)
+                btn.txt = txt
+                pool[i] = btn
+            end
+            btn:SetSize(btnW, BTN_H)
+            btn:ClearAllPoints()
+            btn:SetPoint("TOP", RT.Bar, "TOP", 0, -BAR_BASE - (i - 1) * BTN_SPACING)
+            local ann = anns[offset + i]
+            if ann then
+                btn.txt:SetText(ann.name or ann.label or ann.message or "?")
+                btn:SetScript("OnClick", function() RT.Send(ann.message, ann.channel or "RAID_WARNING") end)
+                btn:SetScript("OnEnter", function(self)
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:AddLine(ann.name or ann.label or "Announcement", 1, 0.82, 0)
+                    GameTooltip:AddLine(ann.message or "", 1, 1, 1, true)
+                    GameTooltip:AddLine("-> " .. (ann.channel or "RAID_WARNING"), 0.6, 0.8, 1)
+                    GameTooltip:Show()
+                end)
+                btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+                btn:Show()
+            else
+                btn:Hide()
+            end
+        elseif btn then
+            btn:Hide()   -- pooled button beyond the current visible count
         end
     end
 
     -- Compact scroll position shown under the row when the list overflows.
     if RT.Bar.scrollInfo then
-        if total > BAR_VISIBLE then
+        if total > visible then
             RT.Bar.scrollInfo:SetText(string.format("|cFF888888%d-%d / %d  (scroll)|r",
-                offset + 1, math.min(offset + BAR_VISIBLE, total), total))
+                offset + 1, math.min(offset + visible, total), total))
             RT.Bar.scrollInfo:Show()
         else
             RT.Bar.scrollInfo:Hide()
         end
     end
-
-    -- Fixed height: always sized for BAR_VISIBLE rows regardless of list length.
-    RT.Bar:SetHeight(46 + BAR_VISIBLE * BTN_SPACING + 14)
-    RT.Bar:SetWidth(BTN_W + 16)
+    -- NOTE: the bar size is user-owned (resize grip) - RefreshBar no longer forces it.
 end
 
 function RT.UpdateBar()

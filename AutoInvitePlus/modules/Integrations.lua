@@ -570,6 +570,50 @@ Int.RaidAchievements = {
     ["The Immortal"] = 2186,
 }
 
+-- Per-instance ORDERED achievement lists (best/most prestigious first). Used to
+-- surface a player's single best relevant achievement for the raid an LFG entry
+-- targets. Ids are the same verified ones as Int.RaidAchievements above.
+Int.RaidAchievementsByInstance = {
+    -- ICC: Heroic Lich King 25 > 10 > Glory 25 > 10 > normal Lich King 25 > 10
+    ICC    = { 4601, 4583, 4603, 4602, 4597, 4530 },
+    -- Trial of the Grand Crusade 25 > 10 (TOGC listings normalise to the same set)
+    TOC    = { 3812, 3918 },
+    TOGC   = { 3812, 3918 },
+    -- Ulduar: Glory 25 > 10 > Observed 25 > 10
+    ULDUAR = { 2958, 2957, 3037, 3036 },
+    -- Naxx: Immortal (25) > Undying (10) > Glory 25 > 10
+    NAXX   = { 2186, 2187, 2138, 2137 },
+    -- RS has no dedicated meta achievement in our set (left intentionally absent).
+}
+
+-- Normalise an LFG raid id ("ICC25", "TOC10", "ULDUAR10HC") to its bare instance
+-- key ("ICC", "TOC", ...) by stripping the size (10/25) and difficulty (H/HC) suffix.
+function Int.RaidToInstanceKey(raidId)
+    if not raidId then return nil end
+    local key = tostring(raidId):upper():gsub("%s+", "")
+    key = key:gsub("HC$", ""):gsub("H$", ""):gsub("25$", ""):gsub("10$", "")
+    key = key:gsub("HC$", ""):gsub("H$", "")   -- e.g. ICC25HC -> ICC
+    if key == "" then return nil end
+    return key
+end
+
+-- Return the first (best) achievement id from an instance's ordered list that
+-- passes hasFn (defaults to Int.HasAchievement, so self/inspected). Peers pass a
+-- closure over the card's completed-achievement set. Returns id, name or nil.
+function Int.BestAchievementFor(instanceKey, hasFn)
+    if not instanceKey then return nil end
+    local list = Int.RaidAchievementsByInstance and Int.RaidAchievementsByInstance[instanceKey]
+    if not list then return nil end
+    hasFn = hasFn or Int.HasAchievement
+    for _, id in ipairs(list) do
+        if hasFn(id) then
+            local _, name = GetAchievementInfo(id)
+            return id, name
+        end
+    end
+    return nil
+end
+
 -- Check if player has an achievement (only works for inspected players or self)
 function Int.HasAchievement(achievementID)
     local _, _, _, completed = GetAchievementInfo(achievementID)

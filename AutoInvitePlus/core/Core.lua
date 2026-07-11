@@ -4,7 +4,7 @@
 -- Refactored with DRY principle and OOP patterns
 
 local ADDON_NAME = "AutoInvitePlus"
-local VERSION = "6.3.0"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
+local VERSION = "6.4.0"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
 local DB_VERSION = 5  -- Increment when saved variables structure changes (5.5: raid sessions, 5.4: mdps/rdps split, 4: loot history retention)
 
 -- Create main addon namespace (may already exist from Utils.lua)
@@ -162,6 +162,7 @@ local defaults = {
     },
     floatingBarEnabled = false,     -- Show the floating announcement bar
     floatingBarPos = nil,           -- {point, relPoint, x, y}
+    floatingBarSize = nil,          -- {w, h} user-resized size of the announcement bar
     rollDuration = 10,              -- Roll countdown seconds
 
     -- Self debuff/curse announcer: /say important raid debuffs on you (with stacks)
@@ -180,11 +181,13 @@ local defaults = {
     threatCoach = false,            -- opt-in: warn me (heads-up) when I'm about to pull aggro off the tank
     readyCheckScan = true,          -- auto-run the pre-pull readiness self-check when a ready check starts
     gearShare = true,               -- broadcast my own gear-readiness summary so peers needn't inspect me
+    cardShare = true,               -- attach my full character card (gear + achievements) to my LFG listing
     statScales = nil,               -- {archetype = {stat=weight}} user overrides from a pasted Pawn string
     recBuild = nil,                 -- imported recommended talent build string (Wowhead digit format)
     postPull = false,               -- opt-in: print a post-pull "how'd that go" report after boss fights
     tooltipScore = true,            -- append an AIP score + upgrade verdict to every item tooltip
     paperdollAudit = true,          -- mark missing-enchant (E) / empty-socket (G) slots on the character sheet
+    charPvp = false,                -- Character panel PvE/PvP toggle (PvP recolours every section's recommendations)
     rotationHelper = false,         -- opt-in: live next-ability rotation advisor + DPS overlay
     rotationPos = nil,              -- {point, relPoint, x, y} for the rotation overlay
     timerBarPos = nil,              -- {point, relPoint, x, y} for the countdown timer bars
@@ -1422,8 +1425,19 @@ local function SlashHandler(msg)
             AIP.ToggleQueueUI()
         end
     elseif cmd == "bl" or cmd == "blacklist" then
-        if AIP.ToggleBlacklistUI then
+        local sub, arg = (rest or ""):match("^(%S*)%s*(.*)$")
+        sub = (sub or ""):lower()
+        if sub == "share" then
+            if AIP.ShareBlacklist then AIP.ShareBlacklist(arg ~= "" and arg or nil) end
+        elseif sub == "accept" then
+            if AIP.AcceptSharedBlacklist then AIP.AcceptSharedBlacklist(arg ~= "" and arg or nil) end
+        elseif AIP.ToggleBlacklistUI then
             AIP.ToggleBlacklistUI()
+        end
+    elseif cmd == "card" then
+        if AIP.CharCard and AIP.CharCard.ShareMine then
+            AIP.CharCard.ShareMine()
+            AIP.Print("Shared your character card (gear + achievements) with AIP peers.")
         end
     elseif cmd == "promote" then
         if AIP.TogglePromoteUI then

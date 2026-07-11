@@ -2,8 +2,9 @@
 -- SEQUENTIAL per-slot chains: an easier "stepping-stone" item THEN the final BiS,
 -- so the advisor promotes the next upgrade AND where it leads. Item IDs are
 -- web-verified 3.3.5a raid drops / Emblem-of-Frost vendor items (so the links
--- resolve correctly); tier vendor pieces are shown by set name only because
--- their IDs diverge between original 3.3.5a and the 2022 re-release.
+-- resolve correctly). (Earlier comments claimed tier IDs "diverge" between original
+-- 3.3.5a and the 2022 re-release - that was verified FALSE: the 511xx/512xx tier IDs
+-- resolve identically on wowhead.com/wotlk and native 3.3.5a DBs, so links are safe.)
 -- Keyed by AIP.ItemScore archetype. Each chain item = { name, itemID|nil, source, note }.
 
 local AIP = AutoInvitePlus
@@ -108,8 +109,8 @@ B.List.casterHot = B.List.healerCrit
 
 -- Class-aware Sanctified T10 (ilvl 264, 25-Normal) FULL 5-piece sets, keyed by
 -- class then archetype -> { setName, head, shoulders, chest, hands, legs }.
--- IDs are ORIGINAL-3.3.5a values (verified on db.rising-gods.de / cavernoftime -
--- the 511xx range, NOT the 2022 Classic 512xx renumbering). Priest/Druid pending.
+-- IDs verified on wowhead.com/wotlk AND native 3.3.5a DBs (db.rising-gods.de /
+-- cavernoftime) - they agree; the "512xx renumbering" concern is a myth. Priest/Druid pending.
 B.Tier = {
     WARRIOR = {
         strDPS = { "Ymirjar Lord's Battlegear", 51212, 51210, 51214, 51213, 51211 },

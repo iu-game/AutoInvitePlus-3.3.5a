@@ -108,6 +108,34 @@ DB.EventTypes = {
             "wait",         -- number: personal est. wait in seconds
         },
     },
+
+    -- BLACKLIST: one page of a player's shared blacklist (on-demand). Paged because
+    -- of the 255-char message cap; the receiver accumulates pages then prompts.
+    BLACKLIST = {
+        id = "BLACKLIST",
+        name = "Blacklist Share",
+        fields = {
+            "seq",          -- number: page index (1-based)
+            "total",        -- number: total pages
+            "entries",      -- table: array of { n = name, r = reason }
+        },
+    },
+
+    -- CARD: one page of a player's full character card (gear + achievements),
+    -- attached to their LFG listing. Paged for the 255-char cap.
+    CARD = {
+        id = "CARD",
+        name = "Character Card",
+        fields = {
+            "seq",          -- number: page index (1-based)
+            "total",        -- number: total pages
+            "name",         -- string: player name
+            "gs",           -- number: GearScore (page 1 only)
+            "ilvl",         -- number: avg item level (page 1 only)
+            "ach",          -- table: completed achievement ids (page 1 only)
+            "slots",        -- table: array of { s = slotId, i = itemID, e = enchant, g = {gemIds} }
+        },
+    },
 }
 
 -- ============================================================================

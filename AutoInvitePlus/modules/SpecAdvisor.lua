@@ -116,6 +116,25 @@ local function decode(str)
     end
     return out
 end
+SA.Decode = decode   -- exposed so the UI can render a variant build's talent tree
+
+-- Point diff (missing + misplaced) between a decoded/encoded build and the live
+-- build. Used to detect which build variation the player is currently running.
+function SA.DiffBuild(buildStr)
+    if not buildStr then return nil end
+    local rec = decode(buildStr)
+    local live = SA.ReadBuild()
+    local d = 0
+    for tab, tal in pairs(rec) do for idx, want in pairs(tal) do
+        local have = (live[tab] and live[tab][idx]) or 0
+        if want > have then d = d + (want - have) end
+    end end
+    for tab, tal in pairs(live) do for idx, have in pairs(tal) do
+        local want = (rec[tab] and rec[tab][idx]) or 0
+        if have > want then d = d + (have - want) end
+    end end
+    return d
+end
 
 -- Imported builds are stored PER SPEC (class + primary tree) so a build imported
 -- for one spec never diffs wrongly against another.
@@ -189,10 +208,17 @@ function SA.Apply()
                 -- GetTalentInfo: name,icon,tier,column,rank(5),maxRank,isExceptional,meetsPrereq(8)
                 local _, _, _, _, cur, _, _, meets = GetTalentInfo(tab, idx)
                 cur = cur or 0
-                if want > cur and meets then
+                -- Re-check unspent points per call: LearnTalent silently no-ops when
+                -- none are left, so gating here (and confirming the rank actually
+                -- rose below) keeps `learned` from over-counting no-op calls.
+                local avail = (GetUnspentTalentPoints and GetUnspentTalentPoints()) or 0
+                if want > cur and meets and avail > 0 then
                     LearnTalent(tab, idx)
-                    learned = learned + 1
-                    progressed = true
+                    local after = select(5, GetTalentInfo(tab, idx)) or cur
+                    if after > cur then
+                        learned = learned + 1
+                        progressed = true
+                    end
                 end
             end
         end

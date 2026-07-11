@@ -1,6 +1,6 @@
 -- AutoInvite Plus - Post-Pull Report ("how'd that go", foolproof coaching)
 -- Silent during combat; on a real boss pull ending it prints a short summary:
--- duration, your DPS/HPS (READ from Skada/Recount - interop, not a rebuilt
+-- duration, your DPS/HPS (READ from Details!/Skada/Recount - interop, not a rebuilt
 -- meter), avoidable damage you took (from the mechanic spell set), and the
 -- interrupts/dispels you landed. Opt-in (AIP.db.postPull). This is the
 -- highest-value-to-annoyance coaching aid: no in-combat nagging.
@@ -27,6 +27,25 @@ end
 -- ---- meter interop: return (dps, hps) for the player from Skada or Recount ----
 local function readMeters()
     local me = UnitName("player")
+    -- Details! Damage Meter (global `Details` / `_detalhes`). 3.3.5a API verified
+    -- against the Bunny67 backport source: GetCombat(0) = current segment (NOT
+    -- GetCurrentCombat, which is doc-only here); combat:GetActor(attr, name).total /
+    -- combat:GetCombatTime(), with attr 1 = damage, 2 = heal.
+    local D = _G.Details or _G._detalhes
+    if D and D.GetCombat then
+        local ok, dps, hps = pcall(function()
+            local combat = D:GetCombat(0) or D.tabela_vigente
+            if not (combat and combat.GetCombatTime and combat.GetActor) then return nil end
+            local t = combat:GetCombatTime(); if not t or t <= 0 then return nil end
+            local da = combat:GetActor(_G.DETAILS_ATTRIBUTE_DAMAGE or 1, me)
+            local ha = combat:GetActor(_G.DETAILS_ATTRIBUTE_HEAL or 2, me)
+            local d = (da and da.total) and (da.total / t) or nil
+            local h = (ha and ha.total) and (ha.total / t) or nil
+            if d or h then return d, h end
+            return nil
+        end)
+        if ok and dps then return dps, hps end
+    end
     -- Skada (global `Skada`): current set, iterate players, dps = damage/activetime.
     if Skada and Skada.GetSet then
         local ok, dps, hps = pcall(function()
@@ -92,7 +111,7 @@ local function endPull()
         AIP.Print(string.format("  Your DPS: |cFFFFFFFF%s|r%s", fmtNum(dps),
             (hps and hps > 1) and ("   HPS: |cFFFFFFFF" .. fmtNum(hps) .. "|r") or ""))
     else
-        AIP.Print("  (install Skada or Recount for DPS/HPS numbers)")
+        AIP.Print("  (install Details!, Skada or Recount for DPS/HPS numbers)")
     end
     if PP.avoidableDmg > 0 then
         AIP.Print(string.format("  |cFFFF6060Avoidable damage taken:|r %s - watch the ground!", fmtNum(PP.avoidableDmg)))

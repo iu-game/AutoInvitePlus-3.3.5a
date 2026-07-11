@@ -16,9 +16,9 @@ local GUI = AIP.CentralGUI
 -- Configuration
 GUI.Config = {
     defaultWidth = 1000,
-    defaultHeight = 650,
+    defaultHeight = 760,   -- taller default so the Character paperdoll + detail + stats aren't cramped
     minWidth = 800,
-    minHeight = 500,
+    minHeight = 600,       -- keep enough vertical room for the paperdoll columns at min size
     minimizedHeight = 45,  -- Height when minimized (just title bar)
 }
 
@@ -2737,6 +2737,11 @@ function GUI.CreateBrowserTab(container, tabType)
                     GameTooltip:AddLine("This is your enrollment", 0, 1, 0)
                 end
 
+                -- Full shared character card (gear + achievements) if broadcast / self.
+                if AIP.CharCard and AIP.CharCard.AppendToTooltip then
+                    AIP.CharCard.AppendToTooltip(GameTooltip, entry.name, entry.isSelf)
+                end
+
                 GameTooltip:Show()
             end
         end)
@@ -4825,13 +4830,17 @@ function GUI.RefreshBrowserTab(tabType, forceReset)
 
     local count = (tabType == "lfm") and lfmCount or lfgCount
 
-    -- Count filtered items
-    local filteredCount = 0
-    for _, cat in ipairs(treeData) do
-        if cat.children then
-            filteredCount = filteredCount + #cat.children
+    -- Count filtered items (recurse - the LFM tree now nests size sub-groups under
+    -- each category, so leaves can be one level deeper than before).
+    local function countLeaves(nodes)
+        local n = 0
+        for _, node in ipairs(nodes or {}) do
+            if node.isLeaf then n = n + 1
+            elseif node.children then n = n + countLeaves(node.children) end
         end
+        return n
     end
+    local filteredCount = countLeaves(treeData)
 
     -- Show/hide empty state message
     if container.emptyTreeText then
@@ -5152,6 +5161,10 @@ function GUI.UpdateQueuePanel(container)
                     if self.isLocked then
                         GameTooltip:AddLine(" ")
                         GameTooltip:AddLine("|cFFFF4444You are saved to this instance|r", 1, 0.27, 0.27)
+                    end
+                    -- Full shared character card (gear + achievements) if broadcast / self.
+                    if AIP.CharCard and AIP.CharCard.AppendToTooltip then
+                        AIP.CharCard.AppendToTooltip(GameTooltip, e.name, e.isSelf)
                     end
                     GameTooltip:Show()
                 end)
@@ -5928,6 +5941,11 @@ function GUI.DoBroadcast()
                 ilvl = GUI.MyEnrollment.ilvl,
             }
             AIP.DataBus.BroadcastLFG(lfgData)
+            -- Also share the full character card (gear + achievements) so peers can
+            -- see it in this LFG listing without inspecting (gated by the Share card toggle).
+            if (not AIP.db or AIP.db.cardShare ~= false) and AIP.CharCard and AIP.CharCard.ShareMine then
+                AIP.CharCard.ShareMine()
+            end
         end
     end
 end
@@ -8955,7 +8973,10 @@ function GUI.Toggle()
         if GUI.IsMinimized then
             GUI.Frame:SetHeight(GUI.Config.minimizedHeight)
         elseif AIP.db and AIP.db.guiWidth and AIP.db.guiHeight then
-            GUI.Frame:SetSize(AIP.db.guiWidth, AIP.db.guiHeight)
+            -- Clamp a previously-saved size up to the current minimums, so an old
+            -- short saved height gets the new, deeper minimum (fixes cramped panels).
+            GUI.Frame:SetSize(math.max(AIP.db.guiWidth, GUI.Config.minWidth),
+                math.max(AIP.db.guiHeight, GUI.Config.minHeight))
         end
 
         GUI.Frame:Show()

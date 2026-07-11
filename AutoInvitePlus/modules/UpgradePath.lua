@@ -64,14 +64,20 @@ end
 -- Weakest N equipped slots by item level (upgrade priorities).
 function UP.WeakestSlots(n)
     n = n or 4
+    -- A 2H main-hand leaves the off-hand (17) legitimately empty - never flag it
+    -- as an "EMPTY" upgrade priority (mirrors GearAdvisor's mh2H handling).
+    local mh = GetInventoryItemLink("player", 16)
+    local mh2H = mh and select(9, GetItemInfo(mh)) == "INVTYPE_2HWEAPON"
     local rows = {}
     for _, slot in ipairs(SLOTS) do
-        local link = GetInventoryItemLink("player", slot)
-        if link then
-            local ilvl = select(4, GetItemInfo(link)) or 0
-            rows[#rows + 1] = { slot = slot, ilvl = ilvl, link = link }
-        else
-            rows[#rows + 1] = { slot = slot, ilvl = 0, link = nil }  -- empty slot = top priority
+        if not (slot == 17 and mh2H) then
+            local link = GetInventoryItemLink("player", slot)
+            if link then
+                local ilvl = select(4, GetItemInfo(link)) or 0
+                rows[#rows + 1] = { slot = slot, ilvl = ilvl, link = link }
+            else
+                rows[#rows + 1] = { slot = slot, ilvl = 0, link = nil }  -- empty slot = top priority
+            end
         end
     end
     table.sort(rows, function(a, b) return a.ilvl < b.ilvl end)

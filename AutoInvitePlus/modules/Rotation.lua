@@ -116,7 +116,7 @@ local APLS = {
             priority = { "Faerie Fire (armor)", "Mangle (keep bleed buff)", "Rake (keep up)", "Savage Roar (1+ CP)", "Rip at 5 CP", "Shred (build)" },
             pick = function()
                 if not myDebuff("Faerie Fire (Feral)") and ready("Faerie Fire (Feral)") then return "Faerie Fire (Feral)" end
-                if (myDebuff("Mangle (Cat)") or 0) < 1 and ready("Mangle (Cat)") then return "Mangle (Cat)" end
+                if (myDebuff("Mangle") or 0) < 1 and ready("Mangle (Cat)") then return "Mangle (Cat)" end
                 if (myDebuff("Rake") or 0) < 1 and energy() >= 35 then return "Rake" end
                 if combo() >= 1 and (pbuff("Savage Roar") or 0) < 2 then return "Savage Roar" end
                 if combo() >= 5 and (myDebuff("Rip") or 0) < 2 then return "Rip" end
@@ -305,11 +305,12 @@ APLS.MAGE[3] = { label = "Frost Mage",
         return "Frostbolt"
     end }
 APLS.WARLOCK[2] = { label = "Demonology Warlock",
-    priority = { "Immolate (keep up)", "Corruption (keep up)", "Soul Fire on Molten Core", "Shadow Bolt (filler)" },
+    priority = { "Immolate (keep up)", "Corruption (keep up)", "Soul Fire on Decimation (<35%)", "Incinerate on Molten Core", "Shadow Bolt (filler)" },
     pick = function()
         if (myDebuff("Immolate") or 0) < 2 then return "Immolate" end
         if (myDebuff("Corruption") or 0) < 2 then return "Corruption" end
-        if pbuff("Molten Core") then return "Soul Fire" end
+        if pbuff("Decimation") then return "Soul Fire" end   -- <35% execute
+        if pbuff("Molten Core") then return "Incinerate" end -- Molten Core empowers Incinerate, not Soul Fire
         return "Shadow Bolt"
     end }
 APLS.WARLOCK[3] = { label = "Destruction Warlock",
@@ -387,15 +388,16 @@ local PROCS = {
     },
     SHAMAN = { [2] = { { "Maelstrom Weapon", "Lightning Bolt", 5 } } },
     WARLOCK = {
-        [1] = { { "Nightfall", "Shadow Bolt" }, { "Shadow Trance", "Shadow Bolt" } },
-        [2] = { { "Molten Core", "Soul Fire" }, { "Decimation", "Soul Fire" } },
-        [3] = { { "Backdraft", "Incinerate" }, { "Backlash", "Incinerate" } },
+        [1] = { { "Shadow Trance", "Shadow Bolt" } },   -- Nightfall is the talent; the proc buff is Shadow Trance
+        [2] = { { "Molten Core", "Incinerate" }, { "Decimation", "Soul Fire" } },
+        [3] = { { "Backdraft", "Incinerate" }, { "Backlash", "Shadow Bolt" } },  -- Backlash procs instant Shadow Bolt
     },
     PALADIN = { [3] = { { "The Art of War", "Exorcism" } } },
     WARRIOR = { [2] = { { "Bloodsurge", "Slam" } }, [1] = { { "Sudden Death", "Execute" } } },
     DEATHKNIGHT = { [1] = { { "Sudden Doom", "Death Coil" } }, [3] = { { "Sudden Doom", "Death Coil" } } },
     HUNTER = { [3] = { { "Lock and Load", "Explosive Shot" } } },
-    DRUID = { [1] = { { "Eclipse (Lunar)", "Starfire" }, { "Eclipse (Solar)", "Wrath" } } },
+    DRUID = { [1] = { { "Eclipse (Lunar)", "Starfire" }, { "Eclipse (Solar)", "Wrath" } },
+              [2] = { { "Clearcasting", "Shred" } } },   -- feral Omen of Clarity free Shred
     PRIEST = { [2] = { { "Surge of Light", "Flash Heal" } } },
 }
 

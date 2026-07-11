@@ -608,8 +608,8 @@ function TB.BuildLFMTree(preserveState)
                     TB.KnownCategories[catNode.id] = true
                 end
 
-                -- Add each group as a direct child
-                for _, group in ipairs(filteredGroups) do
+                -- Build a leaf node (composition line, colours, decor) for one listing.
+                local function makeLeaf(group)
                     local displayName = group.leader .. " - " .. (group.raid or "?")
 
                     -- Build composition text for second line
@@ -673,7 +673,49 @@ function TB.BuildLFMTree(preserveState)
                         isLocked = group.isLocked,
                     }
                     TB.ApplyListingDecor(groupNode, group)
-                    table.insert(catNode.children, groupNode)
+                    return groupNode
+                end
+
+                -- Split the category into 25-man / 10-man sub-groups (with an
+                -- "Unspecified size" bucket for listings that don't state a size).
+                -- Size comes from the already-parsed raid id (ExtractRaidSize).
+                local byKey = {}
+                for _, group in ipairs(filteredGroups) do
+                    local sz = ExtractRaidSize(group.raid)
+                    local key = (sz == 25 and "25") or (sz == 10 and "10") or "any"
+                    if not byKey[key] then byKey[key] = {} end
+                    table.insert(byKey[key], group)
+                end
+                local sizeLabel = { ["25"] = "25-man", ["10"] = "10-man", ["any"] = "Unspecified size" }
+                local displayOrder = {}
+                for _, k in ipairs({ "25", "10", "any" }) do if byKey[k] then displayOrder[#displayOrder + 1] = k end end
+
+                if #displayOrder <= 1 then
+                    -- Only one size present -> keep the category flat (no redundant level).
+                    for _, group in ipairs(filteredGroups) do
+                        table.insert(catNode.children, makeLeaf(group))
+                    end
+                else
+                    for _, key in ipairs(displayOrder) do
+                        local list = byKey[key]
+                        local sizeNode = {
+                            id = "lfm_" .. category.id .. "_" .. key,
+                            type = "category",
+                            text = sizeLabel[key] .. " (" .. #list .. ")",
+                            count = #list,
+                            icon = TB.Icons.raid,
+                            children = {},
+                            data = category,
+                        }
+                        if not preserveState and not TB.KnownCategories[sizeNode.id] then
+                            TB.TreeData.expandedNodes[sizeNode.id] = true
+                            TB.KnownCategories[sizeNode.id] = true
+                        end
+                        for _, group in ipairs(list) do
+                            table.insert(sizeNode.children, makeLeaf(group))
+                        end
+                        table.insert(catNode.children, sizeNode)
+                    end
                 end
 
                 table.insert(tree, catNode)
@@ -1395,6 +1437,29 @@ function TB.CreateTreeView(parent, width, height)
                     if not n or not n.data then return end
                     if n.type == "group" or n.type == "player" then
                         local group = n.data
+
+                        -- LFG player node: show the shared character card (equipped gear
+                        -- with enchant/gem markers + key achievements) if a peer sent one.
+                        if n.type == "player" then
+                            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                            -- Single source of truth: CC.AppendToTooltip renders the whole
+                            -- recruit card (class-coloured header, grouped gear, achievements)
+                            -- and highlights this player's BEST achievement for the raid this
+                            -- listing targets. Pass the LFG context it can't get from the card.
+                            local targetRaid = group.raid or (group.raids and group.raids[1])
+                            if AIP.CharCard and AIP.CharCard.AppendToTooltip then
+                                AIP.CharCard.AppendToTooltip(GameTooltip, group.name,
+                                    group.name == UnitName("player"),
+                                    { header = true, class = group.class, role = group.role,
+                                      spec = group.spec, raid = targetRaid })
+                            else
+                                GameTooltip:AddLine(group.name or "Player", 1, 0.82, 0)
+                                GameTooltip:AddLine("No shared character card yet.", 0.55, 0.55, 0.6, true)
+                            end
+                            GameTooltip:Show()
+                            return
+                        end
+
                         if group.tanks or group.healers or group.mdps or group.rdps or group.dps then
                             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                             GameTooltip:AddLine(group.leader or group.name or "Group", 1, 0.82, 0)

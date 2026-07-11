@@ -79,7 +79,7 @@ IS.SpecArchetype = {
     MAGE       = { "casterDPS","casterDPS","casterDPS" },
     WARLOCK    = { "casterDPS","casterDPS","casterDPS" },
     PRIEST     = { "healerCrit","healerCrit","casterDPS" },       -- disc/holy heal, shadow dps
-    DRUID      = { "casterDPS","tank","casterHot" },               -- balance / feral(bear-or-cat) / resto
+    DRUID      = { "casterDPS","agiDPS","casterHot" },             -- balance / feral (cat default; Bear form -> tank override below) / resto
     SHAMAN     = { "casterDPS","agiDPS","casterHot" },             -- ele / enh / resto
     PALADIN    = { "healerCrit","tank","strDPS" },                 -- holy / prot / ret
     WARRIOR    = { "strDPS","strDPS","tank" },                     -- arms / fury / prot
@@ -182,7 +182,9 @@ function IS.GetStats(link)
     end
     -- weapon dps (melee/ranged); only bother for weapons
     local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(link)
-    if equipLoc and equipLoc:find("WEAPON") then
+    -- Include ranged/thrown: a hunter's bow/gun is their primary damage source and
+    -- its INVTYPE (INVTYPE_RANGED/RANGEDRIGHT/THROWN) does not contain "WEAPON".
+    if equipLoc and (equipLoc:find("WEAPON") or equipLoc:find("RANGED") or equipLoc == "INVTYPE_THROWN") then
         out.wdps = weaponDPS(link)
     end
     return out
@@ -234,8 +236,10 @@ function IS.Score(stats, scale, cur)
             s = s + eff * w
         end
     end
-    -- Weapon DPS: heavily weighted for physical archetypes.
-    if stats.wdps and (scale.str or scale.agi) then
+    -- Weapon DPS: heavily weighted for physical archetypes. Skip the flat 6.0
+    -- fallback when the active scale already carries an explicit wdps weight
+    -- (an imported Pawn "Dps=" scale, applied in the loop above) - else double-count.
+    if stats.wdps and (scale.str or scale.agi) and not scale.wdps then
         s = s + stats.wdps * 6.0
     end
     return s

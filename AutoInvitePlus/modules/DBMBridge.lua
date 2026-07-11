@@ -68,6 +68,17 @@ function Bridge.OnD4(msg, sender)
     end
 end
 
+-- Tear down any DBM-driven bars now (so toggling the feature OFF takes visible
+-- effect immediately instead of waiting for the bars to expire).
+function Bridge.ClearBars()
+    local rt = RT()
+    if rt and rt.timers then
+        rt.timers["pull"] = nil
+        rt.timers["break"] = nil
+        rt.timers["combatres"] = nil
+    end
+end
+
 -- ----------------------------------------------------------------------------
 -- SEND: drive a pull / break in DBM's format (leader/assist only, to avoid two
 -- people fighting to drive the same bar). Renders locally too.

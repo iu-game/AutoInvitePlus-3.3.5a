@@ -795,13 +795,19 @@ function CS.OnChatMessage(message, author, channel)
 
     if not info then return end
 
-    -- Route to appropriate storage
-    if info.isLFM then
+    -- Route to the correct tree. A message can trip BOTH keyword sets (a solo player's
+    -- "LFG dps, need a spot" also matches the broad "need" LFM keyword), which used to
+    -- add the LFG promotion to BOTH trees - leaking it into the LFM group tree. Resolve
+    -- the ambiguity: a STRONG LFM signal (lfm / lf2m / recruiting / spots) means a real
+    -- group; otherwise an LFG signal means the author is a solo player looking for a group.
+    local strongLFM = AIP.Parsers and AIP.Parsers.IsStrongLFM and AIP.Parsers.IsStrongLFM(message)
+    if strongLFM then
         CS.AddGroup(info)
-    end
-
-    if info.isLFG then
+    elseif info.isLFG then
+        info.isLFM = false          -- it's a player promotion, not a group
         CS.AddPlayer(info)
+    elseif info.isLFM then
+        CS.AddGroup(info)
     end
 end
 

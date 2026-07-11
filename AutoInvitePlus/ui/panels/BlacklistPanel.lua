@@ -506,6 +506,28 @@ function BP.Create(parent)
     statusText:SetText("Total: 0 players")
     frame.statusText = statusText
 
+    -- Share button (broadcast your blacklist to AIP addon peers, on demand)
+    local shareBtn = CreateFrame("Button", nil, statusFrame, "UIPanelButtonTemplate")
+    shareBtn:SetSize(60, 20)
+    shareBtn:SetPoint("RIGHT", -205, 0)
+    shareBtn:SetText("Share")
+    shareBtn:SetScript("OnClick", function()
+        StaticPopupDialogs["AIP_SHARE_BL_PANEL"] = {
+            text = "Share your blacklist with AIP addon peers?\nThey'll each be prompted to merge it (nothing is forced).",
+            button1 = "Share", button2 = "Cancel",
+            OnAccept = function() if AIP.ShareBlacklist then AIP.ShareBlacklist() end end,
+            timeout = 0, whileDead = true, hideOnEscape = true,
+        }
+        StaticPopup_Show("AIP_SHARE_BL_PANEL")
+    end)
+    shareBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Share blacklist", 1, 1, 1)
+        GameTooltip:AddLine("Broadcast your blacklist to AIP peers; each peer chooses whether to merge it (/aip bl accept).", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    shareBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     -- Export button
     local exportBtn = CreateFrame("Button", nil, statusFrame, "UIPanelButtonTemplate")
     exportBtn:SetSize(60, 20)
