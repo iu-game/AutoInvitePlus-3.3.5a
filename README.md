@@ -1,6 +1,6 @@
-# AutoInvite Plus v6.0.0
+# AutoInvite Plus v6.4.0
 
-A comprehensive raid organization suite for World of Warcraft 3.3.5a (WotLK) with LFM/LFG browser, auto-invite system, raid management tools, and loot tracking.
+A comprehensive raid organization suite for World of Warcraft 3.3.5a (WotLK) with an LFM/LFG browser, auto-invite system, raid management & assist tools, loot tracking, and a full character-optimization / coaching suite (gear, spec, rotation, PvE **and** PvP).
 
 ---
 
@@ -15,6 +15,16 @@ Browse and filter groups advertised in chat channels, organized by raid type wit
 Find players looking for groups with class/spec detection and smart filtering.
 
 ![LFG Browser](Screenshots/LFG.png)
+
+### Shared Character Card (LFG)
+Hovering an LFG listing shows the player's shared "recruit card" broadcast with their listing — GearScore/iLvl, full equipped gear with enchant (E) / gem (Gn) markers, and their **best achievement for the raid the listing targets** — all with **zero inspection**.
+
+![LFG Shared Character Card](Screenshots/LFG-shared-info.png)
+
+### Character, Gear & Coaching
+A paperdoll with a rotatable 3D model, live character stats, per-slot upgrade/gem/enchant advice, talent-tree guides, and a next-ability rotation advisor — with a PvE/PvP toggle. Import a Wowhead talent link or a Pawn scale to tune it.
+
+![Character & Coaching](Screenshots/character-info-and-quick-guides.png)
 
 ### Scanned Message Interpretation
 Smart parsing extracts raid type, requirements, GearScore, and "Looking For" specs from chat messages.
@@ -35,6 +45,21 @@ Track loot drops per boss with winner assignment and export functionality.
 Quick promotion tools for raid assist and master looter assignment.
 
 ![Raid Promotion](Screenshots/raid-promotion.png)
+
+### Favorites / Whitelist
+Priority players who skip the queue and bypass some filters, with per-player notes and Import Guild / Import Friends.
+
+![Favorites / Whitelist](Screenshots/favorites.png)
+
+### Composition Advisor
+Gear-tiered raid templates with draggable group placement, role/buff coverage, and mandatory-class gap detection.
+
+![Composition Advisor](Screenshots/raid-composition-helper-draggable-grou-placement.png)
+
+### Blacklist
+Search, filter, and share blacklists with your guild (Simple / Full / CSV), with quick add/remove from browser rows.
+
+![Blacklist](Screenshots/blacklist.png)
 
 ---
 
@@ -94,6 +119,20 @@ Quick promotion tools for raid assist and master looter assignment.
 - **Spec-Aware Detection**: Buffs checked against actual player specs
 - **Raid Member Table**: Scrollable table with class, role, spec, and GearScore
 
+### Character, Gear & Coaching (v6.1–6.4)
+- **Character Panel**: Blizzard-style paperdoll with a rotatable 3D model, live role-aware character stats, and a what-if projection when you tick an upgrade
+- **Gear Advisor**: Ranks the best upgrades from your bags (cap-aware, spec-aware, dual-wield-aware), audits missing enchants and empty gem sockets, and peer-shares your audit over the DataBus (`/aip gear raid`) with zero inspection
+- **Upgrade Path**: Weakest-slot priorities, an avg-iLvl progression recommendation, and scores any shift-clicked item vs what you have equipped
+- **Per-slot Guidance**: Click a slot for curated upgrade items (source + honest drop chance + iLvl), recommended gems, and the recommended enchant — each feeds the live what-if
+- **Spec Advisor**: Reads your build, shows the verified recommended split + glyphs, imports a Wowhead talent string to diff and one-click *learn missing points*
+- **Rotation Advisor**: Live next-ability advisor + movable DPS overlay (instant-proc bar, cooldown bar, DoT-tracker) covering all 30 class/specs; a foolproof "how to play" guide per spec
+- **PvE / PvP Toggle**: Every section (Gear/Spec/Rotation) has a PvP variant — Wrathful arena set, resilience targets, **accurate PvP gemming + enchanting**, PvP talent build preview, and arena play tips
+- **Coaching Modules**: Threat coach (native threat API), pre-pull Readiness check (`/aip check`), Post-pull report (Skada/Recount), and a DBM bridge that renders the raid's pull/break/combat-res timers on AIP bars
+
+### Shared Character Card
+- **Broadcast on Enroll**: Your equipped gear (item + enchant + gem ids) and key achievements are shared over the DataBus with your LFG listing — no inspection needed
+- **Recruit Card Tooltip**: Peers see a clean card on your LFG row: class-coloured header, role/spec, GS/iLvl, grouped gear with E/Gn markers, and your **best achievement for the raid that listing targets**
+
 ### Blacklist & Favorites
 - **Search & Filter**: Find players by name or source
 - **Multiple Sources**: Track where each entry came from
@@ -130,6 +169,14 @@ Quick promotion tools for raid assist and master looter assignment.
 | `/aip rollwindow` | Toggle the roll window |
 | `/aip rw` | Announce reserved loot to the raid |
 | `/aip bar` | Toggle the floating loot bar |
+| `/aip gear` | Best upgrades from your bags + enchant/gem audit (`/aip gear raid` shares it) |
+| `/aip upgrade` | Weakest slots + progression; score a shift-clicked item |
+| `/aip spec` | Recommended build/glyphs; import a Wowhead talent string |
+| `/aip rotation` | Toggle the live rotation advisor + DPS overlay |
+| `/aip check` | Pre-pull readiness check (flask/food/durability/talents) |
+| `/aip pull` / `/aip break` | Broadcast a pull/break timer (DBM-compatible) |
+| `/aip postpull` | Post-boss DPS/HPS report (Skada/Recount) |
+| `/aip update` | Run the in-game update checker |
 | `/aip status` | Show current addon state |
 | `/aip help` | List all commands |
 
@@ -269,6 +316,28 @@ Customize automatic whisper responses:
 
 ## Changelog
 
+### v6.4.0
+- **Data-accuracy audit**: validated the character-optimization data against WotLK 3.3.5a sources — fixed the Balance-druid hit cap, Dislodged Foreign Object normal/heroic IDs, a mis-credited trinket boss, an ArP conversion note, and corrected a false "tier-ID renumbering" assumption. Verified clean: all glyph/gem/enchant/consumable IDs, ~120 BiS/upgrade IDs, the dispel matrix, proc names, and talent-string sums
+- **Rotation/logic fixes**: feral cat druids no longer scored/guided as tanks, hunter ranged-weapon DPS is now counted, 2H users no longer get a false "Off Hand: EMPTY", the Demo warlock proc (Molten Core → Incinerate) and a feral Mangle debuff check were corrected, and the Saurfang Blood Beasts call-out now reflects their 95% AoE resistance
+- **Accurate PvP gems & enchants** for every spec (verified Season 8 data) in the Character panel's PvP view
+- **Redesigned LFG character card** with a class-coloured header, grouped gear, and the **best achievement for the raid the listing targets**
+- **Fixed** LFG player promotions leaking into the LFM group tree (keyword-ambiguity routing)
+
+### v6.3.0
+- **Dungeon Finder watcher**: tracks the RDF queue with realtime polling, auto-requeue, and peer-share
+- Gear-scoring fix, UI theme polish, and full-addon audit fixes
+
+### v6.2.0
+- **Coaching suite**: threat coach, readiness, gear/spec/rotation advisors
+- **Character panel redesign**: paperdoll + 3D model, rotation overlay with spec icons, 3-tab raid loot, VOA alerts
+- Full-addon audit fixes
+
+### v6.1.x
+- **Raid assist suite**: buff delegation, self debuff/curse announcer, auto mechanic announcer, and DBM-verified countdown timer bars
+- **Gear-tiered composition** advisor (Entry/Standard/Farm variations)
+- **In-game update checker** (peer version broadcast over the DataBus)
+- Loot accuracy, mechanic timing, and timer-bar polish
+
 ### v6.0.0
 - **Raid Tools**: New loot roll system with countdown, automatic `/roll` capture, and sorted winners
 - **Roll Window**: Dedicated UI to start rolls on linked items and watch results live
@@ -319,7 +388,7 @@ Customize automatic whisper responses:
 
 ## Support
 
-Report issues at: https://github.com/iugames/autoinviteplus/issues
+Report issues at: https://github.com/iu-game/AutoInvitePlus-3.3.5a/issues
 
 ---
 
