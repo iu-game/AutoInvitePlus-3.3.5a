@@ -244,17 +244,16 @@ end
 RT.KnownDebuffs = {
     -- ===== Icecrown Citadel =====
     ["Impaled"]                  = "DPS free me - bone spike!",   -- Marrowgar
-    ["Coldflame"]                = "move out of the flame!",       -- Marrowgar
     ["Death and Decay"]          = "move out!",                    -- Lady Deathwhisper
     ["Curse of Torpor"]          = "decurse me!",                  -- Lady Deathwhisper
     ["Rune of Blood"]            = "tank hit - heal me up!",       -- Saurfang
     ["Mark of the Fallen Champion"] = "keep me topped off!",      -- Saurfang
     ["Boiling Blood"]            = "dot on me - heal!",            -- Saurfang
-    ["Gastric Bloat"]            = "stop - swap eaters!",          -- Festergut
+    ["Gastric Bloat"]            = "tank swap before 10 stacks!",  -- Festergut (10 stacks = Gastric Explosion)
     ["Gas Spore"]                = "share spore with group!",      -- Festergut
     ["Mutated Infection"]        = "move away from raid, then dispel me!", -- Rotface
     ["Vile Gas"]                 = "spread - vile gas!",           -- Rotface / Putricide
-    ["Volatile Ooze Adhesive"]   = "run! ranged stack on me!",     -- Putricide
+    ["Volatile Ooze Adhesive"]   = "rooted - raid STACK ON ME to split the eruption!", -- Putricide (70447 roots the target)
     ["Gaseous Bloat"]            = "run - lead the gas cloud away from raid!", -- Putricide
     ["Unbound Plague"]           = "pass it - run to partner!",    -- Putricide
     ["Mutated Plague"]           = "tank - stacking, swap soon!",  -- Putricide
@@ -264,7 +263,7 @@ RT.KnownDebuffs = {
     ["Pact of the Darkfallen"]   = "stack with linked players!",   -- Blood Queen
     ["Frenzied Bloodthirst"]     = "bite a DPS now!",              -- Blood Queen
     ["Uncontrollable Frenzy"]    = "mind-controlled until death - raid KILL me!", -- Blood Queen
-    ["Shadow Prison"]            = "STOP MOVING!",                 -- Blood Queen
+    ["Shadow Prison"]            = "STOP MOVING!",                 -- Blood Prince Council (heroic)
     ["Mystic Buffet"]            = "hide behind an Ice Tomb to drop your stacks!", -- Sindragosa
     ["Unchained Magic"]          = "slow casts - watch Instability!", -- Sindragosa
     ["Instability"]              = "STOP casting NOW!",            -- Sindragosa
@@ -279,60 +278,50 @@ RT.KnownDebuffs = {
     -- ===== Ruby Sanctum =====
     ["Fiery Combustion"]         = "move out + dispel me!",        -- Halion
     ["Soul Consumption"]         = "spread - then dispel me!",     -- Halion
-    ["Mark of Combustion"]       = "move out + dispel me!",        -- Halion
 
     -- ===== Trial of the Crusader =====
     ["Paralytic Toxin"]          = "get Burning Bile to cleanse!", -- Acidmaw
     ["Burning Bile"]             = "cleanse a poisoned ally!",     -- Dreadscale
     ["Impale"]                   = "tank - stacking!",            -- Gormok
-    ["Fire Bomb"]                = "move - drop fire away!",       -- Gormok snobold
     ["Legion Flame"]             = "move away from raid!",         -- Jaraxxus
     ["Incinerate Flesh"]         = "burst heal / absorb me!",      -- Jaraxxus
-    ["Pursue"]                   = "boss chasing me - make way!",  -- Anub'arak
+    ["Pursued by Anub'arak"]     = "spikes chasing me - I kite to permafrost, make way!", -- Anub'arak (aura 67574)
     ["Penetrating Cold"]         = "heal me - cold!",              -- Anub'arak
 
     -- ===== Ulduar =====
     ["Slag Pot"]                 = "in pot - heal me!",            -- Ignis
-    ["Flame Jets"]               = "STOP casting!",                -- Ignis
-    ["Devouring Flame"]          = "move out!",                    -- Razorscale
     ["Gravity Bomb"]             = "move away from raid!",         -- XT-002
     ["Searing Light"]            = "move away from raid!",         -- XT-002
     ["Static Disruption"]        = "spread out!",                  -- Assembly of Iron
     ["Rune of Death"]            = "move out!",                    -- Assembly of Iron
-    ["Overwhelming Power"]       = "tank - run out at expire!",    -- Steelbreaker
+    ["Overwhelming Power"]       = "I EXPLODE when this expires - everyone 20yd away from me!", -- Steelbreaker (Meltdown kills the bearer)
     ["Stone Grip"]               = "DPS free me!",                 -- Kologarn
-    ["Focused Eyebeam"]          = "move - eyebeam on me!",        -- Kologarn
     ["Flash Freeze"]             = "frozen in ice - allies break me out fast!", -- Hodir
     ["Biting Cold"]              = "keep moving - stacks while you stand still!", -- Hodir
     ["Iron Roots"]               = "DPS free me!",                 -- Freya
     ["Nature's Fury"]            = "move away from raid!",         -- Freya
-    ["Rocket Strike"]            = "MOVE - rocket!",               -- Mimiron
     ["Napalm Shell"]             = "spread - ranged!",             -- Mimiron
     ["Mark of the Faceless"]     = "move away from raid!",         -- Vezax
     ["Malady of the Mind"]       = "run out - fear!",              -- Yogg-Saron
     ["Brain Link"]               = "stay near linked player!",     -- Yogg-Saron
     ["Phase Punch"]              = "tank - phasing, swap!",        -- Algalon
-    ["Cosmic Smash"]             = "move off the marker!",         -- Algalon
 
     -- ===== Naxxramas =====
     ["Web Wrap"]                 = "DPS free me!",                 -- Maexxna
     ["Necrotic Poison"]          = "cleanse me!",                  -- Maexxna
     ["Curse of the Plaguebringer"] = "decurse me!",               -- Noth
-    ["Decrepit Fever"]           = "cure me - spread out!",        -- Heigan
+    ["Decrepit Fever"]           = "cure my disease!",             -- Heigan (does not spread player-to-player)
     ["Mutating Injection"]       = "move out, then dispel me!",    -- Grobbulus
     ["Mark of Korth'azz"]        = "swap sides - stacking!",       -- Four Horsemen
     ["Mark of Blaumeux"]         = "swap sides - stacking!",       -- Four Horsemen
     ["Mark of Rivendare"]        = "swap sides - stacking!",       -- Four Horsemen
     ["Mark of Zeliek"]           = "swap sides - stacking!",       -- Four Horsemen
-    ["Frost Blast"]              = "frozen - others spread!",      -- Kel'Thuzad
-
-    -- ===== Vault of Archavon =====
-    ["Overcharge"]               = "move away - overcharged!",     -- Emalon
+    ["Frost Blast"]              = "frozen - others spread, healers BURST-HEAL me!", -- Kel'Thuzad
 
     -- ===== 5-man dungeons (ICC / heroics) =====
     ["Mirrored Soul"]            = "STOP DPS - reflects to me!",   -- Devourer of Souls (FoS)
     ["Overlord's Brand"]         = "branded - mirrors damage!",    -- Tyrannus (PoS)
-    ["Pursuit"]                  = "chased - kite the boss!",      -- Krick (PoS)
+    ["Pursuit"]                  = "chased - kite the boss!",      -- Ick (PoS)
     ["Insanity"]                 = "kill the phantoms!",           -- Herald Volazj (Old Kingdom)
 }
 
@@ -341,7 +330,7 @@ local DEBUFF_MIN_INTERVAL = 2  -- seconds between re-announces of the same debuf
 
 -- Dispel call-out: the action verb plus the classes that can actually remove
 -- this debuff type in WotLK (3.3.5a). Friendly-dispel matrix (verified):
---   Magic   -> Priest, Paladin                (Shaman's Purge is offensive-only)
+--   Magic   -> Priest, Paladin, Felhunter     (Shaman's Purge is offensive-only)
 --   Curse   -> Mage, Druid, Shaman
 --   Poison  -> Druid, Paladin, Shaman
 --   Disease -> Priest, Paladin, Shaman
@@ -351,7 +340,7 @@ local function debuffDispelVerb(dtype)
     if dtype == "Curse" then return "DECURSE me! (Mage/Druid/Shaman)"
     elseif dtype == "Poison" then return "CLEANSE poison off me! (Druid/Pala/Shaman)"
     elseif dtype == "Disease" then return "CURE disease on me! (Priest/Pala/Shaman)"
-    elseif dtype == "Magic" then return "DISPEL magic off me! (Priest/Pala)"
+    elseif dtype == "Magic" then return "DISPEL magic off me! (Priest/Pala/Felhunter)"
     else return nil end
 end
 
@@ -435,7 +424,7 @@ RT.MechanicSpells = {
     ["Bone Spike Graveyard"] = "Bone Spike - DPS the impaled players free!",
     ["Death and Decay"]      = "move out of Death and Decay (the ground pool)!",
     ["Dominate Mind"]        = "Mind Control - crowd-control the charmed player!",
-    ["Blood Beasts"]         = "Blood Beasts up - SLOW/root & single-target them (95% AoE-resistant); ranged kill them!",
+    ["Call Blood Beast"]     = "Blood Beasts up - SLOW/root & single-target them (95% AoE-resistant); ranged kill them!",
     ["Pungent Blight"]       = "Pungent Blight - spore stacks reset (Festergut)!",
     ["Malleable Goo"]        = "Malleable Goo thrown - dodge the green blob!",
     ["Choking Gas Bomb"]     = "Gas Bombs dropped - move out of the gas!",
@@ -446,6 +435,7 @@ RT.MechanicSpells = {
     ["Bloodbolt Whirl"]      = "Bloodbolt Whirl - spread out (hits nearby players)!",
     ["Frost Breath"]         = "Frost Breath on the tank - do NOT stand in front of Sindragosa!",
     ["Blistering Cold"]      = "Blistering Cold - run 25yd AWAY from Sindragosa NOW!",
+    ["Icy Grip"]             = "Icy Grip - pulled in! Run 25yd AWAY from Sindragosa NOW!",  -- DBM keys the warning here (70117); Blistering Cold logs too late
     ["Defile"]               = "Defile - move OUT of the black circle (it grows if stood in)!",
     ["Soul Reaper"]          = "Soul Reaper on the tank - healers big cooldown!",
     ["Remorseless Winter"]   = "Transition - spread, dodge Ice Spheres, kill Raging Spirits!",
@@ -461,30 +451,29 @@ RT.MechanicSpells = {
     ["Rocket Strike"]        = "Rockets incoming - move off the target lines!",
     ["Plasma Blast"]         = "Plasma Blast - tank pop a big cooldown!",
     ["Shock Blast"]          = "Shock Blast - get OUT of melee range of Leviathan Mk II!",
-    ["Frost Bomb"]           = "Frost Bomb - destroy it before it detonates!",
+    ["Frost Bomb"]           = "Frost Bomb landing - move away before it explodes (it also clears the fires)!",
     ["Saronite Vapors"]      = "Saronite Vapors up - careful, they heal mana but hurt (Vezax)!",
     ["Shadow Crash"]         = "Shadow Crash - move out of the shadow void zone!",
-    ["Death Ray"]            = "Death Ray - move out of its path!",
-    ["Flash Freeze"]         = "Flash Freeze - spread and get to a Snowpack/marker (Hodir)!",
-    ["Nature Bomb"]          = "Nature Bombs up - destroy them before they explode (Freya)!",
+    ["Flash Freeze"]         = "Flash Freeze - get onto a Snow Drift NOW (Hodir)!",
+    ["Nature Bomb"]          = "Nature Bombs down - move away before they explode (Freya)!",
     -- ===== Trial of the (Grand) Crusader =====
     ["Fire Bomb"]            = "Fire Bombs dropping - move out of the fire!",
-    ["Massive Crash"]        = "Massive Crash - run away from Icehowl (charge incoming)!",
+    ["Massive Crash"]        = "Massive Crash - glared player: sidestep the charge at the LAST second so Icehowl hits the wall!",
     ["Nether Power"]         = "Nether Power - dispel the magic buff OFF Jaraxxus!",
     ["Legion Flame"]         = "Legion Flame - marked player runs it away (leaves a fire trail)!",
     ["Incinerate Flesh"]     = "Incinerate Flesh - burst-heal the target before it blows!",
     -- ===== Naxxramas =====
     ["Mutating Injection"]   = "Mutating Injection - move out, THEN get dispelled (spawns cloud+slime)!",
-    ["Frost Blast"]          = "Frost Blast - a player is encased, break them out fast!",
+    ["Frost Blast"]          = "Frost Blast - player frozen (not attackable), healers BURST-HEAL them through it!",
     ["Polarity Shift"]       = "Polarity Shift - group with players of your SAME charge (+/-)!",
     ["Shadow Fissure"]       = "Shadow Fissure - move out of the purple void zone!",
     -- ===== Obsidian Sanctum / Eye of Eternity / Onyxia / VoA =====
-    ["Flame Tsunami"]        = "Flame Tsunami - jump/move over the lava wave!",
-    ["Surge of Power"]       = "Surge of Power - spread out / get to max range!",
+    ["Flame Tsunami"]        = "Flame Tsunami - move into a GAP between the lava waves!",
+    ["Surge of Power"]       = "Surge of Power - targeted drake riders use Flame Shield (drake button 5)!",
     ["Vortex"]               = "Vortex - raid pulled in and takes damage, heal up!",
-    ["Deep Breath"]          = "Deep Breath - Onyxia is about to breathe, clear the middle NOW!",
+    ["Breath"]               = "Deep Breath - Onyxia is about to breathe, clear the middle NOW!",  -- 3.3.5a logs the cast as "Breath" (17086 family)
     ["Bellowing Roar"]       = "Bellowing Roar = FEAR - use Tremor Totem / Fear Ward / Berserker Rage!",
-    ["Overcharge"]           = "Overcharge - move away from the overcharged player!",
+    ["Overcharge"]           = "Overcharge - switch DPS, kill the Overcharged Tempest Minion before 10 stacks!",
 }
 
 -- Boss emote substrings (lowercased) -> short call-out. Only matched against the
@@ -493,10 +482,15 @@ RT.MechanicSpells = {
 -- "frenzy" / "channel" / "submerge" there caused false call-outs. Keep every
 -- phrase here specific enough that essentially only the intended boss emits it.
 RT.BossEmotes = {
-    ["inhales deeply"] = "Festergut inhales - Gas Spore soon, get into a group!",    -- Festergut
-    ["frost beacon"]   = "Frost Beacon on a player - Ice Tomb incoming, clear away!", -- Sindragosa
-    ["deep breath"]    = "Deep Breath - Onyxia is about to breathe, clear the middle!", -- Onyxia
-    ["fixate"]         = "boss is fixating on a player - kite it, don't face-tank it!", -- Blood Queen / adds
+    -- Substrings verified against the 3.3.5a creature_text raid-boss emotes
+    -- (AzerothCore DB / DBM-Warmane localization triggers). The old triggers
+    -- ("inhales deeply", "frost beacon", "fixate") do not exist as
+    -- RAID_BOSS_EMOTE text on this client and could never fire.
+    ["releases gas spores"]       = "Gas Spores out - group up to share the damage (Festergut)!",        -- "%s releases Gas Spores!"
+    ["fires a frozen orb"]        = "Frost Bomb incoming - move away from the marked spot (Sindragosa)!", -- "%s fires a frozen orb towards $n!" (air phase)
+    ["deep breath"]               = "Deep Breath - Onyxia is about to breathe, clear the middle!",        -- "... takes a deep breath"
+    ["shadows amass and swarm"]   = "Swarming Shadows - move the trail away from the raid (Blood-Queen)!", -- "Shadows amass and swarm around $n!"
+    ["spikes pursue"]             = "Impale spikes chasing a player - run toward permafrost, make way (Anub'arak)!", -- "%s's spikes pursue $n!"
 }
 
 -- ============================================================================
@@ -533,7 +527,7 @@ RT.MechanicClassDuties = {
     },
     -- Deathbringer Saurfang: Blood Beasts have Resistant Skin -> single-target
     -- SLOW/CC them off the healers, do NOT try to AoE them down.
-    ["Blood Beasts"] = {
+    ["Call Blood Beast"] = {
         {class = "MAGE",        action = "Frost Nova / slow the Blood Beasts off healers!"},
         {class = "DEATHKNIGHT", action = "Chains of Ice / Death Grip the Blood Beasts!"},
         {class = "HUNTER",      action = "Frost Trap / Concussive the Blood Beasts!"},
@@ -569,7 +563,7 @@ RT.MechanicClassDuties = {
         {class = "PALADIN", action = "Hand of Protection wipes the bleed (or tank-swap)!"},
     },
     ["Pursue"] = {  -- Anub'arak spike fixate -> HoP nullifies the spike hit
-        {class = "PALADIN", action = "Hand of Protection the pursued player (blocks the spike)!"},
+        {class = "PALADIN", action = "Hand of Protection the pursued player (blocks the spike damage - they STILL kite to permafrost)!"},
     },
 
     -- ===== Ulduar — Assembly of Iron (Fusion Punch leaves a MAGIC DoT on tank) =====
@@ -581,14 +575,15 @@ RT.MechanicClassDuties = {
 
     -- ===== Naxxramas =====
     ["Chains of Kel'Thuzad"] = MC_CC,  -- P2 mind control -> CC the charmed player
-    ["Mutating Injection"] = {  -- Grobbulus: MAGIC, dispel ONLY after they run out
-        {class = "PRIEST",  action = "Dispel it AFTER they run 20yd out!"},
+    ["Mutating Injection"] = {  -- Grobbulus: DISEASE (28169), remove ONLY after they run out
+        {class = "PRIEST",  action = "Abolish Disease it AFTER they run 20yd out!"},
         {class = "PALADIN", action = "Cleanse it AFTER they run 20yd out!"},
+        {class = "SHAMAN",  action = "Cure Toxins it AFTER they run 20yd out!"},
     },
     ["Necrotic Poison"] = {  -- Maexxna: Poison -> Druid/Paladin/Shaman
         {class = "DRUID",   action = "Abolish Poison off the tank!"},
         {class = "PALADIN", action = "Cleanse the poison off the tank!"},
-        {class = "SHAMAN",  action = "Poison Cleansing Totem by the tank!"},
+        {class = "SHAMAN",  action = "Cleansing Totem by the tank!"},  -- 3.3.5a merged totem (8170)
     },
     ["Curse of the Plaguebringer"] = {  -- Noth: Curse, explodes if not removed
         {class = "MAGE",   action = "Remove Curse fast (raid-wide blast if not)!"},
@@ -598,7 +593,7 @@ RT.MechanicClassDuties = {
     ["Decrepit Fever"] = {  -- Heigan: Disease -> Priest/Paladin/Shaman
         {class = "PRIEST",  action = "Abolish Disease it!"},
         {class = "PALADIN", action = "Cleanse the disease!"},
-        {class = "SHAMAN",  action = "Disease Cleansing Totem!"},
+        {class = "SHAMAN",  action = "Cleansing Totem!"},  -- 3.3.5a merged totem (8170)
     },
 
     -- ===== Onyxia — Bellowing Roar (Physical fear: prevent/break, can't dispel) =====
@@ -631,60 +626,59 @@ RT.AbilityTimers = {
     ["Rune of Blood"]          = 20,    -- Saurfang (72410)
     ["Boiling Blood"]          = 16,    -- Saurfang (72385)
     ["Blood Nova"]             = 20,    -- Saurfang (72378)
-    ["Gas Spore"]              = 40,    -- Festergut (69279)
-    ["Vile Gas"]               = 30,    -- Rotface (72272)
+    ["Gas Spore"]              = 44,    -- Festergut (69279; DBM variable ~40.6-50.3)
+    ["Vile Gas"]               = 30,    -- Festergut 69240 / Rotface heroic (variable ~28-36)
     ["Slime Spray"]            = 21,    -- Rotface (69508)
     ["Unstable Experiment"]    = 38,    -- Putricide (70351)
     ["Choking Gas Bomb"]       = 35,    -- Putricide (71255)
-    ["Malleable Goo"]          = 25,    -- Putricide (72295)
-    ["Shock Vortex"]           = 17,    -- Blood Prince Council (72037)
-    ["Empowered Shock Vortex"] = 17,    -- Blood Prince Council
+    ["Malleable Goo"]          = 20,    -- Putricide (72295; DBM fixed 20)
+    ["Shock Vortex"]           = 18,    -- Blood Prince Council (72037; DBM 18.2)
+    ["Empowered Shock Vortex"] = 30,    -- Blood Prince Council (DBM: 30, first ~15)
     ["Pact of the Darkfallen"] = 30,    -- Lana'thel (71340)
     ["Swarming Shadows"]       = 30,    -- Lana'thel (71266)
     ["Frost Breath"]           = 22,    -- Sindragosa (69649)
-    ["Unchained Magic"]        = 30,    -- Sindragosa (69762)
+    ["Unchained Magic"]        = 32,    -- Sindragosa (69762)
     ["Blistering Cold"]        = 67,    -- Sindragosa (70123)
     ["Defile"]                 = 33,    -- Lich King (72762)
     ["Soul Reaper"]            = 30,    -- Lich King (69409)
     ["Infest"]                 = 22,    -- Lich King (70541)
     ["Necrotic Plague"]        = 30,    -- Lich King (70337)
     ["Vile Spirits"]           = 30,    -- Lich King (70498)
-    ["Harvest Soul"]           = 75,    -- Lich King heroic (68980)
+    ["Harvest Soul"]           = 75,    -- Lich King NORMAL (68980); heroic Harvest Souls cycles ~105s
 
     -- ===== Ulduar =====
-    ["Flame Jets"]             = 24,    -- Ignis (63472)
-    ["Devouring Flame"]        = 21,    -- Razorscale (64021)
-    ["Tympanic Tantrum"]       = 61,    -- XT-002 (62776)
-    ["Overload"]               = 70,    -- Assembly of Iron (63481)
-    ["Rune of Death"]          = 47,    -- Assembly of Iron (63490)
+    ["Flame Jets"]             = 45,    -- Ignis (63472; DBM 45 on 25m / 41.5 on 10m)
+    ["Tympanic Tantrum"]       = 60,    -- XT-002 (62776; 60 on 25m, ~35 on 10m normal)
+    ["Overload"]               = 60,    -- Assembly of Iron (63481)
+    ["Rune of Death"]          = 30,    -- Assembly of Iron (63490)
     ["Focused Eyebeam"]        = 18,    -- Kologarn (63346)
-    ["Stone Grip"]             = 20,    -- Kologarn (64292)
-    ["Flash Freeze"]           = 50,    -- Hodir (61968)
-    ["Iron Roots"]             = 14,    -- Freya (62438)
+    ["Stone Grip"]             = 25,    -- Kologarn (64292)
+    ["Flash Freeze"]           = 48,    -- Hodir (61968)
+    ["Iron Roots"]             = 30,    -- Freya (62438; 30 on 25m / 60 on 10m; 14 was only the pull opener)
     ["Rocket Strike"]          = 20,    -- Mimiron (64402)
     ["Shock Blast"]            = 35,    -- Mimiron (63631)
     ["Plasma Blast"]           = 30,    -- Mimiron (64529)
     ["Shadow Crash"]           = 10,    -- General Vezax (62660)
-    ["Mark of the Faceless"]   = 20,    -- General Vezax (63276)
-    -- Yogg-Saron's Malady of the Mind (63830) and Brain Link (63802) are
-    -- brain-phase-gated with no steady cadence - DBM keeps their CD timers
-    -- commented out for exactly this reason, so a fixed countdown here would be
-    -- misleading. They still fire a debuff call-out via RT.KnownDebuffs.
+    ["Mark of the Faceless"]   = 36,    -- General Vezax (63276; variable ~35-45)
+    -- Yogg-Saron's Malady of the Mind (63830) and Brain Link (63802): DBM-Warmane
+    -- ships variable CD timers (18.7s / 23s) that stall across portal phases; a
+    -- fixed countdown here would drift badly, so we deliberately show none.
+    -- They still fire a debuff call-out via RT.KnownDebuffs.
     ["Cosmic Smash"]           = 25,    -- Algalon (64596)
     ["Phase Punch"]            = 16,    -- Algalon (64412)
     ["Big Bang"]               = 90,    -- Algalon (64584)
 
     -- ===== Trial of the (Grand) Crusader =====
-    ["Massive Crash"]          = 55,    -- Icehowl (66683)
+    ["Massive Crash"]          = 63,    -- Icehowl (66683; DBM 63.4)
     ["Legion Flame"]           = 30,    -- Jaraxxus (66197)
-    ["Nether Power"]           = 42,    -- Jaraxxus (67009)
-    ["Incinerate Flesh"]       = 23,    -- Jaraxxus (66237)
+    ["Nether Power"]           = 45,    -- Jaraxxus (67009)
+    ["Incinerate Flesh"]       = 30,    -- Jaraxxus (66237)
 
     -- ===== Ruby Sanctum =====
-    ["Fiery Combustion"]       = 30,    -- Halion (74562)
+    ["Fiery Combustion"]       = 25,    -- Halion (74562)
     ["Meteor Strike"]          = 40,    -- Halion (74648)
-    ["Twilight Cutter"]        = 15,    -- Halion (74769)
-    ["Soul Consumption"]       = 25,    -- Halion (74792)
+    ["Twilight Cutter"]        = 30,    -- Halion (74769; effective cast-to-cast ~30 incl. 5s cast + beam)
+    ["Soul Consumption"]       = 20,    -- Halion (74792)
 
     -- ===== Vault of Archavon =====
     ["Overcharge"]             = 45,    -- Emalon (64218)
@@ -700,8 +694,9 @@ RT.AbilityTimers = {
 
     -- ===== Naxxramas =====
     ["Polarity Shift"]         = 30,    -- Thaddius (28089)
-    ["Frost Blast"]            = 35,    -- Kel'Thuzad (27808)
-    ["Mutating Injection"]     = 15,    -- Grobbulus (28240 cloud cadence)
+    ["Frost Blast"]            = 38,    -- Kel'Thuzad (27808; DBM variable ~34.8-42.7)
+    -- Mutating Injection has NO fixed injection cadence in DBM-Warmane (the old
+    -- 15s bar matched nothing); the debuff call-out covers it instead.
 
     -- 5-man dungeons: WotLK has no authoritative recast-timer source and the
     -- fights are short, so dungeon mechanics rely on the mechanic/debuff
@@ -713,16 +708,21 @@ RT.bossHpSeen = {}      -- guid -> {threshold = true}
 RT.lastRaidHealthWarn = 0
 
 -- Emit a mechanic call-out through the configured channel.
+-- Chat-channel delivery is leader-gated exactly like EmitClassDuties: when
+-- several raiders run the addon with a RAID/RW channel configured, only the
+-- leader/assist broadcasts - everyone else gets the personal heads-up. This
+-- was the one announcer path missing the gate, and it multiplied every cast/
+-- emote/HP call-out once per addon user.
 function RT.EmitMechanic(text)
     if not text or text == "" then return end
     local channel = (AIP.db and AIP.db.mechanicAnnounceChannel) or "SELF"
-    if channel == "SELF" then
+    if channel ~= "SELF" and RT.CanBroadcast() then
+        RT.Send(text, channel)
+    else
         if RaidNotice_AddMessage and RaidWarningFrame and ChatTypeInfo then
             RaidNotice_AddMessage(RaidWarningFrame, text, ChatTypeInfo["RAID_WARNING"])
         end
         if AIP.Print then AIP.Print("|cFFFF6600[Mechanic]|r " .. text) end
-    else
-        RT.Send(text, channel)
     end
 end
 
@@ -857,17 +857,21 @@ function RT.OnMechanicHealth(uId)
     if uId ~= "target" and uId ~= "focus" then return end
     if not UnitExists(uId) or UnitIsDead(uId) or not UnitCanAttack("player", uId) then return end
     -- Boss-level only: skull level (-1) or worldboss/rareelite classification.
-    -- 5-man dungeon bosses are plain "elite" at a numeric level, so also accept an
-    -- at/above-level elite while inside a PvE instance (throttled per-GUID below).
+    -- 5-man dungeon bosses are plain "elite" at a numeric level, so also accept
+    -- an at/above-level elite - but ONLY with a boss-sized health pool. Plain
+    -- classification matching made every elite TRASH mob you targeted fire
+    -- "<name> at 35%!" (trash is "elite" at level 80+ too); bosses dwarf trash,
+    -- so require ~8x the player's max health as the tiebreaker.
     local lvl = UnitLevel(uId)
     local cls = UnitClassification(uId)
+    local maxHP = UnitHealthMax(uId)
+    if not maxHP or maxHP == 0 then return end
     local isBoss = (lvl == -1) or cls == "worldboss" or cls == "rareelite"
-    if not isBoss and cls == "elite" and RT.InPveInstance() and (lvl or 0) >= (UnitLevel("player") or 80) then
+    if not isBoss and cls == "elite" and (lvl or 0) >= (UnitLevel("player") or 80)
+        and maxHP >= ((UnitHealthMax("player") or 20000) * 8) then
         isBoss = true
     end
     if not isBoss then return end
-    local maxHP = UnitHealthMax(uId)
-    if not maxHP or maxHP == 0 then return end
     local pct = UnitHealth(uId) / maxHP * 100
     local guid = UnitGUID(uId)
     if not guid then return end
