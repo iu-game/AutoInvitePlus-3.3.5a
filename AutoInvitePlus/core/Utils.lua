@@ -102,7 +102,8 @@ function AIP.InstrumentAll()
         AIP = AIP, Utils = AIP.Utils, Parsers = AIP.Parsers, DataBus = AIP.DataBus,
         ChatScanner = AIP.ChatScanner, InspectionEngine = AIP.InspectionEngine,
         Composition = AIP.Composition, Roster = AIP.Roster, RaidSession = AIP.RaidSession,
-        Integrations = AIP.Integrations, MessageComposer = AIP.MessageComposer, RaidTools = AIP.RaidTools,
+        Integrations = AIP.Integrations, LFMFormat = AIP.LFMFormat, RaidTools = AIP.RaidTools,
+        ChatGate = AIP.ChatGate, Weekly = AIP.Weekly,
         GroupTracker = AIP.GroupTracker, LFMBrowser = AIP.LFMBrowser, TestData = AIP.TestData,
         CentralGUI = AIP.CentralGUI, TreeBrowser = AIP.TreeBrowser, UI = AIP.UI,
     }

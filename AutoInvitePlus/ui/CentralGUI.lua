@@ -1772,6 +1772,12 @@ function GUI.CreateBrowserTab(container, tabType)
     lockoutIndicator:Hide()
     container.lockoutIndicator = lockoutIndicator
 
+    -- Weekly raid quest badge (shows which weekly a listing satisfies)
+    local weeklyIndicator = detContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    weeklyIndicator:SetPoint("LEFT", lockoutIndicator, "RIGHT", 6, 0)
+    weeklyIndicator:Hide()
+    container.weeklyIndicator = weeklyIndicator
+
     -- Message box
     local msgLabel = detContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     msgLabel:SetPoint("TOPLEFT", 0, -36)
@@ -4925,6 +4931,36 @@ function GUI.UpdateQueuePanel(container)
         end
     end
 
+    -- And LFG players scanned from PUBLIC channels (ChatScanner store). These
+    -- previously only appeared in the browser tree, never here - the panel
+    -- showed AIP-peer enrollments but was blind to real chat LFG players.
+    if AIP.ChatScanner and AIP.ChatScanner.Players then
+        for name, player in pairs(AIP.ChatScanner.Players) do
+            if player.isLFG then
+                local found = false
+                for _, e in ipairs(lfgEntries) do
+                    if e.name == name then found = true break end
+                end
+                if not found then
+                    table.insert(lfgEntries, {
+                        name = name,
+                        class = player.class,
+                        spec = player.spec,
+                        role = player.role,
+                        gs = player.gs,
+                        ilvl = player.ilvl,
+                        raid = player.raids and player.raids[1] or player.raid,
+                        weekly = player.weekly,
+                        time = player.time,
+                        message = player.message,
+                        isLfgEnrollment = true,
+                        fromChatScan = true,
+                    })
+                end
+            end
+        end
+    end
+
     -- Apply search filters
     local queueSearchFilter = container.queueSearchFilter or ""
     local lfgSearchFilter = container.lfgSearchFilter or ""
@@ -5332,6 +5368,22 @@ function GUI.UpdateDetailsPanel(container, data)
                 container.lockoutIndicator:Hide()
             end
         end
+        -- Update weekly badge: green if YOU still need this weekly, blue otherwise
+        if container.weeklyIndicator then
+            if data.weekly then
+                local q = AIP.Weekly and AIP.Weekly.ForToken(data.weekly)
+                local bossName = q and q.boss or data.weekly
+                local wanted = AIP.Weekly and AIP.Weekly.IsWanted(data.weekly)
+                if wanted then
+                    container.weeklyIndicator:SetText("|cFF00FF00[W] Weekly: " .. bossName .. " (you need this!)|r")
+                else
+                    container.weeklyIndicator:SetText("|cFF33CCFF[W] Weekly: " .. bossName .. "|r")
+                end
+                container.weeklyIndicator:Show()
+            else
+                container.weeklyIndicator:Hide()
+            end
+        end
     end
     if container.msgValue then
         container.msgValue:SetText(data.message or "-")
@@ -5565,15 +5617,24 @@ function GUI.UpdateDetailsPanel(container, data)
 end
 
 -- ============================================================================
--- AUTO-BROADCAST SYSTEM
+-- AUTO-BROADCAST SYSTEM (round-robin rotor)
+-- One channel per tick, rotating through the enabled targets. Enabling more
+-- channels spreads the sends - it NEVER multiplies them. Every send goes
+-- through AIP.ChatGate, which enforces the global chat budget on top.
 -- ============================================================================
 GUI.Broadcast = {
     active = false,
-    mode = nil, -- "lfm" or "lfg"
+    mode = nil,          -- "lfm" or "lfg"
     message = "",
-    interval = 60,
+    interval = 90,       -- per-channel repost period (seconds)
+    tickSpacing = 30,    -- seconds between rotor sends (interval / #targets)
+    nextSendAt = 0,      -- GetTime() of the next rotor tick
+    startedAt = 0,
+    rotor = {},          -- ordered targets: {kind="CHANNEL", name=..} | {kind="SAY"|"YELL"|"GUILD"}
+    rotorIndex = 0,
+    lastDataBus = 0,
     timer = nil,
-    elapsed = 0,
+    dryRunUntil = 0,     -- /aip broadcast dryrun: log instead of send until this time
 }
 
 -- Join/create our custom channels
@@ -5642,6 +5703,7 @@ function GUI.ParseLfgEnrollment(message, author)
             gs = tonumber(gs) or 0,
             ilvl = tonumber(ilvl) or 0,
             level = tonumber(level) or 0,
+            weekly = message:match("WQ:(%w+)"),  -- weekly quest tag (after {AIP:x})
             time = time(),
             message = message,
             isLfgEnrollment = true,  -- Flag to distinguish from regular queue entries
@@ -5708,88 +5770,229 @@ function GUI.CleanupLfgEnrollments()
     end
 end
 
--- Calculate auto-tuned broadcast interval based on enabled channels to avoid chat bans
-function GUI.CalculateAutoTuneInterval()
-    local channelCount = 1  -- Custom channel always counts
-
-    if AIP.db then
-        -- Count enabled public channels
-        if AIP.db.spamTrade then channelCount = channelCount + 1 end
-        if AIP.db.spamGeneral then channelCount = channelCount + 1 end
-        if AIP.db.spamLFG then channelCount = channelCount + 1 end
-        if AIP.db.spamSay then channelCount = channelCount + 1 end
-        if AIP.db.spamYell then channelCount = channelCount + 1 end
-        if AIP.db.spamGuild then channelCount = channelCount + 1 end
+-- Build the ordered rotor target list from settings. Channel targets carry
+-- NAMES, never numeric ids - ChatGate re-resolves the id at send time (ids
+-- shift when the user joins/leaves channels).
+function GUI.BuildBroadcastTargets(mode)
+    local targets = {}
+    local function addChannel(name)
+        if name and name ~= "" then
+            table.insert(targets, { kind = "CHANNEL", name = name })
+        end
     end
 
-    -- Base interval: 60s minimum, add 15s for each additional public channel
-    -- WoW typically allows ~1 message per minute per channel type without penalty
-    local baseInterval = 60
-    local perChannelDelay = 15
-    local autoTunedInterval = baseInterval + (math.max(0, channelCount - 1) * perChannelDelay)
+    -- Own AIP channel first (peers parse enrollments/listings from it)
+    addChannel(mode == "lfm" and GUI.CustomChannels.LFM or GUI.CustomChannels.LFG)
+    -- Standard LookingForGroup channel (fuzzy-resolved by the gate)
+    addChannel("LookingForGroup")
 
-    -- Cap between 60s and 180s
-    return math.max(60, math.min(180, autoTunedInterval))
+    if AIP.db then
+        if AIP.db.spamTrade then addChannel("Trade") end
+        if AIP.db.spamGeneral then addChannel("General") end
+        if AIP.db.spamGlobal then addChannel("global") end
+        if AIP.db.spamWorld then addChannel("world") end
+        if AIP.db.spamDefense then addChannel("LocalDefense") end
+        if AIP.db.spamSay then table.insert(targets, { kind = "SAY" }) end
+        if AIP.db.spamYell then table.insert(targets, { kind = "YELL" }) end
+        if AIP.db.spamGuild and IsInGuild() then table.insert(targets, { kind = "GUILD" }) end
+    end
+    return targets
 end
 
 -- Start auto-broadcasting
 function GUI.StartBroadcast(mode, message, interval)
-    -- Ensure custom channels exist
+    -- Ensure custom channels exist (async join - first send is delayed below)
     GUI.SetupCustomChannels()
 
-    GUI.Broadcast.active = true
-    GUI.Broadcast.mode = mode
-    GUI.Broadcast.message = message
+    local B = GUI.Broadcast
+    B.active = true
+    B.mode = mode
+    B.message = message
+    B.interval = math.max(60, interval or (AIP.db and AIP.db.autoSpamInterval) or 90)
+    B.rotor = GUI.BuildBroadcastTargets(mode)
+    B.rotorIndex = 0
+    B.startedAt = GetTime()
+    B.lastDataBus = 0
+    -- Spread evenly: each channel reposts roughly every `interval`, so the
+    -- rotor ticks every interval/#targets (floor 15s). ChatGate enforces the
+    -- per-channel and global budgets on top - this is only the cadence.
+    B.tickSpacing = math.max(15, math.floor(B.interval / math.max(1, #B.rotor)))
+    -- First send ~2s out: JoinChannelByName is async and the custom channel
+    -- id isn't resolvable for a few frames after joining (the very first
+    -- LFM used to be silently lost to this).
+    B.nextSendAt = GetTime() + 2
 
-    -- Auto-tune interval if not specified or lower than safe minimum
-    local requestedInterval = interval or (AIP.db and AIP.db.autoSpamInterval) or 60
-    local autoTunedInterval = GUI.CalculateAutoTuneInterval()
-
-    -- Use the higher of requested vs auto-tuned to be safe
-    GUI.Broadcast.interval = math.max(requestedInterval, autoTunedInterval)
-    GUI.Broadcast.elapsed = GUI.Broadcast.interval -- Trigger immediately
-
-    if not GUI.Broadcast.timer then
-        GUI.Broadcast.timer = CreateFrame("Frame")
+    if not B.timer then
+        B.timer = CreateFrame("Frame")
     end
-
-    GUI.Broadcast.statusElapsed = 0
-    GUI.Broadcast.timer:SetScript("OnUpdate", function(self, elapsed)
-        GUI.Broadcast.elapsed = GUI.Broadcast.elapsed + elapsed
-        GUI.Broadcast.statusElapsed = (GUI.Broadcast.statusElapsed or 0) + elapsed
-
-        -- Update status display every second
-        if GUI.Broadcast.statusElapsed >= 1 then
-            GUI.Broadcast.statusElapsed = 0
+    B.statusElapsed = 0
+    B.timer:SetScript("OnUpdate", function(self, elapsed)
+        B.statusElapsed = (B.statusElapsed or 0) + elapsed
+        if B.statusElapsed >= 1 then
+            B.statusElapsed = 0
             GUI.UpdateBroadcastStatus()
+            GUI.CheckBroadcastAutoStop()
         end
-
-        if GUI.Broadcast.elapsed >= GUI.Broadcast.interval then
-            GUI.Broadcast.elapsed = 0
-            GUI.DoBroadcast()
+        if B.active and GetTime() >= B.nextSendAt then
+            GUI.BroadcastTick()
         end
     end)
 
-    -- Update status display
     GUI.UpdateBroadcastStatus()
-
-    local intervalNote = ""
-    local requestedInterval = interval or (AIP.db and AIP.db.autoSpamInterval) or 60
-    if GUI.Broadcast.interval > requestedInterval then
-        intervalNote = " (auto-tuned from " .. requestedInterval .. "s)"
-    end
-    AIP.Print("|cFF00FF00Broadcasting started|r - " .. (mode == "lfm" and "LFM" or "LFG") .. " every " .. GUI.Broadcast.interval .. "s" .. intervalNote)
+    local chanCount = #B.rotor
+    AIP.Print(string.format(
+        "|cFF00FF00Broadcasting started|r - %s: one channel every %ds, each channel every ~%ds (%d target%s)",
+        mode == "lfm" and "LFM" or "LFG",
+        B.tickSpacing,
+        math.max(B.interval, B.tickSpacing * math.max(1, chanCount)),
+        chanCount, chanCount == 1 and "" or "s"))
 end
 
--- Stop auto-broadcasting
+-- Auto-stop conditions, checked once per second while broadcasting
+function GUI.CheckBroadcastAutoStop()
+    local B = GUI.Broadcast
+    if not B.active then return end
+
+    -- Hard time cap (a forgotten broadcast must not advertise forever)
+    local maxMinutes = (AIP.db and AIP.db.broadcastMaxMinutes) or 60
+    if maxMinutes > 0 and (GetTime() - B.startedAt) > maxMinutes * 60 then
+        AIP.Print("|cFFFFFF00Broadcast auto-stopped|r after " .. maxMinutes .. " minutes (set in broadcastMaxMinutes).")
+        GUI.StopBroadcast()
+        return
+    end
+
+    -- LFM: stop when the group is full
+    if B.mode == "lfm" and GUI.MyGroup then
+        local g = GUI.MyGroup
+        local function need(r) return (g[r] and g[r].needed) or 0 end
+        local function cur(r) return (g[r] and g[r].current) or 0 end
+        local total = need("tanks") + need("healers") + need("mdps") + need("rdps")
+        local filled = cur("tanks") + cur("healers") + cur("mdps") + cur("rdps")
+        if total > 0 and filled >= total then
+            AIP.Print("|cFF00FF00Group is full! Stopping LFM broadcast.|r")
+            GUI.StopBroadcast()
+        end
+    end
+end
+
+-- One rotor tick: post to exactly ONE eligible target, then advance.
+function GUI.BroadcastTick()
+    local B = GUI.Broadcast
+    if not B.active or not B.message or B.message == "" then return end
+
+    local CG = AIP.ChatGate
+    local dryRun = B.dryRunUntil and B.dryRunUntil > 0 and GetTime() < B.dryRunUntil
+
+    if #B.rotor == 0 then
+        B.rotor = GUI.BuildBroadcastTargets(B.mode)
+        if #B.rotor == 0 then
+            B.nextSendAt = GetTime() + 10  -- idle; targets may appear later
+            return
+        end
+    end
+
+    -- Find the next target the gate will accept (at most one full pass;
+    -- if everything is cooling down or blacked out, idle - never busy-spin)
+    local picked, pickedIdx
+    for offset = 1, #B.rotor do
+        local idx = ((B.rotorIndex + offset - 1) % #B.rotor) + 1
+        local t = B.rotor[idx]
+        local eligible
+        if not CG then
+            eligible = false
+        elseif t.kind == "CHANNEL" then
+            eligible = CG.IsEligible("CHANNEL", t.name)
+        else
+            eligible = CG.IsEligible(t.kind)
+        end
+        if eligible then
+            picked, pickedIdx = t, idx
+            break
+        end
+    end
+
+    if not picked then
+        B.nextSendAt = GetTime() + 5
+        return
+    end
+
+    B.rotorIndex = pickedIdx
+    B.nextSendAt = GetTime() + B.tickSpacing
+
+    local label = picked.kind == "CHANNEL" and picked.name or picked.kind
+    if dryRun then
+        AIP.Print("|cFF888888[dryrun]|r would send to |cFFFFFF00" .. label .. "|r now")
+    else
+        CG.Send(B.message, picked.kind == "CHANNEL" and "CHANNEL" or picked.kind, nil, {
+            channelName = picked.name,
+            owner = "broadcast",
+            staleAfter = 30,
+            validate = function() return GUI.Broadcast.active end,
+        })
+    end
+
+    -- Companion DataBus broadcast once per repost period (own limiter,
+    -- deliberately NOT gated - a public blackout must not freeze peer sync)
+    GUI.MaybeDataBusBroadcast(dryRun)
+end
+
+-- DataBus LFM/LFG companion broadcast, at most once per repost period
+function GUI.MaybeDataBusBroadcast(dryRun)
+    local B = GUI.Broadcast
+    local now = GetTime()
+    if (now - (B.lastDataBus or 0)) < B.interval then return end
+    B.lastDataBus = now
+    if dryRun or not AIP.DataBus then return end
+
+    if B.mode == "lfm" and GUI.MyGroup then
+        AIP.DataBus.BroadcastLFM({
+            raid = GUI.MyGroup.raid,
+            tanks = GUI.MyGroup.tanks,
+            healers = GUI.MyGroup.healers,
+            mdps = GUI.MyGroup.mdps,
+            rdps = GUI.MyGroup.rdps,
+            gsMin = GUI.MyGroup.gsMin,
+            ilvlMin = GUI.MyGroup.ilvlMin,
+            triggerKey = GUI.MyGroup.inviteKeyword,
+            roleSpecs = GUI.MyGroup.roleSpecs,
+            weekly = GUI.MyGroup.weekly,
+        })
+    elseif B.mode == "lfg" and GUI.MyEnrollment then
+        AIP.DataBus.BroadcastLFG({
+            raids = { GUI.MyEnrollment.raid },
+            role = GUI.MyEnrollment.role,
+            class = GUI.MyEnrollment.class,
+            spec = GUI.MyEnrollment.spec,
+            gs = GUI.MyEnrollment.gs,
+            ilvl = GUI.MyEnrollment.ilvl,
+            weekly = GUI.MyEnrollment.weekly,
+        })
+        -- Share the full character card so peers see gear/achievements with
+        -- zero inspection (gated by the Share card toggle).
+        if (not AIP.db or AIP.db.cardShare ~= false) and AIP.CharCard and AIP.CharCard.ShareMine then
+            AIP.CharCard.ShareMine()
+        end
+    end
+end
+
+-- Stop auto-broadcasting. Single definition (this used to be two - a base
+-- and a wrapper adding LFG cleanup - which was load-order fragile).
 function GUI.StopBroadcast()
+    local wasLfg = GUI.Broadcast.mode == "lfg"
+
     GUI.Broadcast.active = false
     GUI.Broadcast.mode = nil
-    GUI.MyGroup = nil  -- Clear our active LFM data
-    GUI.MyEnrollment = nil  -- Clear our active LFG enrollment
+    GUI.MyGroup = nil        -- Clear our active LFM data
+    GUI.MyEnrollment = nil   -- Clear our active LFG enrollment
 
     if GUI.Broadcast.timer then
         GUI.Broadcast.timer:SetScript("OnUpdate", nil)
+    end
+
+    -- Cancel anything we already queued at the gate: a stale LFM must never
+    -- fire after the user stopped (or joined a group).
+    if AIP.ChatGate then
+        AIP.ChatGate.CancelOwner("broadcast")
     end
 
     -- Reset player mode
@@ -5797,157 +6000,20 @@ function GUI.StopBroadcast()
         AIP.SetPlayerMode("none")
     end
 
+    -- LFG enrollment cleanup
+    if wasLfg then
+        local playerName = UnitName("player")
+        if playerName and GUI.LfgEnrollments then
+            GUI.LfgEnrollments[playerName] = nil
+        end
+        GUI.UpdateEnrollmentStatus()
+        local container = GUI.Frame and GUI.Frame.tabContents and GUI.Frame.tabContents["lfm"]
+        if container then GUI.UpdateQueuePanel(container) end
+    end
+
     GUI.UpdateBroadcastStatus()
     GUI.UpdateStatus()  -- Update footer to reflect mode change
     AIP.Print("|cFFFF0000Broadcasting stopped|r")
-end
-
--- Perform the broadcast (with staggered timing to avoid chat bans)
-function GUI.DoBroadcast()
-    if not GUI.Broadcast.active or not GUI.Broadcast.message or GUI.Broadcast.message == "" then
-        return
-    end
-
-    local msg = GUI.Broadcast.message
-    local mode = GUI.Broadcast.mode
-
-    -- Queue of messages to send with delays
-    local messageQueue = {}
-    local delay = 0
-
-    -- Use chat ban system's delay if available, otherwise default to 2s
-    local delayIncrement = 2
-    if AIP.ChatBan then
-        delayIncrement = AIP.ChatBan.channelDelay or 2
-        -- If recently banned, use increased delay
-        local now = time()
-        if AIP.ChatBan.detected and (now - (AIP.ChatBan.lastBanTime or 0)) < 300 then
-            delayIncrement = math.min(AIP.ChatBan.maxDelay or 5, delayIncrement + (AIP.ChatBan.banCount or 0))
-        end
-    end
-
-    -- 1. Send to our custom AIP channel first (primary/default, no delay)
-    local customChannel = mode == "lfm" and GUI.CustomChannels.LFM or GUI.CustomChannels.LFG
-    local customId = GUI.GetCustomChannelId(customChannel)
-    if customId then
-        table.insert(messageQueue, {delay = 0, name = "AIP", func = function()
-            SendChatMessage(msg, "CHANNEL", nil, customId)
-        end})
-        delay = delay + delayIncrement
-    end
-
-    -- 2. Send to standard LFG channel
-    if AIP.FindChannelId then
-        local lfgId = AIP.FindChannelId("LookingForGroup")
-        if lfgId then
-            table.insert(messageQueue, {delay = delay, name = "LFG", func = function()
-                SendChatMessage(msg, "CHANNEL", nil, lfgId)
-            end})
-            delay = delay + delayIncrement
-        end
-    end
-
-    -- 3. Send to additional channels if configured in settings (with delays)
-    if AIP.db then
-        if AIP.db.spamTrade and AIP.FindChannelId then
-            local tradeId = AIP.FindChannelId("trade")
-            if tradeId then
-                table.insert(messageQueue, {delay = delay, name = "Trade", func = function()
-                    SendChatMessage(msg, "CHANNEL", nil, tradeId)
-                end})
-                delay = delay + delayIncrement
-            end
-        end
-        if AIP.db.spamGeneral and AIP.FindChannelId then
-            local generalId = AIP.FindChannelId("general")
-            if generalId then
-                table.insert(messageQueue, {delay = delay, name = "General", func = function()
-                    SendChatMessage(msg, "CHANNEL", nil, generalId)
-                end})
-                delay = delay + delayIncrement
-            end
-        end
-        -- Say and Yell can be sent together (different chat types, less throttled)
-        local groupDelay = delay
-        if AIP.db.spamSay then
-            table.insert(messageQueue, {delay = groupDelay, name = "Say", func = function()
-                SendChatMessage(msg, "SAY")
-            end})
-            groupDelay = groupDelay + 0.5
-        end
-        if AIP.db.spamYell then
-            table.insert(messageQueue, {delay = groupDelay, name = "Yell", func = function()
-                SendChatMessage(msg, "YELL")
-            end})
-            groupDelay = groupDelay + 0.5
-        end
-        if AIP.db.spamGuild and IsInGuild() then
-            table.insert(messageQueue, {delay = groupDelay, name = "Guild", func = function()
-                SendChatMessage(msg, "GUILD")
-            end})
-        end
-    end
-
-    -- Track how many messages we're sending (for ban detection)
-    GUI.Broadcast.pendingMessages = #messageQueue
-    GUI.Broadcast.sentMessages = 0
-
-    -- Execute the message queue with delays
-    for _, item in ipairs(messageQueue) do
-        if item.delay == 0 then
-            item.func()
-            GUI.Broadcast.sentMessages = (GUI.Broadcast.sentMessages or 0) + 1
-        else
-            AIP.Utils.DelayedCall(item.delay, function()
-                -- Check if broadcast is still active before sending
-                if GUI.Broadcast.active then
-                    item.func()
-                    GUI.Broadcast.sentMessages = (GUI.Broadcast.sentMessages or 0) + 1
-                end
-            end)
-        end
-    end
-
-    -- Log the broadcast with timing info if delay is elevated
-    if delayIncrement > 2 then
-        -- Debug: show that we're using elevated delays
-        -- AIP.Print("|cFFFFFF00Broadcast using " .. delayIncrement .. "s delay between channels|r")
-    end
-
-    -- Also broadcast via DataBus for addon-to-addon communication
-    if AIP.DataBus then
-        if mode == "lfm" and GUI.MyGroup then
-            -- Broadcast LFM data to other addon users
-            local lfmData = {
-                raid = GUI.MyGroup.raid,
-                tanks = GUI.MyGroup.tanks,
-                healers = GUI.MyGroup.healers,
-                mdps = GUI.MyGroup.mdps,
-                rdps = GUI.MyGroup.rdps,
-                gsMin = GUI.MyGroup.gsMin,
-                ilvlMin = GUI.MyGroup.ilvlMin,
-                triggerKey = GUI.MyGroup.inviteKeyword,
-                roleSpecs = GUI.MyGroup.roleSpecs,
-            }
-            AIP.DataBus.BroadcastLFM(lfmData)
-        elseif mode == "lfg" and GUI.MyEnrollment then
-            -- Broadcast LFG data to other addon users
-            local lfgData = {
-                raids = {GUI.MyEnrollment.raid},
-                role = GUI.MyEnrollment.role,
-                class = GUI.MyEnrollment.class,
-                spec = GUI.MyEnrollment.spec,
-                gs = GUI.MyEnrollment.gs,
-                ilvl = GUI.MyEnrollment.ilvl,
-            }
-            AIP.DataBus.BroadcastLFG(lfgData)
-            -- Also share the full character card (gear + achievements) so peers can
-            -- see it in this LFG listing without inspecting (gated by the Share card toggle).
-            if (not AIP.db or AIP.db.cardShare ~= false) and AIP.CharCard and AIP.CharCard.ShareMine then
-                AIP.CharCard.ShareMine()
-            end
-        end
-    end
 end
 
 -- Update broadcast status display
@@ -5969,7 +6035,7 @@ function GUI.UpdateBroadcastStatus()
         local statusText = GUI.Frame.statusBar.broadcastStatus
         if statusText then
             if GUI.Broadcast.active then
-                local remaining = math.max(0, GUI.Broadcast.interval - GUI.Broadcast.elapsed)
+                local remaining = math.max(0, (GUI.Broadcast.nextSendAt or 0) - GetTime())
                 local modeStr = GUI.Broadcast.mode == "lfm" and "Group (LFM)" or "Enroll (LFG)"
                 local raidInfo = ""
                 -- Show what raid we're broadcasting for
@@ -6034,25 +6100,6 @@ function GUI.UpdateEnrollmentStatus()
             statusText = statusText .. " | |cFF00FF00LFG: " .. GUI.MyEnrollment.raid .. "|r"
         end
         container.queueStatus:SetText(statusText)
-    end
-end
-
--- Clear enrollment when stopping broadcast
-local origStopBroadcast = GUI.StopBroadcast
-function GUI.StopBroadcast()
-    local wasLfg = GUI.Broadcast.mode == "lfg"
-    origStopBroadcast()
-    if wasLfg then
-        -- Remove our enrollment from LfgEnrollments
-        local playerName = UnitName("player")
-        if playerName and GUI.LfgEnrollments then
-            GUI.LfgEnrollments[playerName] = nil
-        end
-        GUI.MyEnrollment = nil
-        GUI.UpdateEnrollmentStatus()
-        -- Update queue panel
-        local container = GUI.Frame and GUI.Frame.tabContents and GUI.Frame.tabContents["lfm"]
-        if container then GUI.UpdateQueuePanel(container) end
     end
 end
 
@@ -6209,12 +6256,18 @@ function GUI.GuessPlayerRole(name, unit)
     return "RDPS"
 end
 
--- Regenerate broadcast message with updated composition
+-- Regenerate broadcast message with updated composition.
+-- Uses the single-source LFMFormat builder so the regenerated message keeps
+-- the SAME layout as the original ([x/y] block, spec array from roleSpecs,
+-- reserved items, weekly token). The old inline builder here diverged: it
+-- read `lookingForClasses` (a field nothing writes) and dropped the [x/y]
+-- and [Res:] blocks the first time anyone joined the group.
 function GUI.RegenerateBroadcastMessage()
     local ownGroup = GUI.GetOwnGroup()
     if not ownGroup then return nil end
+    if not AIP.LFMFormat then return nil end
 
-    -- Get current composition (now returns 4 values: tanks, healers, mdps, rdps)
+    -- Get current composition (tanks, healers, mdps, rdps)
     local currentTanks, currentHealers, currentMdps, currentRdps = GUI.GetCurrentGroupComposition()
 
     -- Get needed counts from the original group data
@@ -6223,49 +6276,42 @@ function GUI.RegenerateBroadcastMessage()
     local neededMdps = ownGroup.mdps and ownGroup.mdps.needed or 8
     local neededRdps = ownGroup.rdps and ownGroup.rdps.needed or 9
 
-    -- Update the group's current counts
+    -- Update the scanner record's current counts
     if ownGroup.tanks then ownGroup.tanks.current = currentTanks end
     if ownGroup.healers then ownGroup.healers.current = currentHealers end
     if ownGroup.mdps then ownGroup.mdps.current = currentMdps end
     if ownGroup.rdps then ownGroup.rdps.current = currentRdps end
 
-    -- Build updated message
-    local raidKey = ownGroup.raid or "?"
-    local inviteKeyword = ownGroup.inviteKeyword or (AIP.db and AIP.db.triggers) or "inv"
-    local keywordHint = string.format('w/ "%s"', inviteKeyword)
+    -- Also sync GUI.MyGroup: it's a SEPARATE table that CS.MatchesMyLFM reads
+    -- for auto-queue role-full checks (its .current counts were previously
+    -- frozen at 0 forever, so already-full roles kept accepting).
+    if GUI.MyGroup then
+        if GUI.MyGroup.tanks then GUI.MyGroup.tanks.current = currentTanks end
+        if GUI.MyGroup.healers then GUI.MyGroup.healers.current = currentHealers end
+        if GUI.MyGroup.mdps then GUI.MyGroup.mdps.current = currentMdps end
+        if GUI.MyGroup.rdps then GUI.MyGroup.rdps.current = currentRdps end
+    end
 
     local achieveLink = ""
     if ownGroup.achievementId then
         achieveLink = GetAchievementLink(ownGroup.achievementId) or ""
     end
 
-    -- GS and iLvl without rounding
-    local gsDisplay = ownGroup.gsMin and ownGroup.gsMin > 0 and (tostring(ownGroup.gsMin) .. "+") or ""
-    local ilvlDisplay = ownGroup.ilvlMin and ownGroup.ilvlMin > 0 and (" iLvl:" .. tostring(ownGroup.ilvlMin) .. "+") or ""
-
-    -- Build "LF:" class list if stored
-    local lfClassStr = ""
-    if ownGroup.lookingForClasses and #ownGroup.lookingForClasses > 0 then
-        lfClassStr = " LF: " .. table.concat(ownGroup.lookingForClasses, "/")
-    end
-
-    local noteText = ownGroup.note or ""
-
-    local msg = string.format("LFM %s [T:%d/%d H:%d/%d M:%d/%d R:%d/%d] %s%s%s %s %s %s",
-        raidKey,
-        currentTanks, neededTanks,
-        currentHealers, neededHealers,
-        currentMdps, neededMdps,
-        currentRdps, neededRdps,
-        gsDisplay,
-        ilvlDisplay,
-        lfClassStr,
-        keywordHint,
-        achieveLink,
-        noteText)
-
-    -- Clean up extra spaces
-    msg = msg:gsub("%s+", " "):trim()
+    local msg = AIP.LFMFormat.BuildLFM({
+        raidKey = ownGroup.raid or "?",
+        weekly = ownGroup.weekly,
+        tanks = { current = currentTanks, needed = neededTanks },
+        healers = { current = currentHealers, needed = neededHealers },
+        mdps = { current = currentMdps, needed = neededMdps },
+        rdps = { current = currentRdps, needed = neededRdps },
+        gsMin = ownGroup.gsMin,
+        ilvlMin = ownGroup.ilvlMin,
+        roleSpecs = ownGroup.roleSpecs,
+        keyword = ownGroup.inviteKeyword or (AIP.db and AIP.db.triggers) or "inv",
+        achievementLink = achieveLink,
+        note = ownGroup.note,
+        reservedItems = AIP.db and AIP.db.reservedItems,
+    })
 
     return msg
 end
@@ -6358,6 +6404,17 @@ function GUI.ShowAddGroupPopup()
         else
             GUI.AddGroupPopup.reservedDisplay:SetText("|cFF666666(none - edit in Raid Mgmt tab)|r")
         end
+    end
+    -- Refresh the Quick Post tiles (last-used / this week's weekly), the
+    -- weekly status strip and the live message preview
+    if GUI.AddGroupPopup.RefreshTiles and not GUI.AddGroupPopup.expanded then
+        GUI.AddGroupPopup.RefreshTiles()
+    end
+    if GUI.AddGroupPopup.UpdateWeeklyStrip then
+        GUI.AddGroupPopup.UpdateWeeklyStrip()
+    end
+    if GUI.AddGroupPopup.RefreshPreview then
+        GUI.AddGroupPopup.RefreshPreview()
     end
     GUI.AddGroupPopup:Show()
 end
@@ -6586,7 +6643,7 @@ GUI.ClassSpecs = {
 
 function GUI.CreateAddGroupPopup()
     local popup = CreateFrame("Frame", "AIPAddGroupPopup", UIParent)
-    popup:SetSize(400, 620)  -- Increased height for reserved items section
+    popup:SetSize(430, 320)  -- collapsed height; SetExpanded() grows it
     popup:SetPoint("CENTER", -220, 0)  -- Offset left so it doesn't overlap with Enroll popup
     popup:SetFrameStrata("DIALOG")
     popup:SetMovable(true)
@@ -6597,36 +6654,37 @@ function GUI.CreateAddGroupPopup()
     popup:SetClampedToScreen(true)
     GUI.StylePopup(popup)
 
+    local COLLAPSED_HEIGHT = 320
+    local EXPANDED_HEIGHT = 655
+
     local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -15)
-    title:SetText("Create New Group Listing")
+    title:SetText("Create Group Listing")
     title:SetTextColor(1, 0.82, 0)
 
     local closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT", -5, -5)
 
-    local y = -45
-
-    -- === Raid Selection Row ===
+    -- ========================================================================
+    -- RAID ROW (always visible)
+    -- ========================================================================
     local raidLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    raidLabel:SetPoint("TOPLEFT", 20, y)
+    raidLabel:SetPoint("TOPLEFT", 20, -42)
     raidLabel:SetText("Raid:")
 
-    -- Raid Type dropdown
     local raidTypeDropdown = CreateFrame("Frame", "AIPAddGroupRaidType", popup, "UIDropDownMenuTemplate")
     raidTypeDropdown:SetPoint("LEFT", raidLabel, "RIGHT", -10, -2)
     UIDropDownMenu_SetWidth(raidTypeDropdown, 100)
     UIDropDownMenu_SetText(raidTypeDropdown, "ICC")
     popup.raidType = "ICC"
+    popup.weeklyToken = nil   -- set when a Weekly quest activity is selected
 
-    -- Size dropdown (10/25)
     local sizeDropdown = CreateFrame("Frame", "AIPAddGroupSize", popup, "UIDropDownMenuTemplate")
     sizeDropdown:SetPoint("LEFT", raidTypeDropdown, "RIGHT", -15, 0)
     UIDropDownMenu_SetWidth(sizeDropdown, 50)
     UIDropDownMenu_SetText(sizeDropdown, "25")
     popup.raidSize = "25"
 
-    -- Heroic checkbox
     local heroicCheck = CreateFrame("CheckButton", nil, popup, "UICheckButtonTemplate")
     heroicCheck:SetSize(22, 22)
     heroicCheck:SetPoint("LEFT", sizeDropdown, "RIGHT", 5, 2)
@@ -6636,10 +6694,80 @@ function GUI.CreateAddGroupPopup()
     heroicLabel:SetPoint("LEFT", heroicCheck, "RIGHT", 0, 0)
     heroicLabel:SetText("Heroic")
 
-    -- Helper to build raid key
+    -- Lockout warning indicator (red dot)
+    local lockoutWarning = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lockoutWarning:SetPoint("LEFT", heroicLabel, "RIGHT", 10, 0)
+    lockoutWarning:SetText("|cFFFF4444\226\151\143|r")
+    lockoutWarning:Hide()
+    popup.lockoutWarning = lockoutWarning
+
+    -- === Custom name / weekly status row (shared line under the raid row) ===
+    local customLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    customLabel:SetPoint("TOPLEFT", 20, -74)
+    customLabel:SetText("Custom Name:")
+    customLabel:Hide()
+    popup.customLabel = customLabel
+
+    local customInput, customContainer = GUI.CreateStyledEditBox(popup, 180, 16, false)
+    customContainer:SetPoint("LEFT", customLabel, "RIGHT", 5, 0)
+    customContainer:Hide()
+    popup.customInput = customInput
+    popup.customContainer = customContainer
+
+    -- Weekly quest status strip ("You don't have this quest - ...")
+    local weeklyStrip = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    weeklyStrip:SetPoint("TOPLEFT", 20, -76)
+    weeklyStrip:SetPoint("RIGHT", popup, "RIGHT", -20, 0)
+    weeklyStrip:SetJustifyH("LEFT")
+    weeklyStrip:Hide()
+    popup.weeklyStrip = weeklyStrip
+
+    -- ========================================================================
+    -- QUICK POST preset tiles (collapsed mode) / DETAIL frame (expanded mode)
+    -- ========================================================================
+    local quickLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    quickLabel:SetPoint("TOPLEFT", 20, -96)
+    quickLabel:SetText("QUICK POST")
+    quickLabel:SetTextColor(0.6, 0.8, 1)
+    popup.quickLabel = quickLabel
+
+    popup.presetTiles = {}
+    local function makeTile(index)
+        local tile = CreateFrame("Button", nil, popup)
+        tile:SetSize(126, 52)
+        tile:SetPoint("TOPLEFT", 20 + (index - 1) * 131, -112)
+        GUI.ApplyBackdrop(tile, "Inset", 0.9)
+        tile.titleText = tile:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        tile.titleText:SetPoint("TOP", 0, -8)
+        tile.subText = tile:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        tile.subText:SetPoint("TOP", 0, -26)
+        tile.subText:SetTextColor(0.7, 0.7, 0.7)
+        tile:SetScript("OnEnter", function(self)
+            if self.tooltip then
+                GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                GameTooltip:AddLine(self.tooltip, 1, 1, 1, true)
+                GameTooltip:Show()
+            end
+        end)
+        tile:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        return tile
+    end
+    popup.presetTiles.last = makeTile(1)
+    popup.presetTiles.weekly = makeTile(2)
+    popup.presetTiles.fresh = makeTile(3)
+
+    -- Detail frame: the full customization form, hidden while collapsed
+    local detail = CreateFrame("Frame", nil, popup)
+    detail:SetPoint("TOPLEFT", 0, -96)
+    detail:SetSize(430, 415)
+    detail:Hide()
+    popup.detail = detail
+
+    -- ========================================================================
+    -- HELPERS (raid key, defaults, dropdown wiring)
+    -- ========================================================================
     local function GetRaidKey()
         local raidType = popup.raidType or "ICC"
-        -- Handle custom text
         if raidType == "CUSTOM" then
             local customText = popup.customInput and popup.customInput:GetText() or ""
             if customText ~= "" then
@@ -6649,38 +6777,60 @@ function GUI.CreateAddGroupPopup()
         end
         local size = popup.raidSize or "25"
         local heroic = popup.heroicCheck:GetChecked() and "H" or "N"
-        -- Handle TOC/TOGC naming
         if raidType == "TOC" and heroic == "H" then
             return "TOGC" .. size
         end
         return raidType .. size .. heroic
     end
+    popup.GetRaidKey = GetRaidKey
 
-    -- Apply template defaults when raid changes
-    local function ApplyTemplateDefaults()
-        local raidKey = GetRaidKey()
-        local defaults = GUI.RaidTemplateDefaults[raidKey]
-        if defaults then
-            popup.tankInput:SetText(tostring(defaults.tanks))
-            popup.healInput:SetText(tostring(defaults.healers))
-            -- Handle mdps/rdps (with backwards compat for old dps field)
-            local mdps = defaults.mdps or math.floor((defaults.dps or 0) / 2)
-            local rdps = defaults.rdps or math.ceil((defaults.dps or 0) / 2)
-            popup.mdpsInput:SetText(tostring(mdps))
-            popup.rdpsInput:SetText(tostring(rdps))
-            popup.gsInput:SetText(tostring(defaults.gs))
-            popup.ilvlInput:SetText(tostring(defaults.ilvl))
+    local function UpdateWeeklyStrip()
+        if popup.weeklyToken and AIP.Weekly then
+            local q = AIP.Weekly.ForToken(popup.weeklyToken)
+            local status = AIP.Weekly.StatusText(popup.weeklyToken)
+            weeklyStrip:SetText("|cFF33CCFF[W]|r " .. (q and q.boss or popup.weeklyToken) .. ": " .. status)
+            weeklyStrip:Show()
+        else
+            weeklyStrip:Hide()
         end
-        -- Update achievement dropdown
-        GUI.UpdateAchievementDropdown(popup, raidKey)
-        popup.selectedRaid = raidKey
     end
+    popup.UpdateWeeklyStrip = UpdateWeeklyStrip
 
-    -- Function to update size dropdown based on selected raid
+    local function UpdateCustomFieldVisibility()
+        if popup.raidType == "CUSTOM" then
+            popup.customLabel:Show()
+            if popup.customContainer then popup.customContainer:Show() end
+            popup.heroicCheck:Hide()
+            heroicLabel:Hide()
+            weeklyStrip:Hide()
+        else
+            popup.customLabel:Hide()
+            if popup.customContainer then popup.customContainer:Hide() end
+            popup.heroicCheck:Show()
+            heroicLabel:Show()
+            UpdateWeeklyStrip()
+        end
+    end
+    popup.UpdateCustomFieldVisibility = UpdateCustomFieldVisibility
+
+    local function UpdateLockoutWarning()
+        local raidKey = GetRaidKey()
+        if AIP.TreeBrowser and AIP.TreeBrowser.IsLockedToInstance then
+            AIP.TreeBrowser.UpdateSavedInstances()
+            if AIP.TreeBrowser.IsLockedToInstance(raidKey) then
+                lockoutWarning:Show()
+            else
+                lockoutWarning:Hide()
+            end
+        else
+            lockoutWarning:Hide()
+        end
+    end
+    popup.UpdateLockoutWarning = UpdateLockoutWarning
+
     local function UpdateSizeDropdown()
         local raidInfo = GUI.RaidSizeInfo[popup.raidType]
         if raidInfo then
-            -- Set default size for this raid if current size is not valid
             local currentSizeValid = false
             for _, validSize in ipairs(raidInfo.sizes) do
                 if validSize == popup.raidSize then
@@ -6692,7 +6842,6 @@ function GUI.CreateAddGroupPopup()
                 popup.raidSize = raidInfo.defaultSize
                 UIDropDownMenu_SetText(sizeDropdown, raidInfo.defaultSize)
             end
-            -- Update heroic checkbox visibility
             if raidInfo.hasHeroic then
                 heroicCheck:Show()
                 heroicLabel:Show()
@@ -6701,7 +6850,6 @@ function GUI.CreateAddGroupPopup()
                 heroicLabel:Hide()
                 heroicCheck:SetChecked(false)
             end
-            -- Enable/disable size dropdown based on available sizes
             if #raidInfo.sizes == 1 then
                 UIDropDownMenu_DisableDropDown(sizeDropdown)
             else
@@ -6711,24 +6859,36 @@ function GUI.CreateAddGroupPopup()
     end
     popup.UpdateSizeDropdown = UpdateSizeDropdown
 
-    -- Helper to update raid dropdown text with lockout color
     local function UpdateRaidDropdownText()
         local raidType = popup.raidType or "ICC"
+        local prefix = popup.weeklyToken and "|cFF33CCFF[W]|r " or ""
         local isLocked = AIP.TreeBrowser and AIP.TreeBrowser.IsLockedToInstance and AIP.TreeBrowser.IsLockedToInstance(raidType)
         if isLocked then
-            UIDropDownMenu_SetText(raidTypeDropdown, "|cFFFF6666" .. raidType .. "|r")
+            UIDropDownMenu_SetText(raidTypeDropdown, prefix .. "|cFFFF6666" .. raidType .. "|r")
         else
-            UIDropDownMenu_SetText(raidTypeDropdown, raidType)
+            UIDropDownMenu_SetText(raidTypeDropdown, prefix .. raidType)
         end
     end
     popup.UpdateRaidDropdownText = UpdateRaidDropdownText
 
-    -- Initialize raid type dropdown with nested submenus
+    -- Forward declarations (defined after the detail widgets exist)
+    local ApplyTemplateDefaults
+    local RefreshPreview
+
+    -- Raid type dropdown: Weekly category pinned first, then the standard set
     UIDropDownMenu_Initialize(raidTypeDropdown, function(self, level, menuList)
         level = level or 1
 
         if level == 1 then
-            -- Main level: show categories with arrows
+            if AIP.Weekly then
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = "|cFF33CCFFWeekly Raid Quest|r"
+                info.hasArrow = true
+                info.menuList = "AIP_WEEKLY"
+                info.notCheckable = true
+                info.keepShownOnClick = true
+                UIDropDownMenu_AddButton(info, level)
+            end
             for _, cat in ipairs(GUI.RaidCategories) do
                 local info = UIDropDownMenu_CreateInfo()
                 info.text = cat.header
@@ -6739,12 +6899,40 @@ function GUI.CreateAddGroupPopup()
                 UIDropDownMenu_AddButton(info, level)
             end
         elseif level == 2 then
-            -- Submenu: show raids in category
+            if menuList == "AIP_WEEKLY" and AIP.Weekly then
+                -- This week's detected quest first, then the full rotation
+                local held = AIP.Weekly.Current()
+                local ordered = {}
+                if held then ordered[#ordered + 1] = held.quest end
+                for _, q in ipairs(AIP.Weekly.Quests) do
+                    if not held or q.token ~= held.quest.token then
+                        ordered[#ordered + 1] = q
+                    end
+                end
+                for idx, q in ipairs(ordered) do
+                    local info = UIDropDownMenu_CreateInfo()
+                    local tag = (held and q.token == held.quest.token) and " |cFF00FF00(this week)|r" or ""
+                    info.text = q.boss .. " (" .. q.raid .. ")" .. tag
+                    info.value = q.token
+                    info.func = function()
+                        popup.weeklyToken = q.token
+                        popup.raidType = q.raid
+                        popup.raidSize = "10"          -- weekly kill is any size; 10N is the common carry
+                        popup.heroicCheck:SetChecked(false)
+                        UpdateRaidDropdownText()
+                        UpdateSizeDropdown()
+                        ApplyTemplateDefaults()
+                        CloseDropDownMenus()
+                    end
+                    info.checked = (popup.weeklyToken == q.token)
+                    UIDropDownMenu_AddButton(info, level)
+                end
+                return
+            end
             for _, cat in ipairs(GUI.RaidCategories) do
                 if cat.id == menuList then
                     for _, rt in ipairs(cat.items) do
                         local info = UIDropDownMenu_CreateInfo()
-                        -- Show lockout indicator (red text, no label)
                         local isLocked = AIP.TreeBrowser and AIP.TreeBrowser.IsLockedToInstance and AIP.TreeBrowser.IsLockedToInstance(rt)
                         if isLocked then
                             info.text = "|cFFFF6666" .. rt .. "|r"
@@ -6754,6 +6942,7 @@ function GUI.CreateAddGroupPopup()
                         info.value = rt
                         info.func = function()
                             popup.raidType = rt
+                            popup.weeklyToken = nil    -- picking a plain raid clears the weekly tag
                             UpdateRaidDropdownText()
                             UpdateSizeDropdown()
                             ApplyTemplateDefaults()
@@ -6768,7 +6957,6 @@ function GUI.CreateAddGroupPopup()
         end
     end)
 
-    -- Initialize size dropdown (will be dynamically updated)
     UIDropDownMenu_Initialize(sizeDropdown, function()
         local raidInfo = GUI.RaidSizeInfo[popup.raidType] or {sizes = {"5", "10", "25"}}
         for _, size in ipairs(raidInfo.sizes) do
@@ -6787,177 +6975,131 @@ function GUI.CreateAddGroupPopup()
     GUI.FixDropdownStrata(raidTypeDropdown)
     GUI.FixDropdownStrata(sizeDropdown)
 
-    -- Apply initial size dropdown update
-    UpdateSizeDropdown()
-    UpdateRaidDropdownText()  -- Apply initial lockout color
-
-    heroicCheck:SetScript("OnClick", function() ApplyTemplateDefaults() end)
-    y = y - 35
-
-    -- === Custom Text Input (shown only when CUSTOM is selected) ===
-    local customLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    customLabel:SetPoint("TOPLEFT", 20, y)
-    customLabel:SetText("Custom Name:")
-    customLabel:Hide()
-    popup.customLabel = customLabel
-
-    local customInput, customContainer = GUI.CreateStyledEditBox(popup, 180, 16, false)
-    customContainer:SetPoint("LEFT", customLabel, "RIGHT", 5, 0)
-    customContainer:Hide()
-    popup.customInput = customInput
-    popup.customContainer = customContainer
-
-    -- Update custom field visibility
-    local function UpdateCustomFieldVisibility()
-        if popup.raidType == "CUSTOM" then
-            popup.customLabel:Show()
-            if popup.customContainer then popup.customContainer:Show() end
-            popup.heroicCheck:Hide()
-            heroicLabel:Hide()
-        else
-            popup.customLabel:Hide()
-            if popup.customContainer then popup.customContainer:Hide() end
-            popup.heroicCheck:Show()
-            heroicLabel:Show()
-        end
-    end
-    popup.UpdateCustomFieldVisibility = UpdateCustomFieldVisibility
-
-    -- Lockout warning indicator (red dot instead of text label)
-    local lockoutWarning = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lockoutWarning:SetPoint("LEFT", heroicLabel, "RIGHT", 10, 0)
-    lockoutWarning:SetText("|cFFFF4444\226\151\143|r")  -- Red circle indicator
-    lockoutWarning:Hide()
-    popup.lockoutWarning = lockoutWarning
-
-    -- Update lockout warning based on selected raid
-    local function UpdateLockoutWarning()
-        local raidKey = GetRaidKey()
-        if AIP.TreeBrowser and AIP.TreeBrowser.IsLockedToInstance then
-            -- Refresh saved instances
-            AIP.TreeBrowser.UpdateSavedInstances()
-            local isLocked = AIP.TreeBrowser.IsLockedToInstance(raidKey)
-            if isLocked then
-                lockoutWarning:Show()
-            else
-                lockoutWarning:Hide()
-            end
-        else
-            lockoutWarning:Hide()
-        end
-    end
-    popup.UpdateLockoutWarning = UpdateLockoutWarning
-
-    -- Hook into raid type selection
-    local origApplyDefaults = ApplyTemplateDefaults
-    ApplyTemplateDefaults = function()
-        origApplyDefaults()
-        UpdateCustomFieldVisibility()
-        UpdateLockoutWarning()
-    end
-
-    y = y - 25
+    -- ========================================================================
+    -- DETAIL FRAME CONTENT (composition, requirements, classes, note, keyword)
+    -- ========================================================================
 
     -- === Composition Row ===
-    local compLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    compLabel:SetPoint("TOPLEFT", 20, y)
+    local compLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    compLabel:SetPoint("TOPLEFT", 20, 0)
     compLabel:SetText("Composition:")
-    y = y - 20
 
-    local tankLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    tankLabel:SetPoint("TOPLEFT", 30, y)
+    local tankLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    tankLabel:SetPoint("TOPLEFT", 30, -20)
     tankLabel:SetText("Tanks:")
     tankLabel:SetTextColor(0.5, 0.5, 1)
-    local tankInput, tankContainer = GUI.CreateStyledEditBox(popup, 30, 14, true)
+    local tankInput, tankContainer = GUI.CreateStyledEditBox(detail, 30, 14, true)
     tankContainer:SetPoint("LEFT", tankLabel, "RIGHT", 5, 0)
     tankInput:SetText("2")
     popup.tankInput = tankInput
 
-    local healLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    local healLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     healLabel:SetPoint("LEFT", tankContainer, "RIGHT", 10, 0)
     healLabel:SetText("Healers:")
     healLabel:SetTextColor(0.5, 1, 0.5)
-    local healInput, healContainer = GUI.CreateStyledEditBox(popup, 30, 14, true)
+    local healInput, healContainer = GUI.CreateStyledEditBox(detail, 30, 14, true)
     healContainer:SetPoint("LEFT", healLabel, "RIGHT", 5, 0)
     healInput:SetText("6")
     popup.healInput = healInput
 
-    local mdpsLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    local mdpsLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     mdpsLabel:SetPoint("LEFT", healContainer, "RIGHT", 10, 0)
     mdpsLabel:SetText("MDPS:")
-    mdpsLabel:SetTextColor(1, 0.5, 0)  -- Orange for melee
-    local mdpsInput, mdpsContainer = GUI.CreateStyledEditBox(popup, 25, 14, true)
+    mdpsLabel:SetTextColor(1, 0.5, 0)
+    local mdpsInput, mdpsContainer = GUI.CreateStyledEditBox(detail, 25, 14, true)
     mdpsContainer:SetPoint("LEFT", mdpsLabel, "RIGHT", 3, 0)
     mdpsInput:SetText("8")
     popup.mdpsInput = mdpsInput
 
-    local rdpsLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    local rdpsLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     rdpsLabel:SetPoint("LEFT", mdpsContainer, "RIGHT", 8, 0)
     rdpsLabel:SetText("RDPS:")
-    rdpsLabel:SetTextColor(1, 0.8, 0)  -- Yellow for ranged
-    local rdpsInput, rdpsContainer = GUI.CreateStyledEditBox(popup, 25, 14, true)
+    rdpsLabel:SetTextColor(1, 0.8, 0)
+    local rdpsInput, rdpsContainer = GUI.CreateStyledEditBox(detail, 25, 14, true)
     rdpsContainer:SetPoint("LEFT", rdpsLabel, "RIGHT", 3, 0)
     rdpsInput:SetText("9")
     popup.rdpsInput = rdpsInput
-    y = y - 28
 
     -- === Requirements Row ===
-    local reqLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    reqLabel:SetPoint("TOPLEFT", 20, y)
+    local reqLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    reqLabel:SetPoint("TOPLEFT", 20, -48)
     reqLabel:SetText("Requirements:")
-    y = y - 20
 
-    local gsLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    gsLabel:SetPoint("TOPLEFT", 30, y)
+    local gsLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    gsLabel:SetPoint("TOPLEFT", 30, -68)
     gsLabel:SetText("Min GS:")
-    local gsInput, gsContainer = GUI.CreateStyledEditBox(popup, 45, 14, true)
+    local gsInput, gsContainer = GUI.CreateStyledEditBox(detail, 45, 14, true)
     gsContainer:SetPoint("LEFT", gsLabel, "RIGHT", 5, 0)
     gsInput:SetText("5800")
     popup.gsInput = gsInput
 
-    local ilvlLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    local ilvlLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     ilvlLabel:SetPoint("LEFT", gsContainer, "RIGHT", 15, 0)
     ilvlLabel:SetText("Min iLvl:")
-    local ilvlInput, ilvlContainer = GUI.CreateStyledEditBox(popup, 35, 14, true)
+    local ilvlInput, ilvlContainer = GUI.CreateStyledEditBox(detail, 35, 14, true)
     ilvlContainer:SetPoint("LEFT", ilvlLabel, "RIGHT", 5, 0)
     ilvlInput:SetText("264")
     popup.ilvlInput = ilvlInput
-    y = y - 28
 
     -- === Achievement Row ===
-    local achieveLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    achieveLabel:SetPoint("TOPLEFT", 30, y)
+    local achieveLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    achieveLabel:SetPoint("TOPLEFT", 30, -94)
     achieveLabel:SetText("Require Achievement:")
 
-    local achieveDropdown = CreateFrame("Frame", "AIPAddGroupAchieve", popup, "UIDropDownMenuTemplate")
+    local achieveDropdown = CreateFrame("Frame", "AIPAddGroupAchieve", detail, "UIDropDownMenuTemplate")
     achieveDropdown:SetPoint("LEFT", achieveLabel, "RIGHT", -10, -2)
     UIDropDownMenu_SetWidth(achieveDropdown, 180)
     UIDropDownMenu_SetText(achieveDropdown, "None")
     popup.achieveDropdown = achieveDropdown
     popup.selectedAchievement = nil
     GUI.FixDropdownStrata(achieveDropdown)
-    y = y - 35
 
     -- === Class/Spec Selection ===
-    local classLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    classLabel:SetPoint("TOPLEFT", 20, y)
+    local classLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    classLabel:SetPoint("TOPLEFT", 20, -128)
     classLabel:SetText("Looking For Classes:")
-    y = y - 18
+    local classHint = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    classHint:SetPoint("LEFT", classLabel, "RIGHT", 8, 0)
+    classHint:SetText("|cFF888888(click a role name to toggle all)|r")
 
     popup.classChecks = {}
+    local specSpacing = 55
 
-    -- Tank classes (4 specs)
-    local tankClassLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    tankClassLabel:SetPoint("TOPLEFT", 25, y)
-    tankClassLabel:SetText("Tanks:")
-    tankClassLabel:SetTextColor(0.5, 0.5, 1)
-    popup.classChecks.TANK = {}
-    local tankX = 80
-    local specSpacing = 55  -- Increased spacing to fit icons properly
-    for _, spec in ipairs(GUI.ClassSpecs.TANK) do
-        local check = CreateFrame("CheckButton", nil, popup, "UICheckButtonTemplate")
+    -- Role label doubling as an all/none toggle for its group
+    local function makeRoleToggle(text, r, g, b, yOff, roleKey)
+        local btn = CreateFrame("Button", nil, detail)
+        btn:SetSize(48, 16)
+        btn:SetPoint("TOPLEFT", 25, yOff)
+        local fs = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        fs:SetPoint("LEFT", 0, 0)
+        fs:SetText(text)
+        fs:SetTextColor(r, g, b)
+        btn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine("Click to check/uncheck all " .. text:gsub(":", ""))
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        btn:SetScript("OnClick", function()
+            local group = popup.classChecks[roleKey]
+            if not group then return end
+            -- If any are unchecked, check all; otherwise uncheck all
+            local anyUnchecked = false
+            for _, check in pairs(group) do
+                if not check:GetChecked() then anyUnchecked = true break end
+            end
+            for _, check in pairs(group) do
+                check:SetChecked(anyUnchecked)
+            end
+            if RefreshPreview then RefreshPreview() end
+        end)
+        return btn
+    end
+
+    local function makeSpecCheck(spec, x, yOff, roleKey)
+        local check = CreateFrame("CheckButton", nil, detail, "UICheckButtonTemplate")
         check:SetSize(20, 20)
-        check:SetPoint("TOPLEFT", tankX, y + 2)
+        check:SetPoint("TOPLEFT", x, yOff)
         check:SetChecked(true)
         local icon = check:CreateTexture(nil, "ARTWORK")
         icon:SetSize(20, 20)
@@ -6970,348 +7112,398 @@ function GUI.CreateAddGroupPopup()
             GameTooltip:Show()
         end)
         check:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        popup.classChecks.TANK[spec.class .. spec.spec] = check
+        check:SetScript("OnClick", function() if RefreshPreview then RefreshPreview() end end)
+        popup.classChecks[roleKey][spec.class .. spec.spec] = check
+        return check
+    end
+
+    popup.classChecks.TANK = {}
+    makeRoleToggle("Tanks:", 0.5, 0.5, 1, -146, "TANK")
+    local tankX = 80
+    for _, spec in ipairs(GUI.ClassSpecs.TANK) do
+        makeSpecCheck(spec, tankX, -144, "TANK")
         tankX = tankX + specSpacing
     end
-    y = y - 26
 
-    -- Healer classes (5 specs)
-    local healClassLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    healClassLabel:SetPoint("TOPLEFT", 25, y)
-    healClassLabel:SetText("Heals:")
-    healClassLabel:SetTextColor(0.5, 1, 0.5)
     popup.classChecks.HEALER = {}
+    makeRoleToggle("Heals:", 0.5, 1, 0.5, -172, "HEALER")
     local healX = 80
     for _, spec in ipairs(GUI.ClassSpecs.HEALER) do
-        local check = CreateFrame("CheckButton", nil, popup, "UICheckButtonTemplate")
-        check:SetSize(20, 20)
-        check:SetPoint("TOPLEFT", healX, y + 2)
-        check:SetChecked(true)
-        local icon = check:CreateTexture(nil, "ARTWORK")
-        icon:SetSize(20, 20)
-        icon:SetPoint("LEFT", check, "RIGHT", -2, 0)
-        icon:SetTexture(spec.icon)
-        check.specData = spec
-        check:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine(spec.class .. " - " .. spec.spec)
-            GameTooltip:Show()
-        end)
-        check:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        popup.classChecks.HEALER[spec.class .. spec.spec] = check
+        makeSpecCheck(spec, healX, -170, "HEALER")
         healX = healX + specSpacing
     end
-    y = y - 26
 
-    -- DPS classes (12 specs, split into rows of 5)
-    local dpsClassLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    dpsClassLabel:SetPoint("TOPLEFT", 25, y)
-    dpsClassLabel:SetText("DPS:")
-    dpsClassLabel:SetTextColor(1, 0.5, 0.5)
     popup.classChecks.DPS = {}
-    local dpsX = 80
+    makeRoleToggle("DPS:", 1, 0.5, 0.5, -198, "DPS")
+    local dpsX, dpsY = 80, -196
     local dpsCount = 0
-    local specsPerRow = 5
     for _, spec in ipairs(GUI.ClassSpecs.DPS) do
-        -- Start new row every 5 specs
-        if dpsCount > 0 and dpsCount % specsPerRow == 0 then
-            y = y - 26
+        if dpsCount > 0 and dpsCount % 5 == 0 then
+            dpsY = dpsY - 26
             dpsX = 80
         end
-        local check = CreateFrame("CheckButton", nil, popup, "UICheckButtonTemplate")
-        check:SetSize(20, 20)
-        check:SetPoint("TOPLEFT", dpsX, y + 2)
-        check:SetChecked(true)
-        local icon = check:CreateTexture(nil, "ARTWORK")
-        icon:SetSize(20, 20)
-        icon:SetPoint("LEFT", check, "RIGHT", -2, 0)
-        icon:SetTexture(spec.icon)
-        check.specData = spec
-        check:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine(spec.class .. " - " .. spec.spec)
-            GameTooltip:Show()
-        end)
-        check:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        popup.classChecks.DPS[spec.class .. spec.spec] = check
+        makeSpecCheck(spec, dpsX, dpsY, "DPS")
         dpsX = dpsX + specSpacing
         dpsCount = dpsCount + 1
     end
-    y = y - 32
 
     -- === Note Row ===
-    local noteLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    noteLabel:SetPoint("TOPLEFT", 20, y)
+    local noteLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    noteLabel:SetPoint("TOPLEFT", 20, -282)
     noteLabel:SetText("Note:")
-    local noteInput, noteContainer = GUI.CreateStyledEditBox(popup, 300, 18, false)
+    local noteInput, noteContainer = GUI.CreateStyledEditBox(detail, 300, 18, false)
     noteContainer:SetPoint("LEFT", noteLabel, "RIGHT", 5, 0)
     popup.noteInput = noteInput
-    y = y - 30
 
     -- === Auto-Invite Keyword Row ===
-    local keywordLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    keywordLabel:SetPoint("TOPLEFT", 20, y)
+    local keywordLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    keywordLabel:SetPoint("TOPLEFT", 20, -310)
     keywordLabel:SetText("Invite Keyword:")
     keywordLabel:SetTextColor(0.4, 0.8, 1)
-    local keywordInput, keywordContainer = GUI.CreateStyledEditBox(popup, 110, 18, false)
+    local keywordInput, keywordContainer = GUI.CreateStyledEditBox(detail, 110, 18, false)
     keywordContainer:SetPoint("LEFT", keywordLabel, "RIGHT", 5, 0)
     keywordInput:SetText(AIP.db and AIP.db.triggers or "invme-auto")
     popup.keywordInput = keywordInput
 
-    local keywordHint = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    keywordHint:SetPoint("LEFT", keywordContainer, "RIGHT", 5, 0)
-    keywordHint:SetText("(whisper to join)")
-    keywordHint:SetTextColor(0.5, 0.5, 0.5)
-    y = y - 30
+    local keywordHintText = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    keywordHintText:SetPoint("LEFT", keywordContainer, "RIGHT", 5, 0)
+    keywordHintText:SetText("(whisper to join)")
+    keywordHintText:SetTextColor(0.5, 0.5, 0.5)
 
     -- === Broadcast checkbox ===
-    local broadcastCheck = CreateFrame("CheckButton", nil, popup, "UICheckButtonTemplate")
+    local broadcastCheck = CreateFrame("CheckButton", nil, detail, "UICheckButtonTemplate")
     broadcastCheck:SetSize(22, 22)
-    broadcastCheck:SetPoint("TOPLEFT", 20, y)
+    broadcastCheck:SetPoint("TOPLEFT", 20, -336)
     broadcastCheck:SetChecked(true)
     popup.broadcastCheck = broadcastCheck
-    local broadcastLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    local broadcastLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     broadcastLabel:SetPoint("LEFT", broadcastCheck, "RIGHT", 2, 0)
     broadcastLabel:SetText("Broadcast to chat channels")
-    y = y - 28
 
-    -- === Reserved Items Section (read-only display from DB) ===
-    local reservedLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    reservedLabel:SetPoint("TOPLEFT", 20, y)
+    -- === Reserved Items (read-only display from DB) ===
+    local reservedLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    reservedLabel:SetPoint("TOPLEFT", 20, -362)
     reservedLabel:SetText("Reserved Items:")
-    reservedLabel:SetTextColor(1, 0.5, 0)  -- Orange
+    reservedLabel:SetTextColor(1, 0.5, 0)
 
-    local reservedEditHint = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    local reservedEditHint = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     reservedEditHint:SetPoint("LEFT", reservedLabel, "RIGHT", 10, 0)
     reservedEditHint:SetText("|cFF888888(edit in Raid Mgmt tab)|r")
-    y = y - 18
 
-    -- Reserved Items display (read-only)
-    local reservedFrame = CreateFrame("Frame", nil, popup)
-    reservedFrame:SetSize(350, 50)
-    reservedFrame:SetPoint("TOPLEFT", 20, y)
+    local reservedFrame = CreateFrame("Frame", nil, detail)
+    reservedFrame:SetSize(390, 34)
+    reservedFrame:SetPoint("TOPLEFT", 20, -380)
     GUI.ApplyBackdrop(reservedFrame, "Inset", 0.9)
 
     local reservedDisplay = reservedFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    reservedDisplay:SetPoint("TOPLEFT", 8, -8)
-    reservedDisplay:SetPoint("BOTTOMRIGHT", -8, 8)
+    reservedDisplay:SetPoint("TOPLEFT", 8, -6)
+    reservedDisplay:SetPoint("BOTTOMRIGHT", -8, 6)
     reservedDisplay:SetJustifyH("LEFT")
     reservedDisplay:SetJustifyV("TOP")
     reservedDisplay:SetText("|cFF666666(none)|r")
     popup.reservedDisplay = reservedDisplay
 
-    y = y - 58
+    -- ========================================================================
+    -- FOOTER: customize toggle, live preview, schedule line, buttons
+    -- ========================================================================
+    local customizeBtn = CreateFrame("Button", nil, popup)
+    customizeBtn:SetSize(140, 18)
+    customizeBtn:SetPoint("BOTTOMLEFT", 20, 134)
+    local customizeText = customizeBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    customizeText:SetPoint("LEFT", 0, 0)
+    customizeText:SetText("|cFF66AAFF[+] Customize...|r")
+    customizeBtn.text = customizeText
+    popup.customizeBtn = customizeBtn
 
-    -- === Buttons ===
+    local previewLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    previewLabel:SetPoint("BOTTOMLEFT", 20, 116)
+    previewLabel:SetText("PREVIEW")
+    previewLabel:SetTextColor(0.6, 0.8, 1)
+    local previewHint = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    previewHint:SetPoint("LEFT", previewLabel, "RIGHT", 8, 0)
+    previewHint:SetText("|cFF888888(exactly what gets broadcast)|r")
+
+    local previewFrame = CreateFrame("Frame", nil, popup)
+    previewFrame:SetSize(390, 46)
+    previewFrame:SetPoint("BOTTOMLEFT", 20, 68)
+    GUI.ApplyBackdrop(previewFrame, "Inset", 0.9)
+
+    local previewText = previewFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    previewText:SetPoint("TOPLEFT", 8, -6)
+    previewText:SetPoint("BOTTOMRIGHT", -8, 6)
+    previewText:SetJustifyH("LEFT")
+    previewText:SetJustifyV("TOP")
+    popup.previewText = previewText
+
+    local scheduleText = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    scheduleText:SetPoint("BOTTOMLEFT", 20, 50)
+    scheduleText:SetPoint("RIGHT", popup, "RIGHT", -20, 0)
+    scheduleText:SetJustifyH("LEFT")
+    scheduleText:SetTextColor(0.6, 0.6, 0.6)
+    popup.scheduleText = scheduleText
+
+    -- ========================================================================
+    -- LOGIC: role spec collection, preview, presets, defaults, expansion
+    -- ========================================================================
+
+    -- Collect checked specs -> roleSpecs (codes), lookingForSpecs, selectedClasses
+    local function CollectRoleSpecs()
+        local LF = AIP.LFMFormat
+        local roleSpecs = {TANK = {}, HEALER = {}, MDPS = {}, RDPS = {}}
+        local lookingForSpecs = {}
+        local selectedClasses = {TANK = {}, HEALER = {}, MDPS = {}, RDPS = {}}
+
+        for role, roleChecks in pairs(popup.classChecks) do
+            for _, check in pairs(roleChecks) do
+                if check:GetChecked() and check.specData then
+                    local targetRole = role
+                    if role == "DPS" then
+                        targetRole = check.specData.melee and "MDPS" or "RDPS"
+                    end
+
+                    local code = LF and LF.SpecCode(check.specData)
+                        or (check.specData.class:sub(1, 1) .. check.specData.spec:sub(1, 1))
+                    local found = false
+                    for _, existing in ipairs(roleSpecs[targetRole]) do
+                        if existing == code then found = true break end
+                    end
+                    if not found then
+                        table.insert(roleSpecs[targetRole], code)
+                        table.insert(lookingForSpecs, code)
+                    end
+
+                    table.insert(selectedClasses[targetRole], {
+                        class = check.specData.class,
+                        spec = check.specData.spec,
+                    })
+                end
+            end
+        end
+        return roleSpecs, lookingForSpecs, selectedClasses
+    end
+
+    -- Build the LFM config table off the current popup state
+    local function BuildConfig()
+        local roleSpecs, lookingForSpecs, selectedClasses = CollectRoleSpecs()
+        local achieveLink = ""
+        if popup.selectedAchievement then
+            achieveLink = GetAchievementLink(popup.selectedAchievement) or ""
+        end
+        local inviteKeyword = popup.keywordInput:GetText()
+        if not inviteKeyword or inviteKeyword == "" then
+            inviteKeyword = AIP.db and AIP.db.triggers or "invme-auto"
+        end
+        return {
+            raidKey = GetRaidKey(),
+            weekly = popup.weeklyToken,
+            tanks = {current = 0, needed = tonumber(popup.tankInput:GetText()) or 2},
+            healers = {current = 0, needed = tonumber(popup.healInput:GetText()) or 6},
+            mdps = {current = 0, needed = tonumber(popup.mdpsInput:GetText()) or 8},
+            rdps = {current = 0, needed = tonumber(popup.rdpsInput:GetText()) or 9},
+            gsMin = tonumber(popup.gsInput:GetText()) or 0,
+            ilvlMin = tonumber(popup.ilvlInput:GetText()) or 0,
+            roleSpecs = roleSpecs,
+            keyword = inviteKeyword,
+            achievementLink = achieveLink,
+            note = popup.noteInput:GetText() or "",
+            reservedItems = AIP.db and AIP.db.reservedItems or "",
+        }, roleSpecs, lookingForSpecs, selectedClasses
+    end
+
+    RefreshPreview = function()
+        if not AIP.LFMFormat then return end
+        local cfg = BuildConfig()
+        local msg, trimmed = AIP.LFMFormat.BuildLFM(cfg)
+        previewText:SetText(msg)
+
+        -- Schedule line: the real rotor math, so the pacing is visible
+        local targets = GUI.BuildBroadcastTargets and GUI.BuildBroadcastTargets("lfm") or {}
+        local names = {}
+        for _, t in ipairs(targets) do
+            names[#names + 1] = t.kind == "CHANNEL" and t.name or t.kind
+        end
+        local interval = (AIP.db and AIP.db.autoSpamInterval) or 90
+        local spacing = math.max(15, math.floor(interval / math.max(1, #targets)))
+        local line = "Sends to: " .. (#names > 0 and table.concat(names, ", ") or "-")
+            .. "  -  one channel every " .. spacing .. "s, each ~" .. math.max(interval, spacing * math.max(1, #targets)) .. "s"
+        if trimmed and #trimmed > 0 then
+            line = line .. "  |cFFFF6666(trimmed: " .. table.concat(trimmed, ", ") .. ")|r"
+        end
+        scheduleText:SetText(line)
+    end
+    popup.RefreshPreview = RefreshPreview
+
+    ApplyTemplateDefaults = function()
+        local raidKey = GetRaidKey()
+        local defaults = GUI.RaidTemplateDefaults[raidKey]
+        if defaults then
+            popup.tankInput:SetText(tostring(defaults.tanks))
+            popup.healInput:SetText(tostring(defaults.healers))
+            local mdps = defaults.mdps or math.floor((defaults.dps or 0) / 2)
+            local rdps = defaults.rdps or math.ceil((defaults.dps or 0) / 2)
+            popup.mdpsInput:SetText(tostring(mdps))
+            popup.rdpsInput:SetText(tostring(rdps))
+            popup.gsInput:SetText(tostring(defaults.gs))
+            popup.ilvlInput:SetText(tostring(defaults.ilvl))
+        end
+        GUI.UpdateAchievementDropdown(popup, raidKey)
+        popup.selectedRaid = raidKey
+        UpdateCustomFieldVisibility()
+        UpdateLockoutWarning()
+        UpdateWeeklyStrip()
+        RefreshPreview()
+    end
+    popup.ApplyTemplateDefaults = ApplyTemplateDefaults
+
+    -- Expansion toggle: collapsed = preset tiles, expanded = the full form
+    local function SetExpanded(expanded)
+        popup.expanded = expanded
+        if expanded then
+            quickLabel:Hide()
+            for _, tile in pairs(popup.presetTiles) do tile:Hide() end
+            detail:Show()
+            popup:SetHeight(EXPANDED_HEIGHT)
+            customizeText:SetText("|cFF66AAFF[-] Hide details|r")
+        else
+            quickLabel:Show()
+            popup.RefreshTiles()
+            detail:Hide()
+            popup:SetHeight(COLLAPSED_HEIGHT)
+            customizeText:SetText("|cFF66AAFF[+] Customize...|r")
+        end
+    end
+    popup.SetExpanded = SetExpanded
+    customizeBtn:SetScript("OnClick", function() SetExpanded(not popup.expanded) end)
+
+    -- Apply a preset config to all fields
+    local function ApplyPreset(cfg)
+        if not cfg then return end
+        popup.raidType = cfg.raidType or "ICC"
+        popup.raidSize = cfg.raidSize or "25"
+        popup.heroicCheck:SetChecked(cfg.heroic and true or false)
+        popup.weeklyToken = cfg.weekly
+        UpdateSizeDropdown()
+        UIDropDownMenu_SetText(sizeDropdown, popup.raidSize)
+        UpdateRaidDropdownText()
+        ApplyTemplateDefaults()
+        -- Preset-specific overrides on top of the template defaults
+        if cfg.tanks then popup.tankInput:SetText(tostring(cfg.tanks)) end
+        if cfg.healers then popup.healInput:SetText(tostring(cfg.healers)) end
+        if cfg.mdps then popup.mdpsInput:SetText(tostring(cfg.mdps)) end
+        if cfg.rdps then popup.rdpsInput:SetText(tostring(cfg.rdps)) end
+        if cfg.gs then popup.gsInput:SetText(tostring(cfg.gs)) end
+        if cfg.ilvl then popup.ilvlInput:SetText(tostring(cfg.ilvl)) end
+        if cfg.keyword then popup.keywordInput:SetText(cfg.keyword) end
+        if cfg.note then popup.noteInput:SetText(cfg.note) end
+        RefreshPreview()
+    end
+    popup.ApplyPreset = ApplyPreset
+
+    -- Refresh the three preset tiles' labels/actions
+    function popup.RefreshTiles()
+        local tiles = popup.presetTiles
+
+        -- Tile 1: last used
+        local last = AIP.db and AIP.db.lastListingConfig
+        if last and last.raidType then
+            local key = (last.raidType or "?") .. (last.raidSize or "") .. (last.heroic and "H" or "N")
+            tiles.last.titleText:SetText("|cFFFFD700* Last|r")
+            tiles.last.subText:SetText(key .. (last.gs and ("  " .. last.gs .. "+") or ""))
+            tiles.last.tooltip = "Repeat your last listing"
+            tiles.last:SetScript("OnClick", function() ApplyPreset(last) end)
+            tiles.last:Show()
+        else
+            tiles.last.titleText:SetText("|cFF888888* Last|r")
+            tiles.last.subText:SetText("|cFF666666(none yet)|r")
+            tiles.last.tooltip = "Post a listing once and it appears here"
+            tiles.last:SetScript("OnClick", nil)
+            tiles.last:Show()
+        end
+
+        -- Tile 2: this week's raid quest
+        local held = AIP.Weekly and AIP.Weekly.Current()
+        if held then
+            tiles.weekly.titleText:SetText("|cFF33CCFF[W] Weekly|r")
+            tiles.weekly.subText:SetText(held.quest.boss:sub(1, 18))
+            tiles.weekly.tooltip = held.quest.title .. " (" .. held.quest.raid .. ")"
+            tiles.weekly:SetScript("OnClick", function()
+                ApplyPreset({ raidType = held.quest.raid, raidSize = "10", heroic = false, weekly = held.quest.token })
+            end)
+        else
+            tiles.weekly.titleText:SetText("|cFF888888[W] Weekly|r")
+            tiles.weekly.subText:SetText("|cFF666666not in log|r")
+            tiles.weekly.tooltip = "Pick up the weekly raid quest from Archmage Lan'dalock in Dalaran"
+            tiles.weekly:SetScript("OnClick", nil)
+        end
+        tiles.weekly:Show()
+
+        -- Tile 3: fresh default
+        tiles.fresh.titleText:SetText("ICC25H")
+        tiles.fresh.subText:SetText("Fresh  5800+")
+        tiles.fresh.tooltip = "Standard ICC25 Heroic listing"
+        tiles.fresh:SetScript("OnClick", function()
+            ApplyPreset({ raidType = "ICC", raidSize = "25", heroic = true })
+        end)
+        tiles.fresh:Show()
+    end
+
+    -- Live preview refresh on any text change
+    for _, input in ipairs({tankInput, healInput, mdpsInput, rdpsInput, gsInput, ilvlInput, noteInput, keywordInput, customInput}) do
+        input:HookScript("OnTextChanged", function() RefreshPreview() end)
+    end
+    heroicCheck:SetScript("OnClick", function() ApplyTemplateDefaults() end)
+
+    -- ========================================================================
+    -- BUTTONS
+    -- ========================================================================
     local createBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-    createBtn:SetSize(90, 24)
-    createBtn:SetPoint("BOTTOMLEFT", 100, 40)
-    createBtn:SetText("Create")
+    createBtn:SetSize(100, 24)
+    createBtn:SetPoint("BOTTOMLEFT", 100, 16)
+    createBtn:SetText("Post Group")
     createBtn:SetScript("OnClick", function()
         local raidKey = GetRaidKey()
         if not raidKey then
             AIP.Print("Please configure raid settings")
             return
         end
-
-        -- Get the invite keyword
-        local inviteKeyword = popup.keywordInput:GetText()
-        if not inviteKeyword or inviteKeyword == "" then
-            inviteKeyword = AIP.db and AIP.db.triggers or "invme-auto"
+        if not AIP.LFMFormat then
+            AIP.Print("LFMFormat module missing - cannot build the listing message")
+            return
         end
 
-        -- Build LFM message
-        local achieveLink = ""
-        if popup.selectedAchievement then
-            achieveLink = GetAchievementLink(popup.selectedAchievement) or ""
+        local cfg, roleSpecs, lookingForSpecs, selectedClasses = BuildConfig()
+        local msg, trimmed = AIP.LFMFormat.BuildLFM(cfg)
+        if trimmed and #trimmed > 0 then
+            AIP.Print("|cFFFFFF00Listing trimmed to fit chat:|r dropped " .. table.concat(trimmed, ", "))
         end
 
-        -- Include keyword hint in the broadcast message
-        local noteText = popup.noteInput:GetText() or ""
-        local keywordHint = string.format('w/ "%s"', inviteKeyword)
-
-        -- Get GS and iLvl without rounding
-        local gsValue = tonumber(popup.gsInput:GetText()) or 5500
-        local ilvlValue = tonumber(popup.ilvlInput:GetText()) or 0
-
-        -- Build "LF:" class/spec list based on CHECKED specs (what we're looking for)
-        -- Ultra-short 2-3 letter codes for compact display
-        local specCodes = {
-            -- Tanks: class initial + spec initial
-            WARRIOR_Protection = "PW",      -- Prot Warrior
-            PALADIN_Protection = "PP",      -- Prot Paladin
-            DEATHKNIGHT_Blood = "BDK",      -- Blood DK
-            DRUID_FeralBear = "BD",         -- Bear Druid
-            -- Healers
-            PRIEST_Holy = "HP",             -- Holy Priest
-            PRIEST_Discipline = "DP",       -- Disc Priest
-            PALADIN_Holy = "HPal",          -- Holy Paladin
-            DRUID_Restoration = "RD",       -- Resto Druid
-            SHAMAN_Restoration = "RS",      -- Resto Shaman
-            -- Melee DPS
-            WARRIOR_ArmsFury = "AW",        -- Arms/Fury Warrior
-            PALADIN_Retribution = "Ret",    -- Ret Paladin
-            DEATHKNIGHT_Frost = "FDK",      -- Frost DK
-            DEATHKNIGHT_Unholy = "UDK",     -- Unholy DK
-            ROGUE_All = "Rog",              -- Rogue
-            DRUID_FeralCat = "FD",          -- Feral Druid (cat)
-            SHAMAN_Enhancement = "Enh",     -- Enh Shaman
-            -- Ranged DPS
-            MAGE_All = "Mag",               -- Mage
-            WARLOCK_All = "Loc",            -- Warlock
-            HUNTER_All = "Hun",             -- Hunter
-            DRUID_Balance = "Boom",         -- Boomkin
-            SHAMAN_Elemental = "Ele",       -- Ele Shaman
-            PRIEST_Shadow = "SP",           -- Shadow Priest
-        }
-        -- Map specData to code key
-        local function getSpecCodeKey(specData)
-            local specKey = specData.spec:gsub("%s+", ""):gsub("[%(%)/-]", "")
-            return specData.class .. "_" .. specKey
-        end
-
-        -- Organize by role for array format [T:PP,BDK H:HP,RD M:AW,Ret R:Mag,Hun]
-        local roleSpecs = {TANK = {}, HEALER = {}, MDPS = {}, RDPS = {}}
-        local lookingForSpecs = {}  -- For backwards compat
-
-        if popup.classChecks then
-            for role, roleChecks in pairs(popup.classChecks) do
-                for specKey, check in pairs(roleChecks) do
-                    if check:GetChecked() and check.specData then
-                        local codeKey = getSpecCodeKey(check.specData)
-                        local code = specCodes[codeKey] or (check.specData.class:sub(1,1) .. check.specData.spec:sub(1,1))
-
-                        -- Determine target role
-                        local targetRole = role
-                        if role == "DPS" then
-                            targetRole = check.specData.melee and "MDPS" or "RDPS"
-                        end
-
-                        -- Avoid duplicates per role
-                        local found = false
-                        for _, existing in ipairs(roleSpecs[targetRole] or {}) do
-                            if existing == code then found = true break end
-                        end
-                        if not found then
-                            roleSpecs[targetRole] = roleSpecs[targetRole] or {}
-                            table.insert(roleSpecs[targetRole], code)
-                            table.insert(lookingForSpecs, code)
-                        end
-                    end
-                end
-            end
-        end
-
-        -- Build the LF array string: [T:PP,BDK H:HP,RD M:AW R:Mag]
-        local lfParts = {}
-        if #(roleSpecs.TANK or {}) > 0 then
-            table.insert(lfParts, "T:" .. table.concat(roleSpecs.TANK, ","))
-        end
-        if #(roleSpecs.HEALER or {}) > 0 then
-            table.insert(lfParts, "H:" .. table.concat(roleSpecs.HEALER, ","))
-        end
-        if #(roleSpecs.MDPS or {}) > 0 then
-            table.insert(lfParts, "M:" .. table.concat(roleSpecs.MDPS, ","))
-        end
-        if #(roleSpecs.RDPS or {}) > 0 then
-            table.insert(lfParts, "R:" .. table.concat(roleSpecs.RDPS, ","))
-        end
-
-        local lfClassStr = ""
-        if #lfParts > 0 then
-            lfClassStr = "[" .. table.concat(lfParts, " ") .. "] "
-        end
-
-        -- Build message with GS value (not rounded) and iLvl
-        local gsDisplay = tostring(gsValue) .. "+"
-        local ilvlDisplay = ilvlValue > 0 and (" iLvl:" .. tostring(ilvlValue) .. "+") or ""
-        local mdpsNeeded = tonumber(popup.mdpsInput:GetText()) or 8
-        local rdpsNeeded = tonumber(popup.rdpsInput:GetText()) or 9
-
-        -- Calculate total slots
-        local tanksNeeded = tonumber(popup.tankInput:GetText()) or 2
-        local healersNeeded = tonumber(popup.healInput:GetText()) or 6
-        local totalNeeded = tanksNeeded + healersNeeded + mdpsNeeded + rdpsNeeded
-        local totalFilled = 0  -- Start with 0, will be updated when members join
-
-        local msg = string.format("LFM %s [%d/%d] [T:0/%d H:0/%d M:0/%d R:0/%d] %s%s %s%s %s %s",
-            raidKey,
-            totalFilled, totalNeeded,
-            tanksNeeded,
-            healersNeeded,
-            mdpsNeeded,
-            rdpsNeeded,
-            gsDisplay,
-            ilvlDisplay,
-            lfClassStr,
-            keywordHint,
-            achieveLink,
-            noteText)
-
-        -- Store selected classes for the group data
-        local selectedClasses = {TANK = {}, HEALER = {}, MDPS = {}, RDPS = {}}
-        if popup.classChecks then
-            for role, roleChecks in pairs(popup.classChecks) do
-                -- Map DPS to MDPS/RDPS based on spec
-                local targetRole = role
-                if role == "DPS" then
-                    targetRole = "MDPS"  -- Default, will be refined
-                end
-                for specKey, check in pairs(roleChecks) do
-                    if check:GetChecked() and check.specData then
-                        -- Determine if melee or ranged
-                        local isMelee = check.specData.melee
-                        if role == "DPS" then
-                            targetRole = isMelee and "MDPS" or "RDPS"
-                        end
-                        selectedClasses[targetRole] = selectedClasses[targetRole] or {}
-                        table.insert(selectedClasses[targetRole], {
-                            class = check.specData.class,
-                            spec = check.specData.spec,
-                        })
-                    end
-                end
-            end
-        end
-
-        -- Get reserved items from DB (editing happens in Raid Mgmt tab)
-        local reservedItems = AIP.db and AIP.db.reservedItems or ""
-        -- Format reserved items for message (replace newlines with commas)
-        local reservedItemsMsg = ""
-        if reservedItems and reservedItems ~= "" then
-            local itemList = reservedItems:gsub("\n", ", "):gsub(", $", "")
-            if itemList ~= "" then
-                reservedItemsMsg = " [Res: " .. itemList .. "]"
-            end
-        end
-
-        -- Add reserved items to the message if present
-        if reservedItemsMsg ~= "" then
-            msg = msg .. reservedItemsMsg
-        end
-
-        -- Get loot ban data from DB (managed in Raid Mgmt tab)
+        local gsValue = cfg.gsMin
+        local ilvlValue = cfg.ilvlMin
+        local inviteKeyword = cfg.keyword
+        local noteText = cfg.note
+        local reservedItems = cfg.reservedItems
         local lootBans = AIP.db and AIP.db.lootBans or {}
 
         if AIP.GroupTracker and AIP.GroupTracker.AddGroup then
             AIP.GroupTracker.AddGroup({
                 leader = UnitName("player"),
                 raid = raidKey,
+                weekly = popup.weeklyToken,
                 message = msg,
                 gsMin = gsValue,
                 ilvlMin = ilvlValue,
-                tanks = {current = 0, needed = tonumber(popup.tankInput:GetText()) or 2},
-                healers = {current = 0, needed = tonumber(popup.healInput:GetText()) or 6},
-                mdps = {current = 0, needed = mdpsNeeded},
-                rdps = {current = 0, needed = rdpsNeeded},
+                tanks = {current = 0, needed = cfg.tanks.needed},
+                healers = {current = 0, needed = cfg.healers.needed},
+                mdps = {current = 0, needed = cfg.mdps.needed},
+                rdps = {current = 0, needed = cfg.rdps.needed},
                 achievementId = popup.selectedAchievement,
-                inviteKeyword = inviteKeyword,  -- Store the keyword for Quick Req
-                selectedClasses = selectedClasses,  -- Store class preferences
-                lookingForSpecs = lookingForSpecs,  -- Store for message regeneration (class/spec short names)
-                roleSpecs = roleSpecs,  -- Store organized by role: {TANK={codes}, HEALER={codes}, ...}
-                note = noteText,  -- Store note for message regeneration
-                reservedItems = reservedItems,  -- Store reserved items
-                lootBans = lootBans,  -- Store loot bans (from DB)
+                inviteKeyword = inviteKeyword,
+                selectedClasses = selectedClasses,
+                lookingForSpecs = lookingForSpecs,
+                roleSpecs = roleSpecs,
+                note = noteText,
+                reservedItems = reservedItems,
+                lootBans = lootBans,
                 isOwn = true,
                 time = time(),
             })
@@ -7320,32 +7512,51 @@ function GUI.CreateAddGroupPopup()
         -- Store our active LFM data for matching incoming LFG players
         GUI.MyGroup = {
             raid = raidKey,
+            weekly = popup.weeklyToken,
             gsMin = gsValue,
             ilvlMin = ilvlValue,
-            tanks = {current = 0, needed = tonumber(popup.tankInput:GetText()) or 2},
-            healers = {current = 0, needed = tonumber(popup.healInput:GetText()) or 6},
-            mdps = {current = 0, needed = mdpsNeeded},
-            rdps = {current = 0, needed = rdpsNeeded},
+            tanks = {current = 0, needed = cfg.tanks.needed},
+            healers = {current = 0, needed = cfg.healers.needed},
+            mdps = {current = 0, needed = cfg.mdps.needed},
+            rdps = {current = 0, needed = cfg.rdps.needed},
             inviteKeyword = inviteKeyword,
             selectedClasses = selectedClasses,
-            roleSpecs = roleSpecs,  -- Store organized by role
+            roleSpecs = roleSpecs,
             time = time(),
         }
 
-        -- Set player mode to LFM
+        -- Remember this config for the Quick Post "Last" tile
+        if AIP.db then
+            AIP.db.lastListingConfig = {
+                raidType = popup.raidType,
+                raidSize = popup.raidSize,
+                heroic = popup.heroicCheck:GetChecked() and true or false,
+                weekly = popup.weeklyToken,
+                tanks = cfg.tanks.needed,
+                healers = cfg.healers.needed,
+                mdps = cfg.mdps.needed,
+                rdps = cfg.rdps.needed,
+                gs = gsValue,
+                ilvl = ilvlValue,
+                keyword = inviteKeyword,
+                note = noteText,
+            }
+        end
+
         if AIP.SetPlayerMode then
             AIP.SetPlayerMode("lfm")
         end
 
         if popup.broadcastCheck:GetChecked() then
-            -- Store message and start auto-broadcast
             AIP.db.spamMessage = msg
-            GUI.StartBroadcast("lfm", msg, AIP.db.autoSpamInterval or 60)
+            GUI.StartBroadcast("lfm", msg, AIP.db.autoSpamInterval or 90)
         end
 
         popup:Hide()
         GUI.RefreshBrowserTab("lfm")
-        AIP.Print("Group listing created for " .. raidKey .. "! |cFF00FF00Auto-broadcasting started.|r")
+        AIP.Print("Group listing created for " .. raidKey ..
+            (popup.weeklyToken and (" |cFF33CCFF[Weekly: " .. popup.weeklyToken .. "]|r") or "") ..
+            "!" .. (popup.broadcastCheck:GetChecked() and " |cFF00FF00Auto-broadcasting started.|r" or ""))
     end)
 
     local cancelBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
@@ -7354,8 +7565,11 @@ function GUI.CreateAddGroupPopup()
     cancelBtn:SetText("Cancel")
     cancelBtn:SetScript("OnClick", function() popup:Hide() end)
 
-    -- Apply initial defaults
+    -- Apply initial defaults, start collapsed (preset-first)
+    UpdateSizeDropdown()
+    UpdateRaidDropdownText()
     ApplyTemplateDefaults()
+    SetExpanded(false)
 
     popup:Hide()
     tinsert(UISpecialFrames, "AIPAddGroupPopup")
@@ -7383,6 +7597,7 @@ function GUI.UpdateAchievementDropdown(popup, raidKey)
         info.func = function()
             popup.selectedAchievement = nil
             UIDropDownMenu_SetText(popup.achieveDropdown, "None")
+            if popup.RefreshPreview then popup.RefreshPreview() end
         end
         UIDropDownMenu_AddButton(info)
 
@@ -7393,6 +7608,7 @@ function GUI.UpdateAchievementDropdown(popup, raidKey)
             info.func = function()
                 popup.selectedAchievement = achieve.id
                 UIDropDownMenu_SetText(popup.achieveDropdown, achieve.name)
+                if popup.RefreshPreview then popup.RefreshPreview() end
             end
             UIDropDownMenu_AddButton(info)
         end
@@ -7407,6 +7623,16 @@ function GUI.ShowEnrollPopup()
     if not GUI.EnrollPopup then
         GUI.CreateEnrollPopup()
     end
+    -- Restore the last enrollment config (raid/size/heroic/weekly)
+    local last = AIP.db and AIP.db.lastEnrollConfig
+    if last and last.raidType then
+        GUI.EnrollPopup.raidType = last.raidType
+        GUI.EnrollPopup.raidSize = last.raidSize or GUI.EnrollPopup.raidSize
+        if GUI.EnrollPopup.heroicCheck then
+            GUI.EnrollPopup.heroicCheck:SetChecked(last.heroic and true or false)
+        end
+        GUI.EnrollPopup.weeklyToken = last.weekly
+    end
     -- Update size dropdown for current raid selection
     if GUI.EnrollPopup.UpdateSizeDropdown then
         GUI.EnrollPopup.UpdateSizeDropdown()
@@ -7414,6 +7640,9 @@ function GUI.ShowEnrollPopup()
     -- Update raid dropdown text with lockout color
     if GUI.EnrollPopup.UpdateRaidDropdownText then
         GUI.EnrollPopup.UpdateRaidDropdownText()
+    end
+    if GUI.EnrollPopup.UpdateWeeklyStrip then
+        GUI.EnrollPopup.UpdateWeeklyStrip()
     end
     GUI.EnrollPopup:Show()
 end
@@ -7809,6 +8038,27 @@ function GUI.CreateEnrollPopup()
     popup.customContainer = customContainer
     popup.customY = y  -- Store for layout adjustment
 
+    -- Weekly quest status strip (shares the custom-name row; a weekly
+    -- selection and CUSTOM are mutually exclusive)
+    popup.weeklyToken = nil
+    local weeklyStrip = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    weeklyStrip:SetPoint("TOPLEFT", 30, y)
+    weeklyStrip:SetPoint("RIGHT", popup, "RIGHT", -20, 0)
+    weeklyStrip:SetJustifyH("LEFT")
+    weeklyStrip:Hide()
+    popup.weeklyStrip = weeklyStrip
+
+    local function UpdateWeeklyStrip()
+        if popup.weeklyToken and AIP.Weekly then
+            local q = AIP.Weekly.ForToken(popup.weeklyToken)
+            weeklyStrip:SetText("|cFF33CCFF[W]|r " .. (q and q.boss or popup.weeklyToken) .. ": " .. AIP.Weekly.StatusText(popup.weeklyToken))
+            weeklyStrip:Show()
+        else
+            weeklyStrip:Hide()
+        end
+    end
+    popup.UpdateWeeklyStrip = UpdateWeeklyStrip
+
     -- Helper to build raid key
     local function GetRaidKey()
         local raidType = popup.raidType or "ICC"
@@ -7934,14 +8184,15 @@ function GUI.CreateEnrollPopup()
     end
     popup.UpdateSizeDropdown = UpdateSizeDropdown
 
-    -- Helper to update raid dropdown text with lockout color
+    -- Helper to update raid dropdown text with lockout color (+ weekly tag)
     local function UpdateRaidDropdownText()
         local raidType = popup.raidType or "ICC"
+        local prefix = popup.weeklyToken and "|cFF33CCFF[W]|r " or ""
         local isLocked = AIP.TreeBrowser and AIP.TreeBrowser.IsLockedToInstance and AIP.TreeBrowser.IsLockedToInstance(raidType)
         if isLocked then
-            UIDropDownMenu_SetText(raidTypeDropdown, "|cFFFF6666" .. raidType .. "|r")
+            UIDropDownMenu_SetText(raidTypeDropdown, prefix .. "|cFFFF6666" .. raidType .. "|r")
         else
-            UIDropDownMenu_SetText(raidTypeDropdown, raidType)
+            UIDropDownMenu_SetText(raidTypeDropdown, prefix .. raidType)
         end
     end
     popup.UpdateRaidDropdownText = UpdateRaidDropdownText
@@ -7951,6 +8202,16 @@ function GUI.CreateEnrollPopup()
         level = level or 1
 
         if level == 1 then
+            -- Weekly raid quest category pinned first
+            if AIP.Weekly then
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = "|cFF33CCFFWeekly Raid Quest|r"
+                info.hasArrow = true
+                info.menuList = "AIP_WEEKLY"
+                info.notCheckable = true
+                info.keepShownOnClick = true
+                UIDropDownMenu_AddButton(info, level)
+            end
             -- Main level: show categories with arrows
             for _, cat in ipairs(GUI.RaidCategories) do
                 local info = UIDropDownMenu_CreateInfo()
@@ -7962,6 +8223,37 @@ function GUI.CreateEnrollPopup()
                 UIDropDownMenu_AddButton(info, level)
             end
         elseif level == 2 then
+            if menuList == "AIP_WEEKLY" and AIP.Weekly then
+                local held = AIP.Weekly.Current()
+                local ordered = {}
+                if held then ordered[#ordered + 1] = held.quest end
+                for _, q in ipairs(AIP.Weekly.Quests) do
+                    if not held or q.token ~= held.quest.token then
+                        ordered[#ordered + 1] = q
+                    end
+                end
+                for _, q in ipairs(ordered) do
+                    local info = UIDropDownMenu_CreateInfo()
+                    local tag = (held and q.token == held.quest.token) and " |cFF00FF00(this week)|r" or ""
+                    info.text = q.boss .. " (" .. q.raid .. ")" .. tag
+                    info.value = q.token
+                    info.func = function()
+                        popup.weeklyToken = q.token
+                        popup.raidType = q.raid
+                        popup.raidSize = "10"
+                        popup.heroicCheck:SetChecked(false)
+                        UpdateRaidDropdownText()
+                        UpdateSizeDropdown()
+                        UpdateCustomFieldVisibility()
+                        UpdateWeeklyStrip()
+                        UpdateAchievementsList()
+                        CloseDropDownMenus()
+                    end
+                    info.checked = (popup.weeklyToken == q.token)
+                    UIDropDownMenu_AddButton(info, level)
+                end
+                return
+            end
             -- Submenu: show raids in category
             for _, cat in ipairs(GUI.RaidCategories) do
                 if cat.id == menuList then
@@ -7977,9 +8269,11 @@ function GUI.CreateEnrollPopup()
                         info.value = rt
                         info.func = function()
                             popup.raidType = rt
+                            popup.weeklyToken = nil  -- plain raid pick clears the weekly tag
                             UpdateRaidDropdownText()
                             UpdateSizeDropdown()
                             UpdateCustomFieldVisibility()
+                            UpdateWeeklyStrip()
                             UpdateAchievementsList()
                             CloseDropDownMenus()
                         end
@@ -8154,14 +8448,25 @@ function GUI.CreateEnrollPopup()
         }
         local classShort = classShortCodes[class] or classDisplay
 
-        -- Build message with all stats (use - instead of | to avoid WoW escape code issues)
-        local msg = string.format("LFG %s - %s (%s) %s - GS:%d iL:%d Lv:%d {AIP:5.2}",
-            raidKey, classShort, spec, role, gs, ilvl, level)
-        if achieveLink ~= "" then
-            msg = msg .. " " .. achieveLink
-        end
-        if note ~= "" then
-            msg = msg .. " " .. note
+        -- Single-source builder (same one the LFM side uses); weekly token is
+        -- appended after the {AIP:x} tag, which all peer-parse regexes ignore.
+        local msg
+        if AIP.LFMFormat then
+            msg = AIP.LFMFormat.BuildLFG({
+                raidKey = raidKey,
+                classShort = classShort,
+                spec = spec,
+                role = role,
+                gs = gs,
+                ilvl = ilvl,
+                level = level,
+                achievementLink = achieveLink,
+                note = note,
+                weekly = popup.weeklyToken,
+            })
+        else
+            msg = string.format("LFG %s - %s (%s) %s - GS:%d iL:%d Lv:%d {AIP:5.2}",
+                raidKey, classShort, spec, role, gs, ilvl, level)
         end
 
         -- Store enrollment data with all stats
@@ -8176,11 +8481,23 @@ function GUI.CreateEnrollPopup()
             gs = gs,
             ilvl = ilvl,
             level = level,
+            weekly = popup.weeklyToken,
             message = msg,
             time = time(),
             isLfgEnrollment = true,
             isSelf = true,  -- Flag to indicate this is our own enrollment
         }
+
+        -- Remember this config so the popup reopens on the same raid
+        if AIP.db then
+            AIP.db.lastEnrollConfig = {
+                raidType = popup.raidType,
+                raidSize = popup.raidSize,
+                heroic = popup.heroicCheck:GetChecked() and true or false,
+                weekly = popup.weeklyToken,
+                role = popup.selectedRole,
+            }
+        end
 
         -- Also add to LfgEnrollments for display in LFG tab
         GUI.LfgEnrollments[playerName] = GUI.MyEnrollment

@@ -4,7 +4,7 @@
 -- Refactored with DRY principle and OOP patterns
 
 local ADDON_NAME = "AutoInvitePlus"
-local VERSION = "6.4.0"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
+local VERSION = "6.5.0"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
 local DB_VERSION = 5  -- Increment when saved variables structure changes (5.5: raid sessions, 5.4: mdps/rdps split, 4: loot history retention)
 
 -- Create main addon namespace (may already exist from Utils.lua)
@@ -13,9 +13,6 @@ local AIP = AutoInvitePlus
 
 -- Expose the running version so the DataBus broadcasts it to peers (used by the
 -- update checker to detect newer releases other AIP users are running).
-AIP.Version = VERSION
-
--- Store version info
 AIP.Version = VERSION
 AIP.DBVersion = DB_VERSION
 
@@ -124,6 +121,17 @@ local defaults = {
     spamChannelCooldown = 15,  -- seconds between messages per channel
     autoSpamInterval = 90,     -- seconds between auto-spam cycles (WoW limits ~1msg/minute per channel)
 
+    -- ChatGate (central outbound chat budget - see core/ChatGate.lua)
+    chatGateProfile = "safe",  -- relaxed | safe | paranoid
+    broadcastMaxMinutes = 60,  -- auto-stop LFM/LFG broadcasting after this long
+
+    -- Weekly raid quest support (data/WeeklyQuests.lua)
+    weeklyQuestTracking = true,
+
+    -- Last-used popup configs for the Quick Post preset tiles
+    lastListingConfig = {},    -- AddGroupPopup: raid/size/heroic/comp/gs/ilvl/keyword/note
+    lastEnrollConfig = {},     -- EnrollPopup: raid/size/heroic/role
+
     -- Response messages
     responseInvite = "[AutoInvite+] You have been invited!",
     responseReject = "[AutoInvite+] Sorry, the raid is full.",
@@ -211,22 +219,13 @@ local defaults = {
 }
 
 -- Channel IDs for WotLK (default IDs, actual may vary by server)
-local CHANNEL_GENERAL = 1
-local CHANNEL_TRADE = 2
-local CHANNEL_LFG = 4  -- Looking For Group (might vary by server)
-local CHANNEL_DEFENSE = 22
-
--- Spam cooldown tracking
-local spamCooldowns = {}
+-- Spam cooldown tracking (per-channel pacing is ChatGate's job now;
+-- this only rate-limits the manual /aip spam command itself)
 local lastSpamTime = 0
 
 -- Get configured cooldowns (with fallback to defaults)
 local function GetGlobalCooldown()
     return AIP.db and AIP.db.spamGlobalCooldown or 3
-end
-
-local function GetChannelCooldown()
-    return AIP.db and AIP.db.spamChannelCooldown or 10
 end
 
 -- Get all joined channels dynamically
@@ -248,32 +247,6 @@ local function GetJoinedChannels()
 end
 
 AIP.GetJoinedChannels = GetJoinedChannels
-
--- Check if we can spam to a channel (cooldown check)
-local function CanSpamToChannel(channelKey)
-    local now = time()
-    local globalCd = GetGlobalCooldown()
-    local channelCd = GetChannelCooldown()
-
-    -- Check global cooldown
-    if now - lastSpamTime < globalCd then
-        return false, globalCd - (now - lastSpamTime)
-    end
-
-    -- Check per-channel cooldown
-    if spamCooldowns[channelKey] and now - spamCooldowns[channelKey] < channelCd then
-        return false, channelCd - (now - spamCooldowns[channelKey])
-    end
-
-    return true, 0
-end
-
--- Mark channel as spammed
-local function MarkChannelSpammed(channelKey)
-    local now = time()
-    spamCooldowns[channelKey] = now
-    lastSpamTime = now
-end
 
 -- Utility functions
 local function Print(msg)
@@ -329,7 +302,11 @@ local function GetParsedTriggers()
     return triggerCache.list
 end
 
--- Check if message contains any trigger word
+-- Check if message contains any trigger word.
+-- Besides the global db.triggers list, this also honors the invite keyword of
+-- the ACTIVE LFM listing (typed in the Create Group popup): that keyword is
+-- advertised in the broadcast as w/ "<kw>", so whispers of it must invite even
+-- when it isn't in db.triggers.
 local function CheckTriggers(message)
     if not AIP.db or not AIP.db.triggers then return false end
 
@@ -341,10 +318,68 @@ local function CheckTriggers(message)
             return true
         end
     end
+
+    local GUI = AIP.CentralGUI
+    local myGroup = GUI and GUI.MyGroup
+    if myGroup and myGroup.inviteKeyword and myGroup.inviteKeyword ~= "" then
+        if msg:find(myGroup.inviteKeyword:lower():trim(), 1, true) then
+            return true
+        end
+    end
     return false
 end
 
 AIP.CheckTriggers = CheckTriggers
+
+-- Shared per-channel listen decision: returns (shouldListen, channelTag).
+-- Used by the invite handler below AND by data/ChatScanner.lua, so the
+-- LFM/LFG browser and the auto-inviter always agree on which channels count.
+function AIP.IsListenChannel(channelName)
+    if not AIP.db then return false, nil end
+    local channelLower = channelName and channelName:lower() or ""
+    if channelLower == "" then return false, nil end
+
+    -- Never the DataBus addon-comms channel
+    if AIP.DataBus and AIP.DataBus.Config and channelLower:find(AIP.DataBus.Config.channelName:lower(), 1, true) then
+        return false, nil
+    end
+
+    local db = AIP.db
+    if channelLower:find("lookingforgroup", 1, true) or channelLower:find("lfg", 1, true) then
+        if db.listenLFG then return true, "lfg" end
+    elseif channelLower:find("trade", 1, true) then
+        if db.listenTrade then return true, "trade" end
+    elseif channelLower:find("general", 1, true) then
+        if db.listenGeneral then return true, "general" end
+    elseif channelLower:find("localdefense", 1, true) or channelLower:find("defense", 1, true) then
+        if db.listenDefense then return true, "defense" end
+    elseif channelLower:find("global", 1, true) then
+        if db.listenGlobal then return true, "global" end
+    elseif channelLower:find("world", 1, true) then
+        if db.listenWorld then return true, "world" end
+    end
+
+    -- Custom listen channels
+    if db.listenChannels then
+        for chName, enabled in pairs(db.listenChannels) do
+            if enabled and channelLower:find(chName:lower(), 1, true) then
+                return true, "custom:" .. chName
+            end
+        end
+    end
+    if db.listenCustom and db.customChannel and db.customChannel ~= "" then
+        if channelLower:find(db.customChannel:lower(), 1, true) then
+            return true, "custom"
+        end
+    end
+
+    -- Catch-all: listen to every joined channel
+    if db.listenAllJoined then
+        return true, "channel:" .. (channelName or "")
+    end
+
+    return false, nil
+end
 
 -- Check if we can invite (are leader or no group)
 local function CanInvite()
@@ -629,6 +664,14 @@ local function CheckSmartConditions(playerInfo)
         end
     end
 
+    -- Check minimum item level (only when the player's message stated one -
+    -- most whispers don't, and absence shouldn't hard-reject)
+    if smart.minIlvl and smart.minIlvl > 0 and playerInfo.ilvl then
+        if playerInfo.ilvl < smart.minIlvl then
+            return false, "Item level too low (need " .. smart.minIlvl .. "+)"
+        end
+    end
+
     -- Check if role is required
     if smart.requireRole and not playerInfo.role then
         return false, "No role specified in message"
@@ -845,14 +888,9 @@ end
 
 AIP.FindChannelId = FindChannelId
 
--- Chat ban detection state
-AIP.ChatBan = {
-    detected = false,
-    lastBanTime = 0,
-    banCount = 0,
-    channelDelay = 2,  -- Base delay between channels (seconds)
-    maxDelay = 5,      -- Max delay after bans detected
-}
+-- Chat throttle detection & the AIP.ChatBan compat table now live in
+-- core/ChatGate.lua (loaded before this file), which owns ALL outbound
+-- channel/say/yell/guild pacing.
 
 -- Timer helper for delayed execution (WotLK compatible).
 -- Delegates to the pooled, error-isolated implementation in Utils so we don't
@@ -862,18 +900,26 @@ local function DelayedCall(delay, func)
     return AIP.Utils.DelayedCall(delay, func)
 end
 
--- Spam invite message with staggered channel sends
+-- Spam invite message (one-shot). All sends route through ChatGate, which
+-- paces them safely; this function only decides WHERE to send. The old
+-- DelayedCall stagger and manual ban backoff are gone - the gate owns pacing.
 function AIP.SpamInvite()
     if not AIP.db.enabled then
         Print("Enable the addon first!")
         return
     end
 
-    -- Check global cooldown
+    -- Cooldown on the manual command itself (the gate paces the actual sends)
     local now = time()
     if now - lastSpamTime < GetGlobalCooldown() then
         local remaining = GetGlobalCooldown() - (now - lastSpamTime)
         Print("Spam on cooldown. Wait " .. remaining .. " seconds.")
+        return
+    end
+
+    local CG = AIP.ChatGate
+    if not CG then
+        Print("ChatGate not loaded - cannot broadcast safely.")
         return
     end
 
@@ -885,103 +931,47 @@ function AIP.SpamInvite()
     -- Strip tokens we don't fill so a customized template can't broadcast them raw.
     msg = msg:gsub("%s*<raid>", ""):gsub("%s*<roles>", ""):gsub("%s*<gs>", "")
 
-    -- Build message queue with staggered delays
-    local messageQueue = {}
-    local delay = 0
-    local delayIncrement = AIP.ChatBan.channelDelay
+    local queued = 0
+    local seen = {}  -- channel names already queued (dedup vs AllJoined)
 
-    -- If recently banned, increase delay
-    if AIP.ChatBan.detected and (now - AIP.ChatBan.lastBanTime) < 300 then
-        delayIncrement = math.min(AIP.ChatBan.maxDelay, AIP.ChatBan.channelDelay + AIP.ChatBan.banCount)
-    end
-
-    -- Queue channel messages with delays
-    if AIP.db.spamLFG then
-        local id = FindChannelId("lookingforgroup", "lfg")
-        if id then
-            table.insert(messageQueue, {delay = delay, channelId = id, func = function()
-                SendChatMessage(msg, "CHANNEL", nil, id)
-            end, name = "LFG"})
-            delay = delay + delayIncrement
+    local function queueChannel(displayName)
+        if not displayName or displayName == "" then return end
+        local key = displayName:lower()
+        if seen[key] then return end
+        seen[key] = true
+        if CG.Send(msg, "CHANNEL", nil, { channelName = displayName, owner = "spam", staleAfter = 180 }) then
+            queued = queued + 1
         end
     end
 
-    if AIP.db.spamTrade then
-        local id = FindChannelId("trade")
-        if id then
-            table.insert(messageQueue, {delay = delay, channelId = id, func = function()
-                SendChatMessage(msg, "CHANNEL", nil, id)
-            end, name = "Trade"})
-            delay = delay + delayIncrement
-        end
-    end
-
-    if AIP.db.spamGeneral then
-        local id = FindChannelId("general")
-        if id then
-            table.insert(messageQueue, {delay = delay, channelId = id, func = function()
-                SendChatMessage(msg, "CHANNEL", nil, id)
-            end, name = "General"})
-            delay = delay + delayIncrement
-        end
-    end
-
-    if AIP.db.spamDefense then
-        local id = FindChannelId("localdefense", "defense")
-        if id then
-            table.insert(messageQueue, {delay = delay, channelId = id, func = function()
-                SendChatMessage(msg, "CHANNEL", nil, id)
-            end, name = "Defense"})
-            delay = delay + delayIncrement
-        end
-    end
-
-    -- Global channel (common on private servers)
-    if AIP.db.spamGlobal then
-        local id = FindChannelId("global")
-        if id then
-            table.insert(messageQueue, {delay = delay, channelId = id, func = function()
-                SendChatMessage(msg, "CHANNEL", nil, id)
-            end, name = "Global"})
-            delay = delay + delayIncrement
-        end
-    end
-
-    -- World channel (common on private servers)
-    if AIP.db.spamWorld then
-        local id = FindChannelId("world")
-        if id then
-            table.insert(messageQueue, {delay = delay, channelId = id, func = function()
-                SendChatMessage(msg, "CHANNEL", nil, id)
-            end, name = "World"})
-            delay = delay + delayIncrement
-        end
-    end
-
-    -- All Joined channels (broadcast to every channel we're in)
-    if AIP.db.spamAllJoined then
-        -- Track which channel IDs we've already added to avoid duplicates
-        local addedIds = {}
-        for _, entry in ipairs(messageQueue) do
-            if entry.channelId then
-                addedIds[entry.channelId] = true
+    -- Resolve a fuzzy channel search to its real display name (so dedup
+    -- against the AllJoined sweep works on the same key)
+    local function queueFuzzy(...)
+        for i = 1, select("#", ...) do
+            local search = select(i, ...):lower()
+            for j = 1, (MAX_CHANNEL_BUTTONS or 20) do
+                local id, cname = GetChannelName(j)
+                if id and id > 0 and cname and cname:lower():find(search, 1, true) then
+                    queueChannel(cname)
+                    return
+                end
             end
         end
+    end
 
-        -- Iterate through all joined channels
-        for i = 1, 20 do
-            local id, name = GetChannelName(i)
-            if id and id > 0 and name and name ~= "" then
-                -- Skip if already added by specific channel settings
-                if not addedIds[id] then
-                    local channelId = id
-                    local channelName = name
-                    table.insert(messageQueue, {delay = delay, func = function()
-                        SendChatMessage(msg, "CHANNEL", nil, channelId)
-                    end, name = channelName, channelId = channelId})
-                    delay = delay + delayIncrement
-                    addedIds[id] = true
-                end
+    if AIP.db.spamLFG then queueFuzzy("lookingforgroup", "lfg") end
+    if AIP.db.spamTrade then queueFuzzy("trade") end
+    if AIP.db.spamGeneral then queueFuzzy("general") end
+    if AIP.db.spamDefense then queueFuzzy("localdefense", "defense") end
+    if AIP.db.spamGlobal then queueFuzzy("global") end
+    if AIP.db.spamWorld then queueFuzzy("world") end
+
+    -- All joined channels
+    if AIP.db.spamAllJoined then
+        for i = 1, (MAX_CHANNEL_BUTTONS or 20) do
+            local id, cname = GetChannelName(i)
+            if id and id > 0 and cname and cname ~= "" then
+                queueChannel(cname)
             end
         end
     end
@@ -989,140 +979,33 @@ function AIP.SpamInvite()
     -- Custom channels from db.spamChannels list
     if AIP.db.spamChannels then
         for channelName, enabled in pairs(AIP.db.spamChannels) do
-            if enabled then
-                local id = GetChannelName(channelName)
-                if id and id > 0 then
-                    table.insert(messageQueue, {delay = delay, channelId = id, func = function()
-                        SendChatMessage(msg, "CHANNEL", nil, id)
-                    end, name = channelName})
-                    delay = delay + delayIncrement
-                end
-            end
+            if enabled then queueChannel(channelName) end
         end
     end
 
     -- Legacy custom channel support
     if AIP.db.spamCustom and AIP.db.customChannel and AIP.db.customChannel ~= "" then
-        local id = GetChannelName(AIP.db.customChannel)
-        if id and id > 0 then
-            table.insert(messageQueue, {delay = delay, channelId = id, func = function()
-                SendChatMessage(msg, "CHANNEL", nil, id)
-            end, name = AIP.db.customChannel})
-            delay = delay + delayIncrement
-        end
+        queueChannel(AIP.db.customChannel)
     end
 
-    -- SAY/YELL/GUILD can be grouped together (different chat types, less throttled)
-    local groupDelay = delay
     if AIP.db.spamSay then
-        table.insert(messageQueue, {delay = groupDelay, func = function()
-            SendChatMessage(msg, "SAY")
-        end, name = "Say"})
-        groupDelay = groupDelay + 0.5
+        if CG.Send(msg, "SAY", nil, { owner = "spam", staleAfter = 180 }) then queued = queued + 1 end
     end
-
     if AIP.db.spamYell then
-        table.insert(messageQueue, {delay = groupDelay, func = function()
-            SendChatMessage(msg, "YELL")
-        end, name = "Yell"})
-        groupDelay = groupDelay + 0.5
+        if CG.Send(msg, "YELL", nil, { owner = "spam", staleAfter = 180 }) then queued = queued + 1 end
     end
-
     if AIP.db.spamGuild and IsInGuild() then
-        table.insert(messageQueue, {delay = groupDelay, func = function()
-            SendChatMessage(msg, "GUILD")
-        end, name = "Guild"})
+        if CG.Send(msg, "GUILD", nil, { owner = "spam", staleAfter = 180 }) then queued = queued + 1 end
     end
 
-    -- Execute message queue
-    local sentCount = #messageQueue
-    if sentCount == 0 then
+    if queued == 0 then
         Print("No channels configured for spam!")
         return
     end
 
-    -- Reset ban detection for this batch
-    AIP.ChatBan.pendingCount = sentCount
-    AIP.ChatBan.sentThisBatch = 0
-
-    for _, item in ipairs(messageQueue) do
-        if item.delay == 0 then
-            item.func()
-            AIP.ChatBan.sentThisBatch = AIP.ChatBan.sentThisBatch + 1
-        else
-            DelayedCall(item.delay, function()
-                item.func()
-                AIP.ChatBan.sentThisBatch = AIP.ChatBan.sentThisBatch + 1
-            end)
-        end
-    end
-
-    -- Update cooldown
     lastSpamTime = now
-
-    local totalTime = delay > 0 and string.format(" (over %.1fs)", delay) or ""
-    Print("Broadcasting to " .. sentCount .. " channel(s)" .. totalTime)
+    Print("Queued to " .. queued .. " channel(s) - ChatGate paces them safely. /aip gate for status.")
 end
-
--- Check for chat ban messages and auto-tune
-function AIP.OnChatBanDetected(message)
-    local now = time()
-    AIP.ChatBan.detected = true
-    AIP.ChatBan.lastBanTime = now
-    AIP.ChatBan.banCount = AIP.ChatBan.banCount + 1
-
-    -- Increase channel delay (up to max)
-    AIP.ChatBan.channelDelay = math.min(AIP.ChatBan.maxDelay, AIP.ChatBan.channelDelay + 1)
-
-    -- Auto-tune the broadcast interval if GUI system is active
-    if AIP.CentralGUI and AIP.CentralGUI.Broadcast and AIP.CentralGUI.Broadcast.active then
-        local newInterval = AIP.CentralGUI.Broadcast.interval + 30
-        newInterval = math.min(300, newInterval)  -- Cap at 5 minutes
-        AIP.CentralGUI.Broadcast.interval = newInterval
-        Print("|cFFFF6666Chat throttled!|r Auto-tuning interval to " .. newInterval .. "s, delay to " .. AIP.ChatBan.channelDelay .. "s")
-    else
-        Print("|cFFFF6666Chat throttled!|r Increasing channel delay to " .. AIP.ChatBan.channelDelay .. "s")
-    end
-
-    -- Decay ban count over time
-    DelayedCall(300, function()
-        if AIP.ChatBan.banCount > 0 then
-            AIP.ChatBan.banCount = AIP.ChatBan.banCount - 1
-        end
-        if AIP.ChatBan.banCount == 0 then
-            AIP.ChatBan.detected = false
-            AIP.ChatBan.channelDelay = 2  -- Reset to base
-        end
-    end)
-end
-
--- Register for chat ban detection
-local chatBanFrame = CreateFrame("Frame")
-chatBanFrame:RegisterEvent("CHAT_MSG_SYSTEM")
-chatBanFrame:SetScript("OnEvent", function(self, event, message)
-    if event == "CHAT_MSG_SYSTEM" then
-        -- Common chat throttle/ban messages (varies by server/locale)
-        local banPatterns = {
-            "you have been squelched",
-            "you are being ignored",
-            "you cannot send",
-            "chat has been disabled",
-            "you are not permitted",
-            "throttled",
-            "too many messages",
-            "wait before sending",
-            "you must wait",
-            "chat is currently disabled",
-        }
-        local lowerMsg = message:lower()
-        for _, pattern in ipairs(banPatterns) do
-            if lowerMsg:find(pattern) then
-                AIP.OnChatBanDetected(message)
-                break
-            end
-        end
-    end
-end)
 
 -- Invite all online guild members
 function AIP.InviteGuild()
@@ -1231,6 +1114,10 @@ local function OnEvent(self, event, ...)
 
             AIP.db = AutoInvitePlusDB
 
+            -- Broadcast state never survives /reload, so a persisted lfm/lfg
+            -- player mode would be a lie (mode indicator on, nothing sending).
+            AIP.db.playerMode = "none"
+
             -- Apply the persisted chat-scanner enable to the live scanner config
             -- (the scanner's CS.Config.enabled is otherwise session-only).
             if AIP.LFMBrowser and AIP.LFMBrowser.Config and AIP.db.chatScanEnabled ~= nil then
@@ -1311,67 +1198,10 @@ local function OnEvent(self, event, ...)
         end
 
     elseif event == "CHAT_MSG_CHANNEL" then
-        local message, author, _, _, _, _, _, channelIndex, channelName = ...
-        channelIndex = tonumber(channelIndex) or 0
-
-        -- Check standard channels
-        local channelLower = channelName and channelName:lower() or ""
-
-        -- Skip DataBus addon channel (it's for addon communication only)
-        if AIP.DataBus and AIP.DataBus.Config and channelLower:find(AIP.DataBus.Config.channelName:lower()) then
-            return
-        end
-
-        local processed = false
-
-        -- Standard channels
-        if channelLower:find("general") and AIP.db.listenGeneral then
-            ProcessMessage(author, message, "general")
-            processed = true
-        elseif channelLower:find("trade") and AIP.db.listenTrade then
-            ProcessMessage(author, message, "trade")
-            processed = true
-        elseif (channelLower:find("lookingforgroup") or channelLower:find("lfg")) and AIP.db.listenLFG then
-            ProcessMessage(author, message, "lfg")
-            processed = true
-        elseif (channelLower:find("localdefense") or channelLower:find("defense")) and AIP.db.listenDefense then
-            ProcessMessage(author, message, "defense")
-            processed = true
-        -- Global channel (common on private servers)
-        elseif (channelLower:find("global") or channelLower == "global") and AIP.db.listenGlobal then
-            ProcessMessage(author, message, "global")
-            processed = true
-        -- World channel (common on private servers)
-        elseif (channelLower:find("world") or channelLower == "world") and AIP.db.listenWorld then
-            ProcessMessage(author, message, "world")
-            processed = true
-        end
-
-        -- If not processed by standard channels, check custom channels
-        if not processed then
-            -- Check custom listen channels
-            if AIP.db.listenChannels then
-                for chName, enabled in pairs(AIP.db.listenChannels) do
-                    if enabled and channelLower:find(chName:lower()) then
-                        ProcessMessage(author, message, "custom:" .. chName)
-                        processed = true
-                        break
-                    end
-                end
-            end
-
-            -- Legacy custom channel support
-            if not processed and AIP.db.listenCustom and AIP.db.customChannel and AIP.db.customChannel ~= "" then
-                if channelLower:find(AIP.db.customChannel:lower()) then
-                    ProcessMessage(author, message, "custom")
-                    processed = true
-                end
-            end
-
-            -- Listen to all joined channels option
-            if not processed and AIP.db.listenAllJoined then
-                ProcessMessage(author, message, "channel:" .. channelName)
-            end
+        local message, author, _, _, _, _, _, _, channelName = ...
+        local shouldListen, channelTag = AIP.IsListenChannel(channelName)
+        if shouldListen then
+            ProcessMessage(author, message, channelTag)
         end
 
     elseif event == "PARTY_MEMBERS_CHANGED" or event == "RAID_ROSTER_UPDATE" then
@@ -1641,6 +1471,48 @@ local function SlashHandler(msg)
     elseif cmd == "update" or cmd == "updates" then
         if AIP.Updater then AIP.Updater.SlashHandler() end
 
+    -- ChatGate (outbound chat budget)
+    elseif cmd == "gate" then
+        local sub, arg = strsplit(" ", rest, 2)
+        sub = (sub or ""):lower():trim()
+        if sub == "profile" then
+            arg = (arg or ""):lower():trim()
+            if AIP.ChatGate and AIP.ChatGate.Profiles[arg] then
+                AIP.db.chatGateProfile = arg
+                Print("ChatGate profile set to |cFF00FF00" .. arg .. "|r")
+            else
+                Print("Usage: /aip gate profile <relaxed|safe|paranoid>")
+            end
+        elseif AIP.ChatGate then
+            AIP.ChatGate.Status()
+        end
+
+    -- Weekly raid quest
+    elseif cmd == "weekly" then
+        if AIP.Weekly then
+            Print(AIP.Weekly.StatusText())
+            local held = AIP.Weekly.Current()
+            if held and AIP.TreeBrowser and AIP.TreeBrowser.IsLockedToInstance then
+                for _, size in ipairs({"10", "25"}) do
+                    local key = held.quest.raid .. size
+                    if AIP.TreeBrowser.IsLockedToInstance(key) then
+                        Print("  |cFFFF6666Saved to " .. key .. "|r")
+                    end
+                end
+            end
+        end
+
+    -- Broadcast dry run (log the rotor schedule without sending)
+    elseif cmd == "broadcast" and rest:lower():trim() == "dryrun" then
+        local GUI = AIP.CentralGUI
+        if GUI and GUI.Broadcast then
+            GUI.Broadcast.dryRunUntil = GetTime() + 300
+            Print("Broadcast dry-run for 5 minutes: rotor decisions are logged to chat instead of sent.")
+            if not GUI.Broadcast.active then
+                Print("|cFFFFFF00Note:|r no broadcast is active - start one (LFM/LFG popup) to see the schedule.")
+            end
+        end
+
     -- Status
     elseif cmd == "status" then
         Print("=== AutoInvite Plus Status ===")
@@ -1661,7 +1533,10 @@ local function SlashHandler(msg)
         Print("|cFFFFFF00Basic:|r")
         Print("  /aip or /aip gui - Open central GUI")
         Print("  /aip enable/disable - Toggle auto-invite")
-        Print("  /aip spam - Send invite spam")
+        Print("  /aip spam - Send invite spam (paced by the ChatGate)")
+        Print("  /aip gate - Show chat-budget status | /aip gate profile <relaxed|safe|paranoid>")
+        Print("  /aip weekly - Show this week's raid quest status")
+        Print("  /aip broadcast dryrun - Log the broadcast schedule for 5 min without sending")
         Print("  /aip guild/friends - Invite guild or friends")
         Print("  /aip queue - Invite queue")
         Print("  /aip blacklist - Manage blacklist")

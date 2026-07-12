@@ -829,20 +829,30 @@ function Int.ImportRaidBrowserToLFG()
     if not AIP.CentralGUI then return 0 end
 
     for _, listing in ipairs(listings) do
-        -- Create LFG enrollment entry
+        -- Derive a role string so the queue panel's spec/role column isn't
+        -- blank for imported entries
+        local role = nil
+        if listing.wantsTank then role = "TANK"
+        elseif listing.wantsHealer then role = "HEALER"
+        elseif listing.wantsDPS then role = "DPS" end
+
+        -- Create LFG enrollment entry (shaped like a real enrollment so the
+        -- queue panel and cleanup treat it uniformly)
         local entry = {
             name = listing.name,
             class = listing.class,
             level = listing.level,
             raid = listing.raid,
+            role = role,
             message = listing.comment,
-            time = listing.time,
+            time = listing.time or time(),
             source = "RaidBrowser",
             isLeader = listing.isLeader,
             partySize = listing.partySize,
             wantsTank = listing.wantsTank,
             wantsHealer = listing.wantsHealer,
             wantsDPS = listing.wantsDPS,
+            isLfgEnrollment = true,
         }
 
         -- Add to our LFG enrollments if not already present

@@ -91,6 +91,15 @@ function TB.ApplyListingDecor(node, group)
     if not node or not group or not group.leader then return end
     local CS = AIP.ChatScanner
 
+    -- Weekly raid quest marker: green [W] if YOU still need that weekly,
+    -- blue otherwise. Shared decorator so LFM leaves and the "other" bucket
+    -- render it consistently.
+    if group.weekly then
+        local wanted = AIP.Weekly and AIP.Weekly.IsWanted and AIP.Weekly.IsWanted(group.weekly)
+        local color = wanted and "|cFF00FF00" or "|cFF33CCFF"
+        node.text = color .. "[W]|r " .. (node.text or "")
+    end
+
     local isFav = AIP.IsPlayerFavorite and AIP.IsPlayerFavorite(group.leader) or false
     if isFav then
         node.text = "|cFFFFD100\226\152\133|r " .. (node.text or "")
@@ -976,6 +985,10 @@ function TB.BuildLFGTree(preserveState)
                 -- Mark DataBus entries (cyan indicator)
                 if player.isDataBus then
                     displayName = "|cFF00CCFF[AIP]|r " .. displayName
+                end
+                -- Weekly quest marker (player enrolled for a weekly run)
+                if player.weekly then
+                    displayName = "|cFF33CCFF[W]|r " .. displayName
                 end
                 local playerNode = {
                     id = "lfg_player_" .. player.name,

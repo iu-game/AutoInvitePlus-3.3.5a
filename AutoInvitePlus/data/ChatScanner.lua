@@ -165,13 +165,13 @@ function CS.AddGroup(info)
         existing.inviteKeyword = info.inviteKeyword or existing.inviteKeyword
         existing.triggerKey = info.triggerKey or info.inviteKeyword or existing.triggerKey
         existing.selectedClasses = info.selectedClasses or existing.selectedClasses
-        existing.lookingForClasses = info.lookingForClasses or existing.lookingForClasses
         existing.roleSpecs = info.roleSpecs or existing.roleSpecs
         existing.lookingForSpecs = info.lookingForSpecs or existing.lookingForSpecs
         existing.note = info.note or existing.note
         existing.ilvl = info.ilvl or existing.ilvl
         existing.filledCurrent = info.filledCurrent or existing.filledCurrent
         existing.filledMax = info.filledMax or existing.filledMax
+        existing.weekly = info.weekly or existing.weekly
     else
         -- Handle backwards compatibility for dps -> mdps/rdps
         local mdpsVal = info.mdps
@@ -208,13 +208,13 @@ function CS.AddGroup(info)
             inviteKeyword = info.inviteKeyword,
             triggerKey = info.triggerKey or info.inviteKeyword,
             selectedClasses = info.selectedClasses,
-            lookingForClasses = info.lookingForClasses,
             roleSpecs = info.roleSpecs,
             lookingForSpecs = info.lookingForSpecs,
             note = info.note,
             ilvl = info.ilvl,
             filledCurrent = info.filledCurrent,
             filledMax = info.filledMax,
+            weekly = info.weekly,
         }
         CS.PruneGroups()
     end
@@ -257,6 +257,7 @@ function CS.AddPlayer(info)
         if info.gs then existing.gs = info.gs end
         existing.isLFG = info.isLFG or existing.isLFG
         existing.isLFM = info.isLFM or existing.isLFM
+        existing.weekly = info.weekly or existing.weekly
     else
         CS.Players[info.author] = {
             name = info.author,
@@ -269,6 +270,7 @@ function CS.AddPlayer(info)
             time = info.time,
             isLFG = info.isLFG,
             isLFM = info.isLFM,
+            weekly = info.weekly,
         }
         CS.PrunePlayers()
 
@@ -787,6 +789,12 @@ function CS.OnChatMessage(message, author, channel)
     if not CS.Config.enabled then return end
     if not message or not author then return end
 
+    -- Never ingest serialized DataBus payloads ("!A:1.0;LFM;...") - the
+    -- literal "LFM" inside them would create bogus browser entries. The
+    -- clean copy of that data arrives via OnDataBusLFM/LFG instead.
+    local prefix = AIP.DataBus and AIP.DataBus.Config and AIP.DataBus.Config.chatPrefix
+    if prefix and message:sub(1, #prefix) == prefix then return end
+
     -- Use Parsers module for parsing
     local info = nil
     if AIP.Parsers and AIP.Parsers.ParseChatMessage then
@@ -821,10 +829,22 @@ local function OnEvent(self, event, message, author, ...)
     -- Use unified listen settings from AIP.db (same as auto-invite)
     local db = AIP.db or {}
     local shouldScan = false
+    local channel = event
 
     if event == "CHAT_MSG_CHANNEL" then
-        -- Channel messages - check listenGlobal, listenAllJoined, or specific channel settings
-        shouldScan = db.listenGlobal or db.listenAllJoined
+        -- CHAT_MSG_CHANNEL varargs: language, channelString, target, flags,
+        -- zoneChannelID, channelIndex, channelName
+        local _, _, _, _, _, channelIndex, channelName = ...
+        -- Same per-channel decision as the auto-inviter (Core.lua), so the
+        -- browser sees exactly the channels the user enabled - previously it
+        -- only honored listenGlobal/listenAllJoined and was blind on the
+        -- LookingForGroup channel. Also excludes the DataBus channel.
+        if AIP.IsListenChannel then
+            shouldScan = AIP.IsListenChannel(channelName)
+        else
+            shouldScan = db.listenGlobal or db.listenAllJoined
+        end
+        channel = channelName or ("Channel " .. (channelIndex or "?"))
     elseif event == "CHAT_MSG_SAY" then
         shouldScan = db.listenSay
     elseif event == "CHAT_MSG_YELL" then
@@ -834,14 +854,6 @@ local function OnEvent(self, event, message, author, ...)
     end
 
     if not shouldScan then return end
-
-    -- Get channel info for channel messages
-    local channel = event
-    if event == "CHAT_MSG_CHANNEL" then
-        -- CHAT_MSG_CHANNEL: within ... (arg3+), channelIndex is the 6th value.
-        local _, _, _, _, _, channelIndex = ...
-        channel = "Channel " .. (channelIndex or "?")
-    end
 
     CS.OnChatMessage(message, author, channel)
 end
@@ -921,6 +933,10 @@ local function OnDataBusLFM(event)
         isDataBus = true,           -- Mark as coming from DataBus
         triggerKey = data.triggerKey,
         inviteKeyword = data.triggerKey,
+        -- These are broadcast by GUI.MaybeDataBusBroadcast but were never read here,
+        -- so peer listings always showed "Looking for: -" and no weekly tag.
+        roleSpecs = data.roleSpecs,
+        weekly = data.weekly,
         version = event.version,
     }
 
@@ -952,6 +968,7 @@ local function OnDataBusLFG(event)
         time = event.timestamp,
         isLFG = true,
         isDataBus = true,           -- Mark as coming from DataBus
+        weekly = event.data.weekly,
         version = event.version,
     }
 

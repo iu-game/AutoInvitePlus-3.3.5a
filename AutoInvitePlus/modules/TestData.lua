@@ -67,6 +67,11 @@ local RAIDS = {
     {key = "VoA25", name = "Vault of Archavon 25", size = 25},
     {key = "Ony25", name = "Onyxia's Lair 25", size = 25},
     {key = "POS5", name = "Pit of Saron", size = 5},  -- 5-man dungeon (verifies dungeon boss population)
+    -- Weekly-quest-hosting raids (exercise the [W] badges; GUI key casing)
+    {key = "ICC10N", name = "Icecrown Citadel 10 Normal", size = 10, weekly = "Marrowgar"},
+    {key = "ULDUAR10N", name = "Ulduar 10", size = 10, weekly = "FlameLeviathan"},
+    {key = "OS10N", name = "Obsidian Sanctum 10", size = 10, weekly = "Sartharion"},
+    {key = "EoE10N", name = "Eye of Eternity 10", size = 10, weekly = "Malygos"},
 }
 
 local BOSS_NAMES = {
@@ -145,11 +150,13 @@ function TD.GenerateLFMGroups(count)
         local healersNeeded = raid.size == 25 and math.random(5, 7) or math.random(2, 3)
         local dpsNeeded = raid.size - tanksNeeded - healersNeeded
 
+        local weeklyTag = raid.weekly and ("WQ:" .. raid.weekly .. " ") or ""
         local groupData = {
             leader = leader,
             raid = raid.key,
-            message = string.format("LFM %s [T:0/%d H:0/%d D:0/%d] %d+ GS w/ \"inv\"",
-                raid.key, tanksNeeded, healersNeeded, dpsNeeded, gsMin),
+            weekly = raid.weekly,
+            message = string.format("LFM %s %s[T:0/%d H:0/%d D:0/%d] %d+ GS w/ \"inv\"",
+                raid.key, weeklyTag, tanksNeeded, healersNeeded, dpsNeeded, gsMin),
             gsMin = gsMin,
             ilvlMin = math.floor(gsMin / 24),
             -- math.max guards against small raids (e.g. 5-man) where these
@@ -194,8 +201,11 @@ function TD.GenerateLFGPlayers(count)
             gs = player.gs,
             ilvl = player.ilvl,
             raid = raid.key,
-            message = string.format("LFG %s %s (%s) %s %d GS",
-                raid.key, player.class, player.spec, player.role, player.gs),
+            weekly = raid.weekly,
+            isLFG = true,
+            message = string.format("LFG %s %s (%s) %s %d GS%s",
+                raid.key, player.class, player.spec, player.role, player.gs,
+                raid.weekly and (" WQ:" .. raid.weekly) or ""),
             time = time() - math.random(0, 600),
             _testData = true,
         }
@@ -609,6 +619,12 @@ function TD.LoadTestData()
     TD.GenerateRaidMgmt(N)
     TD.GenerateRollData()
 
+    -- Force an "active weekly" so the [W] badges/preset render without a real
+    -- quest-log entry (fixtures can't inject quests into the client)
+    if AIP.Weekly then
+        AIP.Weekly.testActive = "Marrowgar"
+    end
+
     -- Refresh UI
     TD.RefreshAllUI()
 
@@ -635,6 +651,12 @@ function TD.ClearTestData()
     end
 
     TD.testDataActive = false
+
+    -- Clear the forced weekly test hook
+    if AIP.Weekly then
+        AIP.Weekly.testActive = nil
+        if AIP.Weekly.Invalidate then AIP.Weekly.Invalidate() end
+    end
 
     -- Helper to remove test entries from a table
     local function RemoveTestEntries(tbl)

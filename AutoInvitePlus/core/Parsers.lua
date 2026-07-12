@@ -783,14 +783,27 @@ function Parsers.MatchesLookingFor(playerClass, playerSpec, playerRole, roleSpec
     return not hasAnyRequirements  -- No requirements for this role = allowed
 end
 
+-- Weekly raid quest token: "WQ:Marrowgar" (unbracketed - a bracketed form
+-- would collide with ParseAchievement's trailing-[...] rule).
+function Parsers.ParseWeekly(message)
+    if not message then return nil end
+    return message:match("WQ:(%w+)")
+end
+
 function Parsers.ParseChatMessage(message, author, channel)
     if not message or not author then return nil end
+
+    -- Extract the weekly token, then strip it for raid/role detection: boss
+    -- names like "WQ:Sartharion" would otherwise feed DetectAllRaids.
+    local weekly = Parsers.ParseWeekly(message)
+    local scanMessage = weekly and message:gsub("WQ:%w+%s*", "") or message
 
     local info = {
         author = author,
         message = message,
         channel = channel,
         time = time(),
+        weekly = weekly,
 
         -- Message type
         isLFG = Parsers.IsLFG(message),
@@ -817,13 +830,13 @@ function Parsers.ParseChatMessage(message, author, channel)
         lookingForSpecs = nil,
     }
 
-    -- Detect raids
-    info.raid, info.raidCategory = Parsers.DetectRaid(message)
-    info.raids = Parsers.DetectAllRaids(message)
+    -- Detect raids (on the WQ-stripped copy)
+    info.raid, info.raidCategory = Parsers.DetectRaid(scanMessage)
+    info.raids = Parsers.DetectAllRaids(scanMessage)
 
     -- Detect role and class
-    info.role = Parsers.DetectRole(message)
-    info.class = Parsers.DetectClass(message)
+    info.role = Parsers.DetectRole(scanMessage)
+    info.class = Parsers.DetectClass(scanMessage)
 
     -- Detect GearScore
     info.gs = Parsers.ParseGearScore(message)

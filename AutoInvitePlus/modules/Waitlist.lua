@@ -195,7 +195,7 @@ function AIP.UpdateWaitlistEntry(name, role, note, priority)
             end
 
             -- Notify affected players, staggered ~0.4s apart to avoid tripping
-            -- the server chat throttle (see Core.lua OnChatBanDetected).
+            -- the server chat throttle (whispers stay off the ChatGate by design).
             local n = 0
             for playerName, newPos in pairs(affectedPlayers) do
                 n = n + 1

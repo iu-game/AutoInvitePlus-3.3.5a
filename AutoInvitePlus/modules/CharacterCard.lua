@@ -75,7 +75,11 @@ function CC.ShareMine(target)
     sendPage(1)
     for idx = 2, total do
         if AIP.Utils and AIP.Utils.DelayedCall then
-            AIP.Utils.DelayedCall(2.2 * (idx - 1), function() sendPage(idx) end)
+            -- 5.5s spacing: must clear the DataBus CHANNEL rate limit (5s,
+            -- DB.Config.channelRateLimit), not just the 2s per-event-type
+            -- limit. At the old 2.2s, pages 2..N were silently dropped on the
+            -- channel path, so cross-guild peers never completed a card.
+            AIP.Utils.DelayedCall(5.5 * (idx - 1), function() sendPage(idx) end)
         else
             sendPage(idx)
         end
@@ -202,8 +206,18 @@ end
 local function onCard(event)
     if not (event and event.sender and event.data) then return end
     if event.sender == UnitName("player") then return end
+
+    -- Prune stale partial buffers: a sender whose remaining pages never
+    -- arrived (dropped cross-guild, sender logged off) must not leak forever.
+    local now = time()
+    for sender, buf in pairs(pending) do
+        if buf.startedAt and (now - buf.startedAt) > 120 then
+            pending[sender] = nil
+        end
+    end
+
     local d = event.data
-    local buf = pending[event.sender] or { slots = {}, seqs = {} }
+    local buf = pending[event.sender] or { slots = {}, seqs = {}, startedAt = now }
     pending[event.sender] = buf
     buf.name = d.name or event.sender
     buf.total = d.total or 1
