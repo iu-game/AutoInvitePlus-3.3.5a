@@ -886,12 +886,22 @@ function RM.Create(parent)
     header1:SetPoint("TOPLEFT", 10, y)
     header1:SetText("Raid Warning Templates")
     header1:SetTextColor(1, 0.82, 0)
+    local header1Line = content:CreateTexture(nil, "ARTWORK")
+    header1Line:SetSize(160, 1)
+    header1Line:SetPoint("LEFT", header1, "RIGHT", 8, 0)
+    header1Line:SetTexture("Interface\\Buttons\\WHITE8X8")
+    header1Line:SetVertexColor(0.34, 0.37, 0.46, 1)
 
     -- === RIGHT: LOOT RULES (at center of panel) ===
     local header2 = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     header2:SetPoint("TOPLEFT", 480, y)  -- Will be repositioned by UpdateLayout
     header2:SetText("Loot Rules & Reservations")
     header2:SetTextColor(1, 0.82, 0)
+    local header2Line = content:CreateTexture(nil, "ARTWORK")
+    header2Line:SetSize(160, 1)
+    header2Line:SetPoint("LEFT", header2, "RIGHT", 8, 0)
+    header2Line:SetTexture("Interface\\Buttons\\WHITE8X8")
+    header2Line:SetVertexColor(0.34, 0.37, 0.46, 1)
     content.lootHeader = header2
 
     y = y - 22
@@ -1204,6 +1214,11 @@ function RM.Create(parent)
     header3:SetPoint("TOPLEFT", 10, y)
     header3:SetText("Raid Buff Checker")
     header3:SetTextColor(1, 0.82, 0)
+    local header3Line = content:CreateTexture(nil, "ARTWORK")
+    header3Line:SetSize(160, 1)
+    header3Line:SetPoint("LEFT", header3, "RIGHT", 8, 0)
+    header3Line:SetTexture("Interface\\Buttons\\WHITE8X8")
+    header3Line:SetVertexColor(0.34, 0.37, 0.46, 1)
 
     -- Buttons
     local checkAllBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
@@ -1363,6 +1378,11 @@ function RM.Create(parent)
     header4:SetPoint("TOPLEFT", 10, y)
     header4:SetText("MS/OS Tracking")
     header4:SetTextColor(1, 0.82, 0)
+    local header4Line = content:CreateTexture(nil, "ARTWORK")
+    header4Line:SetSize(160, 1)
+    header4Line:SetPoint("LEFT", header4, "RIGHT", 8, 0)
+    header4Line:SetTexture("Interface\\Buttons\\WHITE8X8")
+    header4Line:SetVertexColor(0.34, 0.37, 0.46, 1)
 
     -- MS/OS buttons
     local refreshMSBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
@@ -1525,6 +1545,11 @@ function RM.Create(parent)
     rtHeader:SetPoint("TOPLEFT", msTableBg, "BOTTOMLEFT", 0, -18)
     rtHeader:SetText("Raid Tools")
     rtHeader:SetTextColor(1, 0.82, 0)
+    local rtHeaderLine = content:CreateTexture(nil, "ARTWORK")
+    rtHeaderLine:SetSize(160, 1)
+    rtHeaderLine:SetPoint("LEFT", rtHeader, "RIGHT", 8, 0)
+    rtHeaderLine:SetTexture("Interface\\Buttons\\WHITE8X8")
+    rtHeaderLine:SetVertexColor(0.34, 0.37, 0.46, 1)
 
     -- Floating bar toggle
     local barCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")

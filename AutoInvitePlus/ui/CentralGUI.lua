@@ -687,7 +687,7 @@ function GUI.CreateMinimapButton()
 
     button:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine("AutoInvite+")
+        GameTooltip:AddLine("AutoInvite+ |cFF888888v" .. (AIP.Version or "?") .. "|r")
         GameTooltip:AddLine("|cFF888888by iuGames|r", 0.5, 0.5, 0.5)
 
         local CS = AIP.ChatScanner
@@ -982,6 +982,7 @@ function GUI.CreateFrame()
         composition = 85, -- "Composition"
         raidmgmt = 78,   -- "Raid Mgmt"
         loothistory = 82, -- "Loot History"
+        character = 72,  -- "Character"
         settings = 62,   -- "Settings"
     }
     local tabSpacing = 6  -- Gap between tabs (increased for better visual separation)
@@ -996,11 +997,12 @@ function GUI.CreateFrame()
         -- Tab background
         local tabBg = tabBtn:CreateTexture(nil, "BACKGROUND")
         tabBg:SetAllPoints()
-        -- First tab starts selected
+        -- First tab starts selected - SAME colors SelectTab uses, so the
+        -- initial render matches the post-click restyle exactly
         if firstTab then
-            tabBg:SetTexture(0.25, 0.25, 0.35, 1)
+            tabBg:SetTexture(0.30, 0.26, 0.12, 1)   -- selected: warm gold-tinted
         else
-            tabBg:SetTexture(0.15, 0.15, 0.15, 0.9)
+            tabBg:SetTexture(0.11, 0.12, 0.17, 0.9) -- unselected: dark navy
         end
         tabBtn.bg = tabBg
 
@@ -1645,7 +1647,7 @@ function GUI.CreateBrowserTab(container, tabType)
     emptyTreeText:SetPoint("CENTER", treePanel, "CENTER", 0, -20)
     emptyTreeText:SetWidth(280)
     emptyTreeText:SetJustifyH("CENTER")
-    emptyTreeText:SetText("No groups found\n\nGroups appear when players\nadvertise in chat channels")
+    emptyTreeText:SetText("No group listings yet\n\nListings appear from chat scanning\nand AIP peers.\n\n|cFF33CCFFTip:|r enable channels in Settings,\nor click + Post Group to start your own.")
     emptyTreeText:SetTextColor(0.5, 0.5, 0.5)
     emptyTreeText:Hide()
     container.emptyTreeText = emptyTreeText
@@ -1658,9 +1660,9 @@ function GUI.CreateBrowserTab(container, tabType)
 
     -- Action buttons at bottom of tree panel
     local addGroupBtn = CreateFrame("Button", nil, treePanel, "UIPanelButtonTemplate")
-    addGroupBtn:SetSize(50, 22)
+    addGroupBtn:SetSize(85, 22)
     addGroupBtn:SetPoint("BOTTOMLEFT", 8, 8)
-    addGroupBtn:SetText("LFM")
+    addGroupBtn:SetText("+ Post Group")
     addGroupBtn:SetScript("OnClick", function() GUI.ShowAddGroupPopup() end)
     addGroupBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -1671,9 +1673,9 @@ function GUI.CreateBrowserTab(container, tabType)
     addGroupBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     local enrollBtn = CreateFrame("Button", nil, treePanel, "UIPanelButtonTemplate")
-    enrollBtn:SetSize(50, 22)
+    enrollBtn:SetSize(75, 22)
     enrollBtn:SetPoint("LEFT", addGroupBtn, "RIGHT", 5, 0)
-    enrollBtn:SetText("LFG")
+    enrollBtn:SetText("Find Group")
     enrollBtn:SetScript("OnClick", function() GUI.ShowEnrollPopup() end)
     enrollBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -1684,7 +1686,7 @@ function GUI.CreateBrowserTab(container, tabType)
     enrollBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     local clearBtn = CreateFrame("Button", nil, treePanel, "UIPanelButtonTemplate")
-    clearBtn:SetSize(50, 22)
+    clearBtn:SetSize(45, 22)
     clearBtn:SetPoint("LEFT", enrollBtn, "RIGHT", 5, 0)
     clearBtn:SetText("Clear")
     clearBtn:SetScript("OnClick", function()
@@ -1703,9 +1705,9 @@ function GUI.CreateBrowserTab(container, tabType)
 
     -- Stop Broadcast button (shows when broadcasting)
     local stopBroadcastBtn = CreateFrame("Button", nil, treePanel, "UIPanelButtonTemplate")
-    stopBroadcastBtn:SetSize(90, 22)
+    stopBroadcastBtn:SetSize(55, 22)
     stopBroadcastBtn:SetPoint("LEFT", clearBtn, "RIGHT", 5, 0)
-    stopBroadcastBtn:SetText("Stop BC")
+    stopBroadcastBtn:SetText("Stop")
     stopBroadcastBtn:Hide()  -- Hidden by default
     stopBroadcastBtn:SetScript("OnClick", function()
         GUI.StopBroadcast()
@@ -2000,7 +2002,7 @@ function GUI.CreateBrowserTab(container, tabType)
     local quickRequestBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
     quickRequestBtn:SetSize(90, 24)
     quickRequestBtn:SetPoint("LEFT", requestInviteBtn, "RIGHT", 5, 0)
-    quickRequestBtn:SetText("Quick Req")
+    quickRequestBtn:SetText("Instant Join")
     quickRequestBtn:SetScript("OnClick", function()
         local data = container.selectedGroupData
         if not data or not data.leader then
@@ -2084,7 +2086,7 @@ function GUI.CreateBrowserTab(container, tabType)
             end
         end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Quick Request")
+        GameTooltip:AddLine("Instant Join")
         GameTooltip:AddLine("Sends the autoinvite keyword to the group leader", 1, 1, 1, true)
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("Detected keyword: |cFF00FFFF" .. keyword .. "|r", 0.7, 0.7, 0.7)
@@ -2322,6 +2324,15 @@ function GUI.CreateBrowserTab(container, tabType)
     queueContent:SetPoint("TOPLEFT", 5, -30)
     queueContent:SetPoint("BOTTOMRIGHT", -5, 30)
     container.queueContent = queueContent
+
+    local queueEmptyText = queueContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    queueEmptyText:SetPoint("CENTER", 0, 0)
+    queueEmptyText:SetWidth(360)
+    queueEmptyText:SetJustifyH("CENTER")
+    queueEmptyText:SetText("Queue is empty\n\n|cFF888888Players who whisper your invite keyword\nor apply to your listing land here.|r")
+    queueEmptyText:SetTextColor(0.55, 0.55, 0.55)
+    queueEmptyText:Hide()
+    container.queueEmptyText = queueEmptyText
 
     -- Queue column headers
     local qHeaders = {
@@ -2637,6 +2648,15 @@ function GUI.CreateBrowserTab(container, tabType)
     lfgContent:Hide()
     container.lfgContent = lfgContent
 
+    local lfgEmptyText = lfgContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lfgEmptyText:SetPoint("CENTER", 0, 0)
+    lfgEmptyText:SetWidth(360)
+    lfgEmptyText:SetJustifyH("CENTER")
+    lfgEmptyText:SetText("No LFG players seen yet\n\n|cFF888888Players broadcasting LFG - from chat or\nAIP peers - appear here, best fit first.|r")
+    lfgEmptyText:SetTextColor(0.55, 0.55, 0.55)
+    lfgEmptyText:Hide()
+    container.lfgEmptyText = lfgEmptyText
+
     -- LFG column headers
     local lfgHeaders = {
         {text = "#", x = 5, width = 20},
@@ -2923,6 +2943,15 @@ function GUI.CreateBrowserTab(container, tabType)
     waitlistContent:SetPoint("BOTTOMRIGHT", -5, 30)
     waitlistContent:Hide()
     container.waitlistContent = waitlistContent
+
+    local waitlistEmptyText = waitlistContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    waitlistEmptyText:SetPoint("CENTER", 0, 0)
+    waitlistEmptyText:SetWidth(360)
+    waitlistEmptyText:SetJustifyH("CENTER")
+    waitlistEmptyText:SetText("Waitlist is empty\n\n|cFF888888Park overflow players here - they are\nwhispered when their turn comes.|r")
+    waitlistEmptyText:SetTextColor(0.55, 0.55, 0.55)
+    waitlistEmptyText:Hide()
+    container.waitlistEmptyText = waitlistEmptyText
 
     -- Waitlist column headers
     local wlHeaders = {
@@ -4883,9 +4912,9 @@ function GUI.RefreshBrowserTab(tabType, forceReset)
             if count > 0 and filteredCount == 0 then
                 container.emptyTreeText:SetText("No matches for current filter\n\nTotal " .. (tabType == "lfm" and "groups" or "players") .. ": " .. count)
             elseif tabType == "lfm" then
-                container.emptyTreeText:SetText("No groups found\n\nGroups will appear when players\nadvertise in chat channels")
+                container.emptyTreeText:SetText("No group listings yet\n\nListings appear from chat scanning\nand AIP peers.\n\n|cFF33CCFFTip:|r enable channels in Settings,\nor click + Post Group to start your own.")
             else
-                container.emptyTreeText:SetText("No players found\n\nPlayers will appear when they\nlook for group in chat channels")
+                container.emptyTreeText:SetText("No players looking for group yet\n\nLFG players from chat and AIP peers\nshow here with their fit for your listing.\n\n|cFF33CCFFTip:|r click Find Group to enroll yourself.")
             end
         else
             container.emptyTreeText:Hide()
@@ -5384,6 +5413,18 @@ function GUI.UpdateQueuePanel(container)
         else
             container.waitlistTabBtn.text:SetText("Waitlist (" .. #waitlistEntries .. ")")
         end
+    end
+
+    -- Empty-state hints (each parented to its sub-tab content frame, so
+    -- they inherit the sub-tab's visibility automatically)
+    if container.queueEmptyText then
+        if #queueEntries == 0 then container.queueEmptyText:Show() else container.queueEmptyText:Hide() end
+    end
+    if container.lfgEmptyText then
+        if #lfgEntries == 0 then container.lfgEmptyText:Show() else container.lfgEmptyText:Hide() end
+    end
+    if container.waitlistEmptyText then
+        if #waitlistEntries == 0 then container.waitlistEmptyText:Show() else container.waitlistEmptyText:Hide() end
     end
 
     -- Update status footer (single source: counts + mode + needs strip)

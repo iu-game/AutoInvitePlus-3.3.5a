@@ -350,6 +350,15 @@ function FP.Create(parent)
     end)
     frame.scrollFrame = scrollFrame
 
+    local emptyText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    emptyText:SetPoint("CENTER", scrollFrame, "CENTER", 0, 0)
+    emptyText:SetWidth(340)
+    emptyText:SetJustifyH("CENTER")
+    emptyText:SetText("No favorites yet\n\n|cFF888888Favorites skip the queue and their listings\nget a gold * in the browser.\nAdd players here or from a queue row.|r")
+    emptyText:SetTextColor(0.55, 0.55, 0.55)
+    emptyText:Hide()
+    frame.emptyText = emptyText
+
     -- Create a generous row pool; the number actually shown adapts to the
     -- scroll height (computed live in FP.VisibleCount / FP.Update).
     for i = 1, FP.MAX_ROWS do
@@ -578,6 +587,11 @@ function FP.Update()
 
     local favorites = GetFilteredFavorites()
     local numEntries = #favorites
+
+    -- Empty-state hint
+    if FP.Frame.emptyText then
+        if numEntries == 0 then FP.Frame.emptyText:Show() else FP.Frame.emptyText:Hide() end
+    end
 
     -- Recompute visible rows from the live (elastic) scroll height every refresh,
     -- so the list fills the panel on tab-switch and resize, and never overflows.

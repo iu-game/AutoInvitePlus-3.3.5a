@@ -13,6 +13,26 @@ local _seq = 0
 local function uname(prefix) _seq = _seq + 1; return "AIP" .. (prefix or "F") .. _seq end
 
 -- ============================================================================
+-- DESIGN TOKENS (one semantic palette for the whole addon)
+-- Use these instead of raw color codes: chips, badges, headers and status
+-- text must read as one system, not five shades of the same idea.
+-- ============================================================================
+
+UI.Colors = {
+    -- Inline chat-color codes
+    GOOD   = "|cFF00FF00",  -- success / GREEN verdicts / enabled
+    WARN   = "|cFFFFD100",  -- caution / YELLOW verdicts / gold accents
+    BAD    = "|cFFFF4444",  -- errors / RED verdicts / locked
+    ACCENT = "|cFF33CCFF",  -- AIP brand: [AIP]/[W]/[LFG]/[GUILD] badges, info
+    DIM    = "|cFF888888",  -- secondary text, hints
+    -- RGB tuples for SetTextColor
+    goldRGB   = { 1, 0.82, 0 },        -- section headers, titles
+    dimRGB    = { 0.55, 0.55, 0.55 },  -- empty states, hints
+    accentRGB = { 0.2, 0.8, 1 },
+    borderRGB = { 0.34, 0.37, 0.46 },  -- theme slate border
+}
+
+-- ============================================================================
 -- STANDARD BACKDROP CONFIGURATIONS
 -- ============================================================================
 
