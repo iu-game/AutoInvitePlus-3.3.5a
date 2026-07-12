@@ -586,7 +586,7 @@ function Roster.CreateUI()
     waitAddLabel:SetPoint("TOPLEFT", 0, 0)
     waitAddLabel:SetText("Add to Waitlist:")
 
-    local waitNameInput = CreateFrame("EditBox", "AIPWaitlistName", tab2, "InputBoxTemplate")
+    local waitNameInput = CreateFrame("EditBox", "AIPRosterWaitlistName", tab2, "InputBoxTemplate")
     waitNameInput:SetSize(100, 20)
     waitNameInput:SetPoint("LEFT", waitAddLabel, "RIGHT", 10, 0)
     waitNameInput:SetAutoFocus(false)

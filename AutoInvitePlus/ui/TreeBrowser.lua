@@ -110,7 +110,7 @@ function TB.ApplyListingDecor(node, group)
 
     local isFav = AIP.IsPlayerFavorite and AIP.IsPlayerFavorite(group.leader) or false
     if isFav then
-        node.text = "|cFFFFD100\226\152\133|r " .. (node.text or "")
+        node.text = "|cFFFFD100*|r " .. (node.text or "")
         -- Gold, unless a higher-priority color (own=green, locked=red) is set.
         if not node.textColor then
             node.textColor = {r = 1, g = 0.82, b = 0}
@@ -675,7 +675,7 @@ function TB.BuildLFMTree(preserveState)
                         textColor = {r = 1, g = 0.4, b = 0.4}
                     -- Mark DataBus entries (cyan indicator)
                     elseif group.isDataBus then
-                        displayName = "|cFF00CCFF[AIP]|r " .. displayName
+                        displayName = "|cFF33CCFF[AIP]|r " .. displayName
                     end
 
                     local groupNode = {
@@ -855,7 +855,7 @@ function TB.BuildLFMTree(preserveState)
                     textColor = {r = 1, g = 0.4, b = 0.4}
                 -- Mark DataBus entries (cyan indicator)
                 elseif group.isDataBus then
-                    displayName = "|cFF00CCFF[AIP]|r " .. displayName
+                    displayName = "|cFF33CCFF[AIP]|r " .. displayName
                 end
 
                 local groupNode = {
@@ -992,7 +992,7 @@ function TB.BuildLFGTree(preserveState)
                 local displayName = player.name .. roleStr
                 -- Mark DataBus entries (cyan indicator)
                 if player.isDataBus then
-                    displayName = "|cFF00CCFF[AIP]|r " .. displayName
+                    displayName = "|cFF33CCFF[AIP]|r " .. displayName
                 end
                 -- Weekly quest marker (player enrolled for a weekly run)
                 if player.weekly then
@@ -1039,7 +1039,7 @@ function TB.BuildLFGTree(preserveState)
             local displayName = player.name .. roleStr
             -- Mark DataBus entries (cyan indicator)
             if player.isDataBus then
-                displayName = "|cFF00CCFF[AIP]|r " .. displayName
+                displayName = "|cFF33CCFF[AIP]|r " .. displayName
             end
             local playerNode = {
                 id = "lfg_player_" .. player.name,
@@ -1279,6 +1279,7 @@ function TB.CreateTreeView(parent, width, height)
         text:SetPoint("LEFT", row, "LEFT", 56, 5)  -- Offset up for two-line layout
         text:SetPoint("RIGHT", row, "RIGHT", -5, 5)
         text:SetJustifyH("LEFT")
+        text:SetWordWrap(false)  -- decorated names must clip, not wrap into the comp line
         row.text = text
 
         -- Composition text (second line, smaller font)
@@ -1734,6 +1735,7 @@ function TB.CreateTreeView(parent, width, height)
             text:SetPoint("LEFT", row, "LEFT", 56, 5)
             text:SetPoint("RIGHT", row, "RIGHT", -5, 5)
             text:SetJustifyH("LEFT")
+            text:SetWordWrap(false)  -- decorated names must clip, not wrap into the comp line
             row.text = text
 
             local compText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")

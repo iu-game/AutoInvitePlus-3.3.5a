@@ -103,7 +103,10 @@ function AIP.InstrumentAll()
         ChatScanner = AIP.ChatScanner, InspectionEngine = AIP.InspectionEngine,
         Composition = AIP.Composition, Roster = AIP.Roster, RaidSession = AIP.RaidSession,
         Integrations = AIP.Integrations, LFMFormat = AIP.LFMFormat, RaidTools = AIP.RaidTools,
-        ChatGate = AIP.ChatGate, Weekly = AIP.Weekly,
+        ChatGate = AIP.ChatGate, Weekly = AIP.Weekly, FitEngine = AIP.FitEngine,
+        Apply = AIP.Apply, Updater = AIP.Updater, LFGWatch = AIP.LFGWatch,
+        Readiness = AIP.Readiness, GearAdvisor = AIP.GearAdvisor, Rotation = AIP.Rotation,
+        DBMBridge = AIP.DBMBridge, ThreatCoach = AIP.ThreatCoach, CharCard = AIP.CharCard,
         GroupTracker = AIP.GroupTracker, LFMBrowser = AIP.LFMBrowser, TestData = AIP.TestData,
         CentralGUI = AIP.CentralGUI, TreeBrowser = AIP.TreeBrowser, UI = AIP.UI,
     }

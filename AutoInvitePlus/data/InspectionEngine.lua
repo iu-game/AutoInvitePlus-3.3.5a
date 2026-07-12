@@ -426,31 +426,7 @@ local function ProcessInspectionQueue()
     local next = table.remove(IE.Queue.pending, 1)
     if not next then return end
 
-    -- Find the unit
-    local unit = nil
-    if UnitName("target") == next.name then
-        unit = "target"
-    elseif UnitName("mouseover") == next.name then
-        unit = "mouseover"
-    else
-        -- Check raid/party
-        local numRaid = GetNumRaidMembers()
-        if numRaid > 0 then
-            for i = 1, numRaid do
-                if UnitName("raid" .. i) == next.name then
-                    unit = "raid" .. i
-                    break
-                end
-            end
-        else
-            for i = 1, GetNumPartyMembers() do
-                if UnitName("party" .. i) == next.name then
-                    unit = "party" .. i
-                    break
-                end
-            end
-        end
-    end
+    local unit = IE.ResolveUnit(next.name)
 
     if not unit or not CanInspect(unit) then
         -- Can't inspect, move on
@@ -463,27 +439,38 @@ local function ProcessInspectionQueue()
     NotifyInspect(unit)
 end
 
+-- Resolve a player name to an inspectable unit token. Shared by the queue
+-- starter AND the completion handler: they must agree, or an inspect started
+-- against a mouseover/party unit completes with unit=nil and the result is
+-- silently thrown away (this is exactly what happened to party inspects).
+function IE.ResolveUnit(name)
+    if not name then return nil end
+    if UnitName("target") == name then return "target" end
+    if UnitName("mouseover") == name then return "mouseover" end
+    local numRaid = GetNumRaidMembers()
+    if numRaid > 0 then
+        for i = 1, numRaid do
+            if UnitName("raid" .. i) == name then
+                return "raid" .. i
+            end
+        end
+    else
+        for i = 1, GetNumPartyMembers() do
+            if UnitName("party" .. i) == name then
+                return "party" .. i
+            end
+        end
+    end
+    return nil
+end
+
 -- Handle inspection ready event
 local function OnInspectReady()
     if not IE.Queue.inProgress then return end
 
-    -- Find the unit we were inspecting
+    -- Find the unit we were inspecting (same resolution as the starter)
     local name = IE.Queue.inProgress
-    local unit = nil
-
-    if UnitName("target") == name then
-        unit = "target"
-    else
-        local numRaid = GetNumRaidMembers()
-        if numRaid > 0 then
-            for i = 1, numRaid do
-                if UnitName("raid" .. i) == name then
-                    unit = "raid" .. i
-                    break
-                end
-            end
-        end
-    end
+    local unit = IE.ResolveUnit(name)
 
     -- Validate unit still exists and is connected before processing
     if unit and UnitExists(unit) and UnitIsConnected(unit) then

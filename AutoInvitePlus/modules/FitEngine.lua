@@ -33,13 +33,14 @@ local function roleOpen(listing, roleKey)
     return (slot.needed or 0) > (slot.current or 0)
 end
 
--- Map a role string (TANK/HEALER/MDPS/RDPS/DPS) to the listing slot key(s)
+-- Map a role string (TANK/HEALER/MDPS/RDPS/DPS + MELEE/RANGED aliases some
+-- peers send) to the listing slot key(s)
 local function roleSlots(role)
     local upper = role and role:upper() or nil
     if upper == "TANK" then return { "tanks" } end
     if upper == "HEALER" then return { "healers" } end
-    if upper == "MDPS" then return { "mdps" } end
-    if upper == "RDPS" then return { "rdps" } end
+    if upper == "MDPS" or upper == "MELEE" then return { "mdps" } end
+    if upper == "RDPS" or upper == "RANGED" then return { "rdps" } end
     if upper == "DPS" then return { "mdps", "rdps" } end
     return nil
 end

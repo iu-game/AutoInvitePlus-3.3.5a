@@ -237,6 +237,7 @@ end
 
 -- LFG Enrollment tracking (other players looking for groups)
 GUI.LfgEnrollments = {}  -- {playerName = {name, class, spec, role, gs, ilvl, raid, time}}
+GUI.FitCache = setmetatable({}, { __mode = "k" })  -- render-time fit verdicts, keyed by entry (weak: never persisted)
 GUI.MyEnrollment = nil   -- Our own enrollment data
 GUI.MyGroup = nil        -- Our active LFM data (for matching incoming LFG players)
 
@@ -1097,6 +1098,8 @@ function GUI.CreateFrame()
     -- Chat ban status (center-right of footer)
     local chatBanStatus = statusBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     chatBanStatus:SetPoint("CENTER", 100, 0)
+    chatBanStatus:SetWidth(160)       -- clip: overlaps the right-side strings on narrow windows otherwise
+    chatBanStatus:SetJustifyH("CENTER")
     chatBanStatus:SetText("")
     statusBar.chatBanStatus = chatBanStatus
 
@@ -1115,6 +1118,8 @@ function GUI.CreateFrame()
     -- Broadcast status (right side of footer)
     local broadcastStatus = statusBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     broadcastStatus:SetPoint("RIGHT", -25, 0)
+    broadcastStatus:SetWidth(230)     -- clip: grows leftward into the mode indicator otherwise
+    broadcastStatus:SetJustifyH("RIGHT")
     broadcastStatus:SetText("")
     statusBar.broadcastStatus = broadcastStatus
 
@@ -2089,7 +2094,7 @@ function GUI.CreateBrowserTab(container, tabType)
     container.quickRequestBtn = quickRequestBtn
 
     local blacklistBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
-    blacklistBtn:SetSize(65, 24)
+    blacklistBtn:SetSize(64, 24)
     blacklistBtn:SetPoint("LEFT", quickRequestBtn, "RIGHT", 5, 0)
     blacklistBtn:SetText("Block")
     blacklistBtn:SetScript("OnClick", function()
@@ -2109,7 +2114,7 @@ function GUI.CreateBrowserTab(container, tabType)
 
     -- Whisper button (plain whisper to open chat)
     local whisperBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
-    whisperBtn:SetSize(70, 24)
+    whisperBtn:SetSize(64, 24)
     whisperBtn:SetPoint("LEFT", blacklistBtn, "RIGHT", 5, 0)
     whisperBtn:SetText("Whisper")
     whisperBtn:SetScript("OnClick", function()
@@ -2133,7 +2138,7 @@ function GUI.CreateBrowserTab(container, tabType)
     -- Hide/Unhide button - exclude a listing we can't join (requested/no reply,
     -- or just not interested). Stays hidden until the listing expires.
     local hideBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
-    hideBtn:SetSize(60, 24)
+    hideBtn:SetSize(64, 24)
     hideBtn:SetPoint("LEFT", whisperBtn, "RIGHT", 5, 0)
     hideBtn:SetText("Hide")
     hideBtn:SetScript("OnClick", function()
@@ -2172,7 +2177,7 @@ function GUI.CreateBrowserTab(container, tabType)
     -- Favorite/Unfavorite button - add the leader (or LFG player) to favorites so
     -- their listings are highlighted and they get priority in the queue.
     local favBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
-    favBtn:SetSize(55, 24)
+    favBtn:SetSize(64, 24)
     favBtn:SetPoint("LEFT", hideBtn, "RIGHT", 5, 0)
     favBtn:SetText("Fav")
     favBtn:SetScript("OnClick", function()
@@ -3167,7 +3172,7 @@ function GUI.CreateBrowserTab(container, tabType)
     -- Queue status
     local queueStatus = queuePanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     queueStatus:SetPoint("BOTTOMLEFT", 10, 8)
-    queueStatus:SetText("Status: Ready")
+    queueStatus:SetText("Queue: 0 | Waitlist: 0")
     container.queueStatus = queueStatus
 
     -- Timer refresh for queue/waitlist time displays (every 5 seconds)
@@ -5027,13 +5032,15 @@ function GUI.UpdateQueuePanel(container)
     end
 
     -- While a listing is active, sort both lists best-fit first (the LFG
-    -- sub-tab doubles as the "who should I recruit" suggestion list). The
-    -- verdicts are cached on the entries and reused by the row renderer.
+    -- sub-tab doubles as the "who should I recruit" suggestion list).
+    -- Verdicts live in a weak-keyed side table, NEVER on the entries: queue
+    -- entries are persisted SavedVariables tables, and a nested verdict
+    -- written onto them would be serialized to disk every logout.
     if AIP.FitEngine and GUI.MyGroup then
         local function fitScore(entry)
             if entry.isSelf then return -1 end
-            entry._fit = AIP.FitEngine.ScoreApplicant(entry, GUI.MyGroup)
-            return entry._fit.score
+            GUI.FitCache[entry] = AIP.FitEngine.ScoreApplicant(entry, GUI.MyGroup)
+            return GUI.FitCache[entry].score
         end
         local function byFit(a, b)
             local sa, sb = fitScore(a), fitScore(b)
@@ -5091,19 +5098,20 @@ function GUI.UpdateQueuePanel(container)
                 -- Show name with favorite/guild indicators
                 local displayName = entry.name or "-"
                 if entry.isFavorite then
-                    displayName = "|cFF00FF80*|r" .. displayName  -- Green star for favorite
+                    displayName = "|cFFFFD100*|r" .. displayName  -- Gold star for favorite (matches tree)
                     row.nameText:SetTextColor(0, 1, 0.5)  -- Greenish
                 elseif entry.isGuildMember then
-                    displayName = "|cFF00CCFF+|r" .. displayName  -- Blue plus for guild
+                    displayName = "|cFF33CCFF+|r" .. displayName  -- Accent plus for guild
                     row.nameText:SetTextColor(0.4, 0.8, 1)  -- Light blue
                 else
                     row.nameText:SetTextColor(1, 1, 1)  -- Default white
                 end
-                -- Fit chip while a listing is active (live verdict per render)
-                entry._fit = nil
+                -- Fit chip while a listing is active (live verdict per render;
+                -- weak side table, never written onto the persisted entry)
+                GUI.FitCache[entry] = nil
                 if AIP.FitEngine and GUI.MyGroup then
-                    entry._fit = AIP.FitEngine.ScoreApplicant(entry, GUI.MyGroup)
-                    displayName = AIP.FitEngine.Chip(entry._fit) .. " " .. displayName
+                    GUI.FitCache[entry] = AIP.FitEngine.ScoreApplicant(entry, GUI.MyGroup)
+                    displayName = AIP.FitEngine.Chip(GUI.FitCache[entry]) .. " " .. displayName
                 end
                 row.nameText:SetText(displayName)
 
@@ -5145,25 +5153,26 @@ function GUI.UpdateQueuePanel(container)
                     end
                     if e.isFavorite then
                         GameTooltip:AddLine(" ")
-                        GameTooltip:AddLine("|cFF00FF80FAVORITE|r - Priority player", 0, 1, 0.5)
+                        GameTooltip:AddLine("|cFF00FF00FAVORITE|r - Priority player", 0, 1, 0)
                     end
                     if e.isGuildMember then
-                        GameTooltip:AddLine("|cFF00CCFFGUILD MEMBER|r", 0.4, 0.8, 1)
+                        GameTooltip:AddLine("|cFF33CCFFGUILD MEMBER|r", 0.2, 0.8, 1)
                     end
                     if e.isBlacklisted then
                         GameTooltip:AddLine(" ")
-                        GameTooltip:AddLine("|cFFFF3333BLACKLISTED|r", 1, 0.3, 0.3)
+                        GameTooltip:AddLine("|cFFFF4444BLACKLISTED|r", 1, 0.27, 0.27)
                         if e.blacklistReason then GameTooltip:AddLine(e.blacklistReason, 1, 0.5, 0.5) end
                     end
-                    if e._fit and AIP.FitEngine then
+                    local eFit = GUI.FitCache[e]
+                    if eFit and AIP.FitEngine then
                         GameTooltip:AddLine(" ")
-                        GameTooltip:AddLine(AIP.FitEngine.Chip(e._fit) .. " Fit for your listing:", 1, 0.82, 0)
-                        for _, reason in ipairs(e._fit.reasons) do
+                        GameTooltip:AddLine(AIP.FitEngine.Chip(eFit) .. " Fit for your listing:", 1, 0.82, 0)
+                        for _, reason in ipairs(eFit.reasons) do
                             GameTooltip:AddLine("  - " .. reason, 0.8, 0.8, 0.8, true)
                         end
                     end
                     if e.isApplication then
-                        GameTooltip:AddLine("|cFF00CCFFStructured application (AIP peer)|r", 0.4, 0.8, 1)
+                        GameTooltip:AddLine("|cFF33CCFFStructured application (AIP peer)|r", 0.2, 0.8, 1)
                     end
                     GameTooltip:Show()
                 end)
@@ -5198,12 +5207,13 @@ function GUI.UpdateQueuePanel(container)
 
                 local class = entry.class or "UNKNOWN"
                 local classColor = RAID_CLASS_COLORS and RAID_CLASS_COLORS[class:upper()]
-                -- Fit chip while a listing is active (live verdict per render)
+                -- Fit chip while a listing is active (live verdict per render;
+                -- weak side table, never written onto the persisted entry)
                 local lfgDisplayName = entry.name or "-"
-                entry._fit = nil
+                GUI.FitCache[entry] = nil
                 if AIP.FitEngine and GUI.MyGroup and not entry.isSelf then
-                    entry._fit = AIP.FitEngine.ScoreApplicant(entry, GUI.MyGroup)
-                    lfgDisplayName = AIP.FitEngine.Chip(entry._fit) .. " " .. lfgDisplayName
+                    GUI.FitCache[entry] = AIP.FitEngine.ScoreApplicant(entry, GUI.MyGroup)
+                    lfgDisplayName = AIP.FitEngine.Chip(GUI.FitCache[entry]) .. " " .. lfgDisplayName
                 end
                 if classColor then
                     row.nameText:SetText(lfgDisplayName)
@@ -5262,10 +5272,11 @@ function GUI.UpdateQueuePanel(container)
                         GameTooltip:AddLine(" ")
                         GameTooltip:AddLine("|cFFFF4444You are saved to this instance|r", 1, 0.27, 0.27)
                     end
-                    if e._fit and AIP.FitEngine then
+                    local eFit = GUI.FitCache[e]
+                    if eFit and AIP.FitEngine then
                         GameTooltip:AddLine(" ")
-                        GameTooltip:AddLine(AIP.FitEngine.Chip(e._fit) .. " Fit for your listing:", 1, 0.82, 0)
-                        for _, reason in ipairs(e._fit.reasons) do
+                        GameTooltip:AddLine(AIP.FitEngine.Chip(eFit) .. " Fit for your listing:", 1, 0.82, 0)
+                        for _, reason in ipairs(eFit.reasons) do
                             GameTooltip:AddLine("  - " .. reason, 0.8, 0.8, 0.8, true)
                         end
                     end
@@ -6758,7 +6769,7 @@ function GUI.CreateAddGroupPopup()
     GUI.StylePopup(popup)
 
     local COLLAPSED_HEIGHT = 320
-    local EXPANDED_HEIGHT = 655
+    local EXPANDED_HEIGHT = 668  -- 655 put the customize toggle 7px over the reserved box
 
     local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -15)
@@ -6831,7 +6842,7 @@ function GUI.CreateAddGroupPopup()
     local quickLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     quickLabel:SetPoint("TOPLEFT", 20, -96)
     quickLabel:SetText("QUICK POST")
-    quickLabel:SetTextColor(0.6, 0.8, 1)
+    quickLabel:SetTextColor(1, 0.82, 0)
     popup.quickLabel = quickLabel
 
     popup.presetTiles = {}
@@ -7024,6 +7035,9 @@ function GUI.CreateAddGroupPopup()
                         popup.heroicCheck:SetChecked(false)
                         UpdateRaidDropdownText()
                         UpdateSizeDropdown()
+                        -- SetText explicitly: UpdateSizeDropdown only rewrites
+                        -- the label when the size is INVALID for the raid
+                        UIDropDownMenu_SetText(sizeDropdown, "10")
                         ApplyTemplateDefaults()
                         CloseDropDownMenus()
                     end
@@ -7321,7 +7335,7 @@ function GUI.CreateAddGroupPopup()
     local previewLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     previewLabel:SetPoint("BOTTOMLEFT", 20, 116)
     previewLabel:SetText("PREVIEW")
-    previewLabel:SetTextColor(0.6, 0.8, 1)
+    previewLabel:SetTextColor(1, 0.82, 0)
     local previewHint = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     previewHint:SetPoint("LEFT", previewLabel, "RIGHT", 8, 0)
     previewHint:SetText("|cFF888888(exactly what gets broadcast)|r")
@@ -7510,7 +7524,7 @@ function GUI.CreateAddGroupPopup()
         local last = AIP.db and AIP.db.lastListingConfig
         if last and last.raidType then
             local key = (last.raidType or "?") .. (last.raidSize or "") .. (last.heroic and "H" or "N")
-            tiles.last.titleText:SetText("|cFFFFD700* Last|r")
+            tiles.last.titleText:SetText("|cFFFFD100* Last|r")
             tiles.last.subText:SetText(key .. (last.gs and ("  " .. last.gs .. "+") or ""))
             tiles.last.tooltip = "Repeat your last listing"
             tiles.last:SetScript("OnClick", function() ApplyPreset(last) end)
@@ -8347,6 +8361,7 @@ function GUI.CreateEnrollPopup()
                         popup.heroicCheck:SetChecked(false)
                         UpdateRaidDropdownText()
                         UpdateSizeDropdown()
+                        UIDropDownMenu_SetText(sizeDropdown, "10")
                         UpdateCustomFieldVisibility()
                         UpdateWeeklyStrip()
                         UpdateAchievementsList()

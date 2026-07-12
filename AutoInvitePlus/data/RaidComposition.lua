@@ -3079,7 +3079,7 @@ function Comp.BuildRecommendationLines()
         table.insert(lines, " ")
         table.insert(lines, "|cFFFFCC00Core classes:|r")
         for _, c in ipairs(missingReq) do
-            table.insert(lines, " - |cFFFF3333MISSING|r " .. Comp.ColoredClassName(c.class)
+            table.insert(lines, " - |cFFFF4444MISSING|r " .. Comp.ColoredClassName(c.class)
                 .. " |cFF888888- " .. c.reason .. "|r")
         end
         if #missingRec > 0 then

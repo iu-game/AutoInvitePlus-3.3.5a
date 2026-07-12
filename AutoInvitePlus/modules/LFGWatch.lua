@@ -154,12 +154,12 @@ end
 function LW.Print()
     LW.Refresh()
     for line in (LW.Summary() .. "\n"):gmatch("(.-)\n") do
-        if line ~= "" and AIP.Print then AIP.Print("|cff66bbff[LFG]|r " .. line) end
+        if line ~= "" and AIP.Print then AIP.Print("|cff33ccff[LFG]|r " .. line) end
     end
     local peers = LW.PeerSummary and LW.PeerSummary()
     if peers and #peers > 0 and AIP.Print then
-        AIP.Print("|cff66bbff[LFG]|r |cffffd100Peers in queue:|r")
-        for _, p in ipairs(peers) do AIP.Print("|cff66bbff[LFG]|r   " .. p) end
+        AIP.Print("|cff33ccff[LFG]|r |cffffd100Peers in queue:|r")
+        for _, p in ipairs(peers) do AIP.Print("|cff33ccff[LFG]|r   " .. p) end
     end
 end
 
@@ -278,7 +278,7 @@ function LW.CheckAutoRequeue()
     -- Re-queue after the leave is confirmed server-side (LeaveLFG is async).
     local function rejoin() if LFDQueueFrame_Join then pcall(LFDQueueFrame_Join) end end
     if AIP.Utils and AIP.Utils.DelayedCall then AIP.Utils.DelayedCall(2, rejoin) else rejoin() end
-    if AIP.Print then AIP.Print("|cff66bbff[LFG]|r No group after " ..
+    if AIP.Print then AIP.Print("|cff33ccff[LFG]|r No group after " ..
         math.floor(LW.REQUEUE_AFTER / 60) .. " min - left and re-queued.") end
 end
 

@@ -85,11 +85,16 @@ function CG.GetProfile()
     return CG.Profiles[key] or CG.Profiles.safe, key
 end
 
--- Effective budget values (profile scaled by throttle backoff)
+-- Effective budget values (profile scaled by throttle backoff). The user's
+-- "Cooldown (sec)" setting (db.spamChannelCooldown) acts as a floor on the
+-- per-channel gap, so raising it beyond the profile slows same-channel posts.
 local function budgets()
     local p = CG.GetProfile()
     local b = CG.State.backoff
-    return p.publicGap * b, p.channelGap * b, p.perMinute, p.guildGap * b
+    local channelGap = p.channelGap * b
+    local userFloor = AIP.db and tonumber(AIP.db.spamChannelCooldown) or 0
+    if userFloor > channelGap then channelGap = userFloor end
+    return p.publicGap * b, channelGap, p.perMinute, p.guildGap * b
 end
 
 -- ============================================================================

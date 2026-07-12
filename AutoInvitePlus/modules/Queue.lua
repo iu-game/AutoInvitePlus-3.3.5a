@@ -135,7 +135,7 @@ function AIP.AddToQueue(name, message, role, gs, class)
     if isFavorite then
         queueMsg = queueMsg .. " |cFF00FF00[FAVORITE]|r"
     elseif isGuildMember then
-        queueMsg = queueMsg .. " |cFF00CCFF[GUILD]|r"
+        queueMsg = queueMsg .. " |cFF33CCFF[GUILD]|r"
     end
     if isBlacklisted then
         queueMsg = queueMsg .. " |cFFFF0000[BLACKLISTED]|r"

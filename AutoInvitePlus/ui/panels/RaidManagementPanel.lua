@@ -907,8 +907,8 @@ function RM.Create(parent)
         tile = true, tileSize = 16, edgeSize = 12,
         insets = {left = 3, right = 3, top = 3, bottom = 3}
     })
-    listBg:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
-    listBg:SetBackdropBorderColor(0.4, 0.4, 0.4)
+    listBg:SetBackdropColor(0.045, 0.05, 0.072, 0.92)
+    listBg:SetBackdropBorderColor(0.34, 0.37, 0.46)
 
     local listScroll = CreateFrame("ScrollFrame", "AIPRMTemplateScroll", listBg, "FauxScrollFrameTemplate")
     listScroll:SetPoint("TOPLEFT", 5, -5)
@@ -977,8 +977,8 @@ function RM.Create(parent)
         tile = true, tileSize = 16, edgeSize = 10,
         insets = {left = 3, right = 3, top = 3, bottom = 3}
     })
-    msgInputBg:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
-    msgInputBg:SetBackdropBorderColor(0.4, 0.4, 0.4)
+    msgInputBg:SetBackdropColor(0.045, 0.05, 0.072, 0.92)
+    msgInputBg:SetBackdropBorderColor(0.34, 0.37, 0.46)
     content.msgInputBg = msgInputBg
 
     local msgInput = CreateFrame("EditBox", nil, msgInputBg)
@@ -1051,8 +1051,8 @@ function RM.Create(parent)
         tile = true, tileSize = 16, edgeSize = 10,
         insets = {left = 3, right = 3, top = 3, bottom = 3}
     })
-    reservedFrame:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
-    reservedFrame:SetBackdropBorderColor(0.4, 0.4, 0.4)
+    reservedFrame:SetBackdropColor(0.045, 0.05, 0.072, 0.92)
+    reservedFrame:SetBackdropBorderColor(0.34, 0.37, 0.46)
     content.reservedFrame = reservedFrame
 
     local reservedScroll = CreateFrame("ScrollFrame", "AIPRMReservedScroll", reservedFrame, "UIPanelScrollFrameTemplate")
@@ -1118,8 +1118,8 @@ function RM.Create(parent)
         tile = true, tileSize = 16, edgeSize = 10,
         insets = {left = 3, right = 3, top = 3, bottom = 3}
     })
-    lootBanFrame:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
-    lootBanFrame:SetBackdropBorderColor(0.4, 0.4, 0.4)
+    lootBanFrame:SetBackdropColor(0.045, 0.05, 0.072, 0.92)
+    lootBanFrame:SetBackdropBorderColor(0.34, 0.37, 0.46)
     content.lootBanFrame = lootBanFrame
 
     -- Only a few rows fit in the fixed-height box, so allow wheel paging through
@@ -1252,8 +1252,8 @@ function RM.Create(parent)
         tile = true, tileSize = 16, edgeSize = 12,
         insets = {left = 3, right = 3, top = 3, bottom = 3}
     })
-    buffTableBg:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
-    buffTableBg:SetBackdropBorderColor(0.4, 0.4, 0.4)
+    buffTableBg:SetBackdropColor(0.045, 0.05, 0.072, 0.92)
+    buffTableBg:SetBackdropBorderColor(0.34, 0.37, 0.46)
     content.buffTableBg = buffTableBg
 
     -- Reflow buff columns whenever the (elastic) table width changes.
@@ -1417,8 +1417,8 @@ function RM.Create(parent)
         tile = true, tileSize = 16, edgeSize = 12,
         insets = {left = 3, right = 3, top = 3, bottom = 3}
     })
-    msTableBg:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
-    msTableBg:SetBackdropBorderColor(0.4, 0.4, 0.4)
+    msTableBg:SetBackdropColor(0.045, 0.05, 0.072, 0.92)
+    msTableBg:SetBackdropBorderColor(0.34, 0.37, 0.46)
     content.msTableBg = msTableBg
 
     -- Reflow MS/OS columns whenever the (elastic) table width changes.
@@ -2343,7 +2343,7 @@ local function CreateDropdownMenu(parent, width, items, onSelect, placeholder)
         insets = {left = 3, right = 3, top = 3, bottom = 3}
     })
     menu:SetBackdropColor(0.1, 0.1, 0.1, 0.95)
-    menu:SetBackdropBorderColor(0.4, 0.4, 0.4)
+    menu:SetBackdropBorderColor(0.34, 0.37, 0.46)
     menu:Hide()
     dropdown.menu = menu
 
@@ -2791,7 +2791,7 @@ rollEventFrame:SetScript("OnEvent", function(self, event, message)
     if isBanned then
         local rollNum = tonumber(roll)
         if rollNum and rollNum >= 50 then  -- Only warn for decent rolls
-            local warnMsg = "|cFFFF0000WARNING:|r " .. playerName .. " rolled " .. roll .. " but is |cFFFF4444LOOT BANNED|r"
+            local warnMsg = "|cFFFF4444WARNING:|r " .. playerName .. " rolled " .. roll .. " but is |cFFFF4444LOOT BANNED|r"
             if banBoss then
                 warnMsg = warnMsg .. " (" .. banBoss .. ")"
             end

@@ -398,7 +398,12 @@ function SP.Create(parent)
         if AIP.db then
             local val = tonumber(self:GetText()) or 25
             AIP.db.maxRaiders = math.max(1, math.min(40, val))
+            -- Setting a max implies enforcing it: IsGroupFull() ignores
+            -- maxRaiders unless useMaxLimit is on, and no other UI sets it -
+            -- without this line the box was decorative.
+            AIP.db.useMaxLimit = true
             self:SetText(AIP.db.maxRaiders)
+            AIP.Print("Max group size set to " .. AIP.db.maxRaiders .. " (limit enforcement ON)")
         end
         self:ClearFocus()
     end)

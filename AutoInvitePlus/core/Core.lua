@@ -4,7 +4,7 @@
 -- Refactored with DRY principle and OOP patterns
 
 local ADDON_NAME = "AutoInvitePlus"
-local VERSION = "6.6.0"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
+local VERSION = "6.6.1"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
 local DB_VERSION = 5  -- Increment when saved variables structure changes (5.5: raid sessions, 5.4: mdps/rdps split, 4: loot history retention)
 
 -- Create main addon namespace (may already exist from Utils.lua)
@@ -263,7 +263,7 @@ local function Debug(msg)
     -- Always log to file; only echo to chat when debug mode is enabled.
     if AIP.Log then AIP.Log("[DEBUG] " .. tostring(msg)) end
     if AIP.db and AIP.db.debug then
-        DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00[AIP Debug]|r " .. tostring(msg))
+        DEFAULT_CHAT_FRAME:AddMessage("|cFFFFD100[AIP Debug]|r " .. tostring(msg))
     end
 end
 
@@ -326,8 +326,11 @@ local function CheckTriggers(message)
 
     local GUI = AIP.CentralGUI
     local myGroup = GUI and GUI.MyGroup
-    if myGroup and myGroup.inviteKeyword and myGroup.inviteKeyword ~= "" then
-        if msg:find(myGroup.inviteKeyword:lower():trim(), 1, true) then
+    if myGroup and myGroup.inviteKeyword then
+        -- Trim BEFORE the empty check: find("", ...) matches everything, so a
+        -- whitespace-only keyword would auto-invite on every single message.
+        local kw = myGroup.inviteKeyword:lower():trim()
+        if kw ~= "" and msg:find(kw, 1, true) then
             return true
         end
     end
@@ -1092,6 +1095,14 @@ local function OnEvent(self, event, ...)
             -- player mode would be a lie (mode indicator on, nothing sending).
             AIP.db.playerMode = "none"
 
+            -- One-time hygiene: 6.6.0 briefly wrote render-time fit verdicts
+            -- onto persisted queue entries; strip any that got saved.
+            if AIP.db.queue then
+                for _, entry in ipairs(AIP.db.queue) do
+                    entry._fit = nil
+                end
+            end
+
             -- Apply the persisted chat-scanner enable to the live scanner config
             -- (the scanner's CS.Config.enabled is otherwise session-only).
             if AIP.LFMBrowser and AIP.LFMBrowser.Config and AIP.db.chatScanEnabled ~= nil then
@@ -1465,6 +1476,34 @@ local function SlashHandler(msg)
     elseif cmd == "fit" then
         if AIP.FitEngine then AIP.FitEngine.SlashHandler(rest) end
 
+    -- Matchmaking automation toggles (no Settings UI yet - slash surface)
+    elseif cmd == "auto" then
+        local sub, arg = strsplit(" ", rest, 2)
+        sub = (sub or ""):lower():trim()
+        arg = (arg or ""):lower():trim()
+        local keys = { alerts = "matchAlerts", invite = "autoInviteGreen", apply = "autoApplyGreen" }
+        local key = keys[sub]
+        if key then
+            if arg == "on" then AIP.db[key] = true
+            elseif arg == "off" then AIP.db[key] = false
+            else AIP.db[key] = not AIP.db[key] end
+            Print(sub .. " (" .. key .. "): " .. (AIP.db[key] and "|cFF00FF00ON|r" or "|cFFFF4444OFF|r"))
+        elseif sub == "max" then
+            local minutes = tonumber(arg)
+            if minutes and minutes >= 0 then
+                AIP.db.broadcastMaxMinutes = minutes
+                Print("Broadcast auto-stop after " .. (minutes > 0 and (minutes .. " minutes") or "|cFFFF4444never (0)|r"))
+            else
+                Print("Usage: /aip auto max <minutes>  (0 = never auto-stop)")
+            end
+        else
+            Print("Matchmaking automation:")
+            Print("  /aip auto alerts [on|off] - match alerts while enrolled: " .. (AIP.db.matchAlerts and "|cFF00FF00ON|r" or "|cFFFF4444OFF|r"))
+            Print("  /aip auto invite [on|off] - auto-invite GREEN applicants: " .. (AIP.db.autoInviteGreen and "|cFF00FF00ON|r" or "|cFFFF4444OFF|r"))
+            Print("  /aip auto apply [on|off] - auto-apply to GREEN AIP listings: " .. (AIP.db.autoApplyGreen and "|cFF00FF00ON|r" or "|cFFFF4444OFF|r"))
+            Print("  /aip auto max <minutes> - broadcast auto-stop (now " .. (AIP.db.broadcastMaxMinutes or 60) .. "m)")
+        end
+
     -- Weekly raid quest
     elseif cmd == "weekly" then
         if AIP.Weekly then
@@ -1515,6 +1554,7 @@ local function SlashHandler(msg)
         Print("  /aip gate - Show chat-budget status | /aip gate profile <relaxed|safe|paranoid>")
         Print("  /aip weekly - Show this week's raid quest status")
         Print("  /aip fit <name> - Fit verdict for a queued player or a scanned listing")
+        Print("  /aip auto - Matchmaking automation toggles (alerts/invite/apply/max)")
         Print("  /aip broadcast dryrun - Log the broadcast schedule for 5 min without sending")
         Print("  /aip guild/friends - Invite guild or friends")
         Print("  /aip queue - Invite queue")

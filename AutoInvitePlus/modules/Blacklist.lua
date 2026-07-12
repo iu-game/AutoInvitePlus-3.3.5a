@@ -541,10 +541,13 @@ function AIP.ShareBlacklist(target)
         if ev then AIP.DataBus.Broadcast(ev, target) end
     end
     sendPage(1)
-    -- Stagger remaining pages (~2.2s) so the per-type fan-out rate gate doesn't drop them.
+    -- Stagger remaining pages 5.5s apart: must clear the DataBus CHANNEL rate
+    -- limit (5s, DB.Config.channelRateLimit) - not just the 2s per-event-type
+    -- gate - or cross-guild peers silently lose pages 2..N (same failure the
+    -- CharacterCard pages had at 2.2s).
     for idx = 2, total do
         if AIP.Utils and AIP.Utils.DelayedCall then
-            AIP.Utils.DelayedCall(2.2 * (idx - 1), function() sendPage(idx) end)
+            AIP.Utils.DelayedCall(5.5 * (idx - 1), function() sendPage(idx) end)
         else
             sendPage(idx)
         end
@@ -568,7 +571,7 @@ local function onBlacklistShared(event)
         AIP.Utils.DelayedCall(3, function()
             if buf.promptArmed and #buf.entries > 0 then
                 buf.promptArmed = false
-                AIP.Print(string.format("|cFF00CCFF%s|r offers %d blacklist entr%s. Type |cFFFFFF00/aip bl accept %s|r to merge them in.",
+                AIP.Print(string.format("|cFF33CCFF%s|r offers %d blacklist entr%s. Type |cFFFFD100/aip bl accept %s|r to merge them in.",
                     event.sender, #buf.entries, #buf.entries == 1 and "y" or "ies", event.sender))
             end
         end)
