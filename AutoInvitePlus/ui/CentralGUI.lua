@@ -1916,11 +1916,12 @@ function GUI.CreateBrowserTab(container, tabType)
     -- Store class buttons for reuse
     container.lookingForButtons = {}
 
-    -- Details action buttons - Request Invite (sends whisper with player info)
+    -- Details action buttons - Apply (structured DataBus application to AIP
+    -- peers with status ACKs; detailed whisper to everyone else)
     local requestInviteBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
     requestInviteBtn:SetSize(120, 24)
     requestInviteBtn:SetPoint("BOTTOMLEFT", 10, 8)
-    requestInviteBtn:SetText("Request Invite")
+    requestInviteBtn:SetText("Apply")
     requestInviteBtn:SetScript("OnClick", function()
         local data = container.selectedGroupData
         if not data or not data.leader then
@@ -1928,7 +1929,18 @@ function GUI.CreateBrowserTab(container, tabType)
             return
         end
 
-        -- Build request message with player info
+        -- AIP peer: structured application over the DataBus (seen/queued/
+        -- invited/declined status comes back automatically)
+        if AIP.Apply and AIP.Apply.SendApply and AIP.Apply.SendApply(data) then
+            if AIP.ChatScanner and AIP.ChatScanner.MarkRequested then
+                AIP.ChatScanner.MarkRequested(data.leader)
+                GUI.RefreshBrowserTab(tabType)
+            end
+            GUI.UpdateApplyStatus(container, data)
+            return
+        end
+
+        -- Non-peer fallback: detailed whisper with player info
         local _, class = UnitClass("player")
         local spec = GUI.GetPlayerSpecName()
         local role = GUI.DetectPlayerRole()
@@ -1951,6 +1963,10 @@ function GUI.CreateBrowserTab(container, tabType)
         -- Send whisper
         SendChatMessage(msg, "WHISPER", nil, data.leader)
         AIP.Print("Invite request sent to " .. data.leader)
+        if AIP.Apply and AIP.Apply.MarkWhispered then
+            AIP.Apply.MarkWhispered(data.leader, data.raid)
+        end
+        GUI.UpdateApplyStatus(container, data)
 
         -- Track the request so the row can be marked/hidden until it expires
         if AIP.ChatScanner and AIP.ChatScanner.MarkRequested then
@@ -1960,13 +1976,20 @@ function GUI.CreateBrowserTab(container, tabType)
     end)
     requestInviteBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Request Invite")
-        GameTooltip:AddLine("Send detailed whisper with your class,", 1, 1, 1)
-        GameTooltip:AddLine("spec, GS, iLvl, and achievement", 1, 1, 1)
+        GameTooltip:AddLine("Apply")
+        GameTooltip:AddLine("AIP leaders: structured application with", 1, 1, 1)
+        GameTooltip:AddLine("live status (seen/queued/invited).", 1, 1, 1)
+        GameTooltip:AddLine("Others: detailed whisper with your stats.", 1, 1, 1)
         GameTooltip:Show()
     end)
     requestInviteBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     container.requestInviteBtn = requestInviteBtn
+
+    -- Application status line ("Queued #4") above the action buttons
+    local applyStatus = detailsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    applyStatus:SetPoint("BOTTOMLEFT", 12, 34)
+    applyStatus:SetText("")
+    container.applyStatus = applyStatus
 
     -- Quick Request button - sends autoinvite keyword
     local quickRequestBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
@@ -5003,6 +5026,24 @@ function GUI.UpdateQueuePanel(container)
         lfgEntries = filtered
     end
 
+    -- While a listing is active, sort both lists best-fit first (the LFG
+    -- sub-tab doubles as the "who should I recruit" suggestion list). The
+    -- verdicts are cached on the entries and reused by the row renderer.
+    if AIP.FitEngine and GUI.MyGroup then
+        local function fitScore(entry)
+            if entry.isSelf then return -1 end
+            entry._fit = AIP.FitEngine.ScoreApplicant(entry, GUI.MyGroup)
+            return entry._fit.score
+        end
+        local function byFit(a, b)
+            local sa, sb = fitScore(a), fitScore(b)
+            if sa ~= sb then return sa > sb end
+            return (a.time or 0) > (b.time or 0)
+        end
+        table.sort(queueEntries, byFit)
+        table.sort(lfgEntries, byFit)
+    end
+
     -- Update Queue rows (whisper requests)
     if container.queueRows then
         local numRows = #container.queueRows
@@ -5058,6 +5099,12 @@ function GUI.UpdateQueuePanel(container)
                 else
                     row.nameText:SetTextColor(1, 1, 1)  -- Default white
                 end
+                -- Fit chip while a listing is active (live verdict per render)
+                entry._fit = nil
+                if AIP.FitEngine and GUI.MyGroup then
+                    entry._fit = AIP.FitEngine.ScoreApplicant(entry, GUI.MyGroup)
+                    displayName = AIP.FitEngine.Chip(entry._fit) .. " " .. displayName
+                end
                 row.nameText:SetText(displayName)
 
                 local class = entry.class or "UNKNOWN"
@@ -5108,6 +5155,16 @@ function GUI.UpdateQueuePanel(container)
                         GameTooltip:AddLine("|cFFFF3333BLACKLISTED|r", 1, 0.3, 0.3)
                         if e.blacklistReason then GameTooltip:AddLine(e.blacklistReason, 1, 0.5, 0.5) end
                     end
+                    if e._fit and AIP.FitEngine then
+                        GameTooltip:AddLine(" ")
+                        GameTooltip:AddLine(AIP.FitEngine.Chip(e._fit) .. " Fit for your listing:", 1, 0.82, 0)
+                        for _, reason in ipairs(e._fit.reasons) do
+                            GameTooltip:AddLine("  - " .. reason, 0.8, 0.8, 0.8, true)
+                        end
+                    end
+                    if e.isApplication then
+                        GameTooltip:AddLine("|cFF00CCFFStructured application (AIP peer)|r", 0.4, 0.8, 1)
+                    end
                     GameTooltip:Show()
                 end)
                 row:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -5141,11 +5198,18 @@ function GUI.UpdateQueuePanel(container)
 
                 local class = entry.class or "UNKNOWN"
                 local classColor = RAID_CLASS_COLORS and RAID_CLASS_COLORS[class:upper()]
+                -- Fit chip while a listing is active (live verdict per render)
+                local lfgDisplayName = entry.name or "-"
+                entry._fit = nil
+                if AIP.FitEngine and GUI.MyGroup and not entry.isSelf then
+                    entry._fit = AIP.FitEngine.ScoreApplicant(entry, GUI.MyGroup)
+                    lfgDisplayName = AIP.FitEngine.Chip(entry._fit) .. " " .. lfgDisplayName
+                end
                 if classColor then
-                    row.nameText:SetText(entry.name or "-")
+                    row.nameText:SetText(lfgDisplayName)
                     row.nameText:SetTextColor(classColor.r, classColor.g, classColor.b)
                 else
-                    row.nameText:SetText(entry.name or "-")
+                    row.nameText:SetText(lfgDisplayName)
                     row.nameText:SetTextColor(1, 1, 1)
                 end
 
@@ -5197,6 +5261,13 @@ function GUI.UpdateQueuePanel(container)
                     if self.isLocked then
                         GameTooltip:AddLine(" ")
                         GameTooltip:AddLine("|cFFFF4444You are saved to this instance|r", 1, 0.27, 0.27)
+                    end
+                    if e._fit and AIP.FitEngine then
+                        GameTooltip:AddLine(" ")
+                        GameTooltip:AddLine(AIP.FitEngine.Chip(e._fit) .. " Fit for your listing:", 1, 0.82, 0)
+                        for _, reason in ipairs(e._fit.reasons) do
+                            GameTooltip:AddLine("  - " .. reason, 0.8, 0.8, 0.8, true)
+                        end
                     end
                     -- Full shared character card (gear + achievements) if broadcast / self.
                     if AIP.CharCard and AIP.CharCard.AppendToTooltip then
@@ -5304,23 +5375,22 @@ function GUI.UpdateQueuePanel(container)
         end
     end
 
-    -- Update status
-    if container.queueStatus then
-        local statusText = ""
-        if GUI.MyEnrollment then
-            statusText = "|cFF00FF00LFG: " .. GUI.MyEnrollment.raid .. "|r"
-        elseif GUI.MyGroup then
-            statusText = "|cFF00FF00LFM: " .. GUI.MyGroup.raid .. "|r"
-        else
-            statusText = "Ready"
-        end
-        container.queueStatus:SetText("Status: " .. statusText)
-    end
+    -- Update status footer (single source: counts + mode + needs strip)
+    GUI.UpdateEnrollmentStatus()
+end
+
+-- Refresh the details panel's application-status line for the selected group
+function GUI.UpdateApplyStatus(container, data)
+    if not container or not container.applyStatus then return end
+    local status = data and data.leader and AIP.Apply and AIP.Apply.StatusFor
+        and AIP.Apply.StatusFor(data.leader) or nil
+    container.applyStatus:SetText(status or "")
 end
 
 -- Update details panel when a group is selected
 function GUI.UpdateDetailsPanel(container, data)
     if not container then return end
+    GUI.UpdateApplyStatus(container, data)
 
     container.selectedGroupData = data
     -- Set currentLeader for whisper button
@@ -6098,6 +6168,39 @@ function GUI.UpdateEnrollmentStatus()
         local statusText = "Queue: " .. #queue .. " | Waitlist: " .. waitlistCount
         if GUI.MyEnrollment then
             statusText = statusText .. " | |cFF00FF00LFG: " .. GUI.MyEnrollment.raid .. "|r"
+        end
+
+        -- Needs strip: what my active listing still lacks + how many scanned
+        -- LFG players would fit (the fit-sorted LFG sub-tab lists them)
+        if GUI.MyGroup then
+            local g = GUI.MyGroup
+            statusText = statusText .. " | |cFF00FF00LFM: " .. (g.raid or "?") .. "|r"
+            local needs = {}
+            local function needOf(key, tag)
+                local slot = g[key]
+                if type(slot) == "table" then
+                    local n = (slot.needed or 0) - (slot.current or 0)
+                    if n > 0 then needs[#needs + 1] = n .. tag end
+                end
+            end
+            needOf("tanks", "T"); needOf("healers", "H"); needOf("mdps", "M"); needOf("rdps", "R")
+            if #needs > 0 then
+                statusText = statusText .. " | |cFFFFD100Need: " .. table.concat(needs, " ") .. "|r"
+                if AIP.FitEngine and AIP.ChatScanner and AIP.ChatScanner.Players then
+                    local matching = 0
+                    for _, player in pairs(AIP.ChatScanner.Players) do
+                        if player.isLFG then
+                            local fit = AIP.FitEngine.ScoreApplicant(player, g)
+                            if fit.verdict ~= "RED" then matching = matching + 1 end
+                        end
+                    end
+                    if matching > 0 then
+                        statusText = statusText .. " |cFF00FF00(" .. matching .. " matching LFG)|r"
+                    end
+                end
+            else
+                statusText = statusText .. " | |cFF00FF00Group full!|r"
+            end
         end
         container.queueStatus:SetText(statusText)
     end

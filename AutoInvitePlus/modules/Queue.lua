@@ -323,6 +323,11 @@ function AIP.RejectFromQueue(index, addToBlacklist, reason)
         SendChatMessage(AIP.db.responseReject, "WHISPER", nil, entry.name)
     end
 
+    -- Truthful application status for DataBus applicants
+    if AIP.Apply and AIP.Apply.NotifyDeclined then
+        AIP.Apply.NotifyDeclined(entry.name)
+    end
+
     -- Optionally add to blacklist
     if addToBlacklist then
         AIP.AddToBlacklist(entry.name, reason or "Rejected from queue", "queue")
@@ -346,6 +351,11 @@ function AIP.RejectFromQueueByName(name, addToBlacklist, reason)
             -- Send rejection whisper
             if AIP.db.responseReject and AIP.db.responseReject ~= "" then
                 SendChatMessage(AIP.db.responseReject, "WHISPER", nil, entry.name)
+            end
+
+            -- Truthful application status for DataBus applicants
+            if AIP.Apply and AIP.Apply.NotifyDeclined then
+                AIP.Apply.NotifyDeclined(entry.name)
             end
 
             -- Optionally add to blacklist

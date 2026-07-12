@@ -136,6 +136,34 @@ DB.EventTypes = {
             "slots",        -- table: array of { s = slotId, i = itemID, e = enchant, g = {gemIds} }
         },
     },
+
+    -- APPLY: structured application from a seeker to a specific listing leader.
+    -- Always sent DIRECTED (addon whisper) - never on the shared channel.
+    APPLY = {
+        id = "APPLY",
+        name = "Group Application",
+        fields = {
+            "raid",         -- string: the listing's raid key being applied to
+            "role",         -- string: TANK / HEALER / MDPS / RDPS / DPS
+            "class",        -- string: applicant class token
+            "spec",         -- string: talent spec name
+            "gs",           -- number: applicant GearScore
+            "ilvl",         -- number: applicant avg item level
+            "weekly",       -- string: weekly quest token the applicant still needs (optional)
+            "note",         -- string: free text (optional)
+        },
+    },
+
+    -- APPLYACK: leader's response to an APPLY. Always DIRECTED back.
+    APPLYACK = {
+        id = "APPLYACK",
+        name = "Application Status",
+        fields = {
+            "applicant",    -- string: the applicant this ACK is about
+            "status",       -- string: seen | queued | invited | declined
+            "position",     -- number: queue position (status == queued)
+        },
+    },
 }
 
 -- ============================================================================

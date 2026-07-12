@@ -4,7 +4,7 @@
 -- Refactored with DRY principle and OOP patterns
 
 local ADDON_NAME = "AutoInvitePlus"
-local VERSION = "6.5.0"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
+local VERSION = "6.6.0"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
 local DB_VERSION = 5  -- Increment when saved variables structure changes (5.5: raid sessions, 5.4: mdps/rdps split, 4: loot history retention)
 
 -- Create main addon namespace (may already exist from Utils.lua)
@@ -131,6 +131,11 @@ local defaults = {
     -- Last-used popup configs for the Quick Post preset tiles
     lastListingConfig = {},    -- AddGroupPopup: raid/size/heroic/comp/gs/ilvl/keyword/note
     lastEnrollConfig = {},     -- EnrollPopup: raid/size/heroic/role
+
+    -- Matchmaking loop (FitEngine + Applications)
+    matchAlerts = true,        -- alert when a GREEN-fit listing appears while enrolled
+    autoInviteGreen = false,   -- leaders: auto-invite GREEN-verdict applicants
+    autoApplyGreen = false,    -- seekers: auto-apply to GREEN AIP-peer listings
 
     -- Response messages
     responseInvite = "[AutoInvite+] You have been invited!",
@@ -496,6 +501,12 @@ local function InvitePlayer(name)
     SendChatMessage("[AutoInvite+] Sending invite!", "WHISPER", nil, name)
     Print("Invited: " .. name)
 
+    -- Truthful application status: if this player applied via the DataBus
+    -- Apply protocol, tell their addon they were invited.
+    if AIP.Apply and AIP.Apply.NotifyInvited then
+        AIP.Apply.NotifyInvited(name)
+    end
+
     return true
 end
 
@@ -689,9 +700,23 @@ local function CheckSmartConditions(playerInfo)
         end
     end
 
-    -- Check role matching (only invite if we need that role)
-    if smart.roleMatching and playerInfo.role then
-        if AIP.Composition and AIP.Composition.GetRoleNeeds then
+    -- Role/spec fit against the active listing: one verdict source (FitEngine)
+    -- so this gate, the auto-queue and the UI chips can never disagree.
+    if smart.roleMatching then
+        local GUI = AIP.CentralGUI or {}
+        if AIP.FitEngine and GUI.MyGroup then
+            local fit = AIP.FitEngine.ScoreApplicant({
+                name = playerInfo.author or playerInfo.name,
+                role = playerInfo.role,
+                class = playerInfo.class,
+                gs = playerInfo.gs,
+                ilvl = playerInfo.ilvl,
+            }, GUI.MyGroup, { ignoreBlacklist = true })  -- blacklistMode policy is handled elsewhere
+            if fit.verdict == "RED" then
+                return false, fit.reasons[1] or "Does not fit the listing"
+            end
+        elseif playerInfo.role and AIP.Composition and AIP.Composition.GetRoleNeeds then
+            -- Legacy fallback (no FitEngine / no active listing): raw role needs
             local needs = AIP.Composition.GetRoleNeeds()
             local roleUpper = playerInfo.role:upper()
             if roleUpper == "TANK" and (needs.tanks or 0) <= 0 then
@@ -700,70 +725,6 @@ local function CheckSmartConditions(playerInfo)
                 return false, "No healer slots available"
             elseif roleUpper == "DPS" and (needs.dps or 0) <= 0 then
                 return false, "No DPS slots available"
-            end
-        end
-    end
-
-    -- Check class/spec matching against Looking For preferences
-    -- Only check if we have an active LFM with roleSpecs defined
-    if smart.roleMatching then
-        local GUI = AIP.CentralGUI or {}
-        local myGroup = GUI.MyGroup
-        if myGroup and myGroup.roleSpecs then
-            local hasAnySpecs = false
-            for role, specs in pairs(myGroup.roleSpecs) do
-                if specs and #specs > 0 then
-                    hasAnySpecs = true
-                    break
-                end
-            end
-
-            -- Only enforce if roleSpecs are defined
-            if hasAnySpecs and playerInfo.class then
-                local playerClass = playerInfo.class:upper()
-                local playerRole = playerInfo.role and playerInfo.role:upper() or nil
-
-                -- Use the parser's matching function
-                if AIP.Parsers and AIP.Parsers.MatchesLookingFor then
-                    local matches = AIP.Parsers.MatchesLookingFor(playerClass, nil, playerRole, myGroup.roleSpecs)
-                    if not matches then
-                        -- Build helpful rejection message
-                        local wantedClasses = {}
-                        local rolesToCheck = {}
-                        if playerRole == "TANK" then
-                            rolesToCheck = {"TANK"}
-                        elseif playerRole == "HEALER" then
-                            rolesToCheck = {"HEALER"}
-                        elseif playerRole == "DPS" then
-                            rolesToCheck = {"MDPS", "RDPS"}
-                        else
-                            rolesToCheck = {"TANK", "HEALER", "MDPS", "RDPS"}
-                        end
-
-                        for _, role in ipairs(rolesToCheck) do
-                            local specs = myGroup.roleSpecs[role]
-                            if specs then
-                                for _, code in ipairs(specs) do
-                                    local info = AIP.Parsers.SpecCodeInfo and AIP.Parsers.SpecCodeInfo[code]
-                                    if info then
-                                        wantedClasses[info.shortClass] = true
-                                    end
-                                end
-                            end
-                        end
-
-                        local wantedList = {}
-                        for cls in pairs(wantedClasses) do
-                            table.insert(wantedList, cls)
-                        end
-
-                        if #wantedList > 0 then
-                            return false, "Looking for: " .. table.concat(wantedList, ", ")
-                        else
-                            return false, "Class/spec not in Looking For list"
-                        end
-                    end
-                end
             end
         end
     end
@@ -855,6 +816,19 @@ local function ProcessMessage(author, message, channel)
     elseif smart.prioritizeGuild and isGuildMember then
         skipQueue = true
         Debug("ProcessMessage: " .. author .. " is a guild member, skipping queue")
+    elseif AIP.db.autoInviteGreen and AIP.FitEngine and AIP.CentralGUI and AIP.CentralGUI.MyGroup then
+        -- Opt-in green fast-lane: unambiguous fits skip the queue
+        local fit = AIP.FitEngine.ScoreApplicant({
+            name = author,
+            role = playerInfo.role,
+            class = playerInfo.class,
+            gs = playerInfo.gs,
+            ilvl = playerInfo.ilvl,
+        }, AIP.CentralGUI.MyGroup)
+        if fit.verdict == "GREEN" then
+            skipQueue = true
+            Debug("ProcessMessage: " .. author .. " is a GREEN fit (" .. fit.score .. "), skipping queue")
+        end
     end
 
     -- Process based on mode
@@ -1487,6 +1461,10 @@ local function SlashHandler(msg)
             AIP.ChatGate.Status()
         end
 
+    -- Fit verdict for a queued player / scanned listing
+    elseif cmd == "fit" then
+        if AIP.FitEngine then AIP.FitEngine.SlashHandler(rest) end
+
     -- Weekly raid quest
     elseif cmd == "weekly" then
         if AIP.Weekly then
@@ -1536,6 +1514,7 @@ local function SlashHandler(msg)
         Print("  /aip spam - Send invite spam (paced by the ChatGate)")
         Print("  /aip gate - Show chat-budget status | /aip gate profile <relaxed|safe|paranoid>")
         Print("  /aip weekly - Show this week's raid quest status")
+        Print("  /aip fit <name> - Fit verdict for a queued player or a scanned listing")
         Print("  /aip broadcast dryrun - Log the broadcast schedule for 5 min without sending")
         Print("  /aip guild/friends - Invite guild or friends")
         Print("  /aip queue - Invite queue")

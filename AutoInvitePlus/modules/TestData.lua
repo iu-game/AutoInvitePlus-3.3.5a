@@ -625,6 +625,25 @@ function TD.LoadTestData()
         AIP.Weekly.testActive = "Marrowgar"
     end
 
+    -- Fake active listing so the fit chips, fit-sort and the needs strip
+    -- render offline (only if the user has no real listing running)
+    if AIP.CentralGUI and not AIP.CentralGUI.MyGroup then
+        AIP.CentralGUI.MyGroup = {
+            raid = "ICC25N",
+            gsMin = 5400,
+            ilvlMin = 251,
+            tanks = {current = 1, needed = 2},
+            healers = {current = 3, needed = 6},
+            mdps = {current = 4, needed = 8},
+            rdps = {current = 5, needed = 9},
+            roleSpecs = nil,   -- accept all classes in fixtures
+            inviteKeyword = "inv",
+            weekly = "Marrowgar",
+            time = time(),
+            _testData = true,
+        }
+    end
+
     -- Refresh UI
     TD.RefreshAllUI()
 
@@ -656,6 +675,11 @@ function TD.ClearTestData()
     if AIP.Weekly then
         AIP.Weekly.testActive = nil
         if AIP.Weekly.Invalidate then AIP.Weekly.Invalidate() end
+    end
+
+    -- Clear the fake test listing (never a real one)
+    if AIP.CentralGUI and AIP.CentralGUI.MyGroup and AIP.CentralGUI.MyGroup._testData then
+        AIP.CentralGUI.MyGroup = nil
     end
 
     -- Helper to remove test entries from a table

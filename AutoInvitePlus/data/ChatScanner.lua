@@ -217,6 +217,12 @@ function CS.AddGroup(info)
             weekly = info.weekly,
         }
         CS.PruneGroups()
+
+        -- Matchmaking: a NEW listing may be a match alert / auto-apply target
+        -- for an enrolled seeker (Applications module decides; guarded)
+        if AIP.Apply and AIP.Apply.OnNewListing then
+            AIP.Apply.OnNewListing(CS.Groups[info.author])
+        end
     end
 
     -- Notify UI
@@ -323,6 +329,21 @@ function CS.MatchesMyLFM(lfgInfo)
     -- Require exact raid match (ICC25H must match ICC25H, not ICC10N or RS25H)
     if myLFM.raid:lower() ~= targetRaid:lower() then
         return false
+    end
+
+    -- Delegate the fit judgment (GS/iLvl/role-need/spec-list) to FitEngine so
+    -- auto-queue, the smart-invite gate and the UI chips share ONE verdict.
+    if AIP.FitEngine and AIP.FitEngine.ScoreApplicant then
+        local fit = AIP.FitEngine.ScoreApplicant({
+            name = lfgInfo.author or lfgInfo.name,
+            raid = targetRaid,
+            role = lfgInfo.role,
+            class = lfgInfo.class,
+            gs = lfgInfo.gs,
+            ilvl = lfgInfo.ilvl,
+            weekly = lfgInfo.weekly,
+        }, myLFM)
+        return fit.verdict ~= "RED"
     end
 
     -- Check GS requirement

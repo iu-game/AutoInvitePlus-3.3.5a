@@ -100,6 +100,14 @@ function TB.ApplyListingDecor(node, group)
         node.text = color .. "[W]|r " .. (node.text or "")
     end
 
+    -- Fit chip while enrolled as LFG: how well does this listing fit ME?
+    local GUI = AIP.CentralGUI
+    if GUI and GUI.MyEnrollment and not group.isOwn
+        and AIP.FitEngine and AIP.FitEngine.ScoreListing then
+        local fit = AIP.FitEngine.ScoreListing(group, AIP.FitEngine.Me())
+        node.text = AIP.FitEngine.Chip(fit) .. " " .. (node.text or "")
+    end
+
     local isFav = AIP.IsPlayerFavorite and AIP.IsPlayerFavorite(group.leader) or false
     if isFav then
         node.text = "|cFFFFD100\226\152\133|r " .. (node.text or "")
