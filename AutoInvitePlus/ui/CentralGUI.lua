@@ -5460,14 +5460,30 @@ function GUI.CreateAddGroupPopup()
     -- DETAIL FRAME CONTENT (composition, requirements, classes, note, keyword)
     -- ========================================================================
 
-    -- === Composition Row ===
+    -- === Detail Level selector (mode-level control - always visible, always
+    -- the first row) ===
+    -- This is a page-level control (it governs whether the Composition row
+    -- OR the Class grid below is shown), not something scoped to "Looking
+    -- For Classes" specifically, so it gets its own top-of-form row rather
+    -- than being squeezed next to one section's label.
+    local modeRowLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    modeRowLabel:SetPoint("TOPLEFT", 20, 0)
+    modeRowLabel:SetText("Detail Level:")
+    local classHint = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    classHint:SetPoint("LEFT", modeRowLabel, "RIGHT", 8, 0)
+    classHint:SetText("|cFF888888(box = count)|r")
+    classHint:SetWidth(150)
+    classHint:SetWordWrap(false)
+
+    -- === Composition Row (Compact mode only - fixed position, this mode
+    -- never shows anything above it) ===
     local compLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    compLabel:SetPoint("TOPLEFT", 20, 0)
+    compLabel:SetPoint("TOPLEFT", 20, -26)
     compLabel:SetText("Composition:")
     popup.compositionRowWidgets = { compLabel }
 
     local tankLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    tankLabel:SetPoint("TOPLEFT", 30, -20)
+    tankLabel:SetPoint("TOPLEFT", 30, -46)
     tankLabel:SetText("Tanks:")
     tankLabel:SetTextColor(0.5, 0.5, 1)
     local tankInput, tankContainer = GUI.CreateStyledEditBox(detail, 30, 14, true)
@@ -5510,13 +5526,15 @@ function GUI.CreateAddGroupPopup()
     table.insert(popup.compositionRowWidgets, rdpsLabel)
     table.insert(popup.compositionRowWidgets, rdpsContainer)
 
-    -- === Requirements Row ===
+    -- === Requirements Row === (dynamic Y - repositioned per mode by
+    -- ReflowDetailRows below; initial SetPoint values are placeholders,
+    -- overwritten before the popup is ever shown)
     local reqLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    reqLabel:SetPoint("TOPLEFT", 20, -48)
+    reqLabel:SetPoint("TOPLEFT", 20, -26)
     reqLabel:SetText("Requirements:")
 
     local gsLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    gsLabel:SetPoint("TOPLEFT", 30, -68)
+    gsLabel:SetPoint("TOPLEFT", 30, -46)
     gsLabel:SetText("Min GS:")
     local gsInput, gsContainer = GUI.CreateStyledEditBox(detail, 45, 14, true)
     gsContainer:SetPoint("LEFT", gsLabel, "RIGHT", 5, 0)
@@ -5531,9 +5549,9 @@ function GUI.CreateAddGroupPopup()
     ilvlInput:SetText("264")
     popup.ilvlInput = ilvlInput
 
-    -- === Achievement Row ===
+    -- === Achievement Row === (dynamic Y)
     local achieveLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    achieveLabel:SetPoint("TOPLEFT", 30, -94)
+    achieveLabel:SetPoint("TOPLEFT", 30, -72)
     achieveLabel:SetText("Require Achievement:")
 
     local achieveDropdown = CreateFrame("Frame", "AIPAddGroupAchieve", detail, "UIDropDownMenuTemplate")
@@ -5544,15 +5562,11 @@ function GUI.CreateAddGroupPopup()
     popup.selectedAchievement = nil
     GUI.FixDropdownStrata(achieveDropdown)
 
-    -- === Class/Spec Selection ===
-    local classLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    classLabel:SetPoint("TOPLEFT", 20, -128)
-    classLabel:SetText("Looking For Classes:")
-    local classHint = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    classHint:SetPoint("LEFT", classLabel, "RIGHT", 8, 0)
-    classHint:SetText("|cFF888888(box = how many needed; role name toggles all)|r")
-    classHint:SetWidth(125)
-    classHint:SetWordWrap(false)
+    -- === Class/Spec Selection (Detailed mode only - fixed position, this
+    -- mode always shows the same fixed set of rows above it) ===
+    local classGridLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    classGridLabel:SetPoint("TOPLEFT", 20, -106)
+    classGridLabel:SetText("Looking For Classes:")
 
     -- Composition detail mode: MINIMAL shows only the Note (role counts still
     -- come from the template, just not shown/editable); COMPACT broadcasts
@@ -5566,12 +5580,18 @@ function GUI.CreateAddGroupPopup()
         detailed = "Broadcast the class list and per-class counts ([Need:...]).",
     }
     popup.modeButtons = {}
+    -- Two redundant selection cues (color AND brackets), not color alone -
+    -- plain-text toggle buttons (matching this file's existing makeRoleToggle
+    -- convention) have no button art to show a pressed/selected state, so the
+    -- active mode must be unmistakable even to a colorblind reader at a glance.
     local function updateModeButtonHighlight()
         for mode, btn in pairs(popup.modeButtons) do
             if mode == popup.detailMode then
                 btn.text:SetTextColor(0.4, 0.8, 1)
+                btn.text:SetText("[" .. MODE_LABEL[mode] .. "]")
             else
                 btn.text:SetTextColor(0.6, 0.6, 0.6)
+                btn.text:SetText(MODE_LABEL[mode])
             end
         end
     end
@@ -5579,7 +5599,7 @@ function GUI.CreateAddGroupPopup()
     local function makeModeButton(mode, xOffset)
         local btn = CreateFrame("Button", nil, detail)
         btn:SetSize(58, 18)
-        btn:SetPoint("TOPRIGHT", detail, "TOPRIGHT", xOffset, -124)
+        btn:SetPoint("TOPRIGHT", detail, "TOPRIGHT", xOffset, 0)
         local fs = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         fs:SetPoint("CENTER", 0, 0)
         fs:SetText(MODE_LABEL[mode])
@@ -5592,12 +5612,16 @@ function GUI.CreateAddGroupPopup()
             if RefreshPreview then RefreshPreview() end
         end)
         btn:SetScript("OnEnter", function(self)
+            self.text:SetTextColor(1, 1, 1)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:AddLine("Composition detail: " .. MODE_LABEL[mode])
             GameTooltip:AddLine(MODE_TOOLTIP[mode], 1, 1, 1)
             GameTooltip:Show()
         end)
-        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        btn:SetScript("OnLeave", function()
+            updateModeButtonHighlight()
+            GameTooltip:Hide()
+        end)
         popup.modeButtons[mode] = btn
         return btn
     end
@@ -5608,7 +5632,7 @@ function GUI.CreateAddGroupPopup()
     if popup.detailMode == "vague" then popup.detailMode = "compact" end -- legacy SavedVariables value
 
     popup.classChecks = {}
-    popup.classGridWidgets = {}   -- everything dimmed/disabled in vague mode
+    popup.classGridWidgets = { classGridLabel }   -- shown/hidden as a group per mode
     local specSpacing = 76  -- check(20) + icon(20) + count box(18) + gap
 
     -- Role label doubling as an all/none toggle for its group
@@ -5713,24 +5737,24 @@ function GUI.CreateAddGroupPopup()
     end
 
     popup.classChecks.TANK = {}
-    makeRoleToggle("Tanks:", 0.5, 0.5, 1, -146, "TANK")
+    makeRoleToggle("Tanks:", 0.5, 0.5, 1, -124, "TANK")
     local tankX = 80
     for _, spec in ipairs(GUI.ClassSpecs.TANK) do
-        makeSpecCheck(spec, tankX, -144, "TANK")
+        makeSpecCheck(spec, tankX, -122, "TANK")
         tankX = tankX + specSpacing
     end
 
     popup.classChecks.HEALER = {}
-    makeRoleToggle("Heals:", 0.5, 1, 0.5, -172, "HEALER")
+    makeRoleToggle("Heals:", 0.5, 1, 0.5, -150, "HEALER")
     local healX = 80
     for _, spec in ipairs(GUI.ClassSpecs.HEALER) do
-        makeSpecCheck(spec, healX, -170, "HEALER")
+        makeSpecCheck(spec, healX, -148, "HEALER")
         healX = healX + specSpacing
     end
 
     popup.classChecks.DPS = {}
-    makeRoleToggle("DPS:", 1, 0.5, 0.5, -198, "DPS")
-    local dpsX, dpsY = 80, -196
+    makeRoleToggle("DPS:", 1, 0.5, 0.5, -176, "DPS")
+    local dpsX, dpsY = 80, -174
     local dpsCount = 0
     for _, spec in ipairs(GUI.ClassSpecs.DPS) do
         if dpsCount > 0 and dpsCount % 5 == 0 then
@@ -5741,32 +5765,6 @@ function GUI.CreateAddGroupPopup()
         dpsX = dpsX + specSpacing
         dpsCount = dpsCount + 1
     end
-
-    -- Fully show/hide (not just dim) the Composition row and Class grid per
-    -- mode - Minimal hides both, Compact shows only Composition, Detailed
-    -- shows only the Class grid (its counts drive the composition totals,
-    -- see SyncCompositionFromClassGrid in the next task).
-    local function ApplyDetailMode(mode)
-        local showComposition = (mode == "compact")
-        local showClassGrid = (mode == "detailed")
-        for _, w in ipairs(popup.compositionRowWidgets) do
-            if showComposition then w:Show() else w:Hide() end
-        end
-        for _, w in ipairs(popup.classGridWidgets) do
-            if showClassGrid then w:Show() else w:Hide() end
-            w:SetAlpha(1)
-            if w.Disable and w.Enable then w:Enable() end
-            if w.EnableMouse then w:EnableMouse(true) end
-        end
-        if mode == "minimal" then
-            classHint:SetText("|cFFFF8800minimal mode - only the note is broadcast beyond the template's role counts|r")
-        elseif mode == "compact" then
-            classHint:SetText("|cFFFF8800compact mode - role counts only, class list not broadcast|r")
-        else
-            classHint:SetText("|cFF888888(box = how many needed; role name toggles all)|r")
-        end
-    end
-    popup.ApplyDetailMode = ApplyDetailMode
 
     -- === Need summary (from the per-spec count boxes) ===
     -- Single CLIPPED line - the count boxes above are the full picture and
@@ -5836,6 +5834,82 @@ function GUI.CreateAddGroupPopup()
     reservedDisplay:SetJustifyV("TOP")
     reservedDisplay:SetText("|cFF666666(none)|r")
     popup.reservedDisplay = reservedDisplay
+
+    -- ========================================================================
+    -- DYNAMIC LAYOUT: reposition every row below the mode selector based on
+    -- which optional block (Composition / Class grid) the active mode shows,
+    -- and resize the popup to match - so switching modes reclaims the space
+    -- a hidden block would otherwise leave as a dead gap, instead of just
+    -- hiding widgets in place. Rows that live in the mode-independent tail
+    -- (Requirements, Achievement, Note, Keyword, Broadcast, Reserved Items)
+    -- get looked up per mode; Composition and the Class grid keep the single
+    -- fixed position set at creation above (each is visible in only one mode).
+    local ROW_Y = {
+        minimal  = { req = -26, achieve = -72,  needs = -106, note = -132, keyword = -160, broadcast = -186, reservedLabel = -212, reservedFrame = -230 },
+        compact  = { req = -74, achieve = -120, needs = -154, note = -180, keyword = -208, broadcast = -234, reservedLabel = -260, reservedFrame = -278 },
+        detailed = { req = -26, achieve = -72,  needs = -254, note = -280, keyword = -308, broadcast = -334, reservedLabel = -360, reservedFrame = -378 },
+    }
+    local CONTENT_BOTTOM = { minimal = -264, compact = -312, detailed = -412 }
+    local HEADER_HEIGHT = 96   -- detail frame's fixed TOPLEFT offset from the popup
+    local FOOTER_RESERVE = 158 -- popup space below detail's content the footer (preview box + buttons) needs
+
+    local function ReflowDetailRows(mode)
+        local y = ROW_Y[mode] or ROW_Y.detailed
+        reqLabel:ClearAllPoints()
+        reqLabel:SetPoint("TOPLEFT", 20, y.req)
+        gsLabel:ClearAllPoints()
+        gsLabel:SetPoint("TOPLEFT", 30, y.req - 20)
+        achieveLabel:ClearAllPoints()
+        achieveLabel:SetPoint("TOPLEFT", 30, y.achieve)
+        needsText:ClearAllPoints()
+        needsText:SetPoint("TOPLEFT", 20, y.needs)
+        needsText:SetPoint("RIGHT", detail, "RIGHT", -20, 0)
+        noteLabel:ClearAllPoints()
+        noteLabel:SetPoint("TOPLEFT", 20, y.note)
+        keywordLabel:ClearAllPoints()
+        keywordLabel:SetPoint("TOPLEFT", 20, y.keyword)
+        broadcastCheck:ClearAllPoints()
+        broadcastCheck:SetPoint("TOPLEFT", 20, y.broadcast)
+        reservedLabel:ClearAllPoints()
+        reservedLabel:SetPoint("TOPLEFT", 20, y.reservedLabel)
+        reservedFrame:ClearAllPoints()
+        reservedFrame:SetPoint("TOPLEFT", 20, y.reservedFrame)
+
+        local contentBottom = CONTENT_BOTTOM[mode] or CONTENT_BOTTOM.detailed
+        popup.expandedHeightForMode = HEADER_HEIGHT + math.abs(contentBottom) + FOOTER_RESERVE
+        if popup.expanded then
+            popup:SetHeight(popup.expandedHeightForMode)
+        end
+    end
+    popup.ReflowDetailRows = ReflowDetailRows
+
+    -- Fully show/hide (not just dim) the Composition row and Class grid per
+    -- mode - Minimal hides both, Compact shows only Composition, Detailed
+    -- shows only the Class grid (its counts drive the composition totals,
+    -- see SyncCompositionFromClassGrid in the next task) - then reflow
+    -- everything below to reclaim whichever block is now hidden.
+    local function ApplyDetailMode(mode)
+        local showComposition = (mode == "compact")
+        local showClassGrid = (mode == "detailed")
+        for _, w in ipairs(popup.compositionRowWidgets) do
+            if showComposition then w:Show() else w:Hide() end
+        end
+        for _, w in ipairs(popup.classGridWidgets) do
+            if showClassGrid then w:Show() else w:Hide() end
+            w:SetAlpha(1)
+            if w.Disable and w.Enable then w:Enable() end
+            if w.EnableMouse then w:EnableMouse(true) end
+        end
+        if mode == "minimal" then
+            classHint:SetText("|cFFFF8800(note only)|r")
+        elseif mode == "compact" then
+            classHint:SetText("|cFFFF8800(role counts only)|r")
+        else
+            classHint:SetText("|cFF888888(box = count)|r")
+        end
+        ReflowDetailRows(mode)
+    end
+    popup.ApplyDetailMode = ApplyDetailMode
 
     -- ========================================================================
     -- FOOTER: customize toggle, live preview, schedule line, buttons
@@ -6141,7 +6215,7 @@ function GUI.CreateAddGroupPopup()
             for _, tile in pairs(popup.presetTiles) do tile:Hide() end
             if popup.collapsedNeedsText then popup.collapsedNeedsText:Hide() end
             detail:Show()
-            popup:SetHeight(EXPANDED_HEIGHT)
+            popup:SetHeight(popup.expandedHeightForMode or EXPANDED_HEIGHT)
             customizeText:SetText("|cFF66AAFF[-] Hide details|r")
         else
             quickLabel:Show()
