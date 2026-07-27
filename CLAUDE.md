@@ -17,6 +17,8 @@ The root also contains release automation in .github/workflows/main.yml, user-fa
 - The practical dev loop is: edit a .lua file, /reload in-game, then observe the result and any Lua errors.
 - Use /console scriptErrors 1 if you need in-game error output; an addon such as BugSack/BugGrabber can also help.
 - Load order is controlled by the .toc file, not by require or module imports. If you add a new .lua file, add it to the relevant .toc so it actually loads.
+- On Windows, tools/wow-test-harness/ can drive a locally-running WoW client (screenshot, click, slash-command injection) for live verification instead of relying on a manual playtest or a static code read-through — see its README. It requires the live client's AddOns folder to be synced from this repo first (`Sync-Addon` in the harness); this repo is not itself the client's addon directory.
+- Lua syntax can be validated without launching the client via the `luaparse` npm package (`luaVersion: '5.1'`) — useful as a quick pre-/reload sanity check on a batch of edits.
 
 ## AutoInvitePlus architecture
 
