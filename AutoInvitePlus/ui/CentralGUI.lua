@@ -5551,6 +5551,8 @@ function GUI.CreateAddGroupPopup()
     local classHint = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     classHint:SetPoint("LEFT", classLabel, "RIGHT", 8, 0)
     classHint:SetText("|cFF888888(box = how many needed; role name toggles all)|r")
+    classHint:SetWidth(125)
+    classHint:SetWordWrap(false)
 
     -- Composition detail mode: MINIMAL shows only the Note (role counts still
     -- come from the template, just not shown/editable); COMPACT broadcasts
