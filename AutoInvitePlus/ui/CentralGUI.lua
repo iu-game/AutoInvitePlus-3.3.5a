@@ -105,6 +105,7 @@ local WAITLIST_COLS = {
     {field = "numText",  kind = "fixed", w = 20},
     {field = "nameText", kind = "flex",  weight = 2.0},
     {field = "roleText", kind = "flex",  weight = 1.1},
+    {field = "gsText",   kind = "fixed", w = 45},
     {field = "noteText", kind = "flex",  weight = 3.2},
     {field = "timeText", kind = "fixed", w = 45},
 }
@@ -1307,9 +1308,19 @@ function GUI.InitializeTabs(frame)
               ", LootHistory=" .. tostring(AIP.Panels.LootHistory ~= nil) ..
               ", Settings=" .. tostring(AIP.Panels.Settings ~= nil))
 
-    -- LFM Tab (v4.3: tree view + message composer + 3-tab queue system)
+    -- LFM Tab (v4.3: tree view + message composer + 3-tab queue system).
+    -- CreateBrowserTab lives in ui/CentralGUIBrowser.lua (a NEW .toc entry):
+    -- 3.3.5a does not pick up newly-listed files on /reload, so guard with a
+    -- relog hint instead of hard-erroring after an in-place update.
     local lfmContainer = frame.tabContents["lfm"]
-    GUI.CreateBrowserTab(lfmContainer, "lfm")
+    if GUI.CreateBrowserTab then
+        GUI.CreateBrowserTab(lfmContainer, "lfm")
+    else
+        local info = lfmContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        info:SetPoint("CENTER")
+        info:SetText("AutoInvite+ was updated.\n\nLog out and back in (a /reload is not enough)\nto load the new browser module.")
+        info:SetTextColor(0.6, 0.6, 0.6)
+    end
 
     -- Favorites Tab (v5.2: whitelist/priority players)
     local favoritesContainer = frame.tabContents["favorites"]
@@ -1450,2019 +1461,6 @@ function GUI.InitializeTabs(frame)
     end
 end
 
--- Create LFM browser tab with 3-frame layout (v4.1)
--- Frame 1: Tree view (left) | Frame 2: Details (right top) | Frame 3: Queue (right bottom)
-function GUI.CreateBrowserTab(container, tabType)
-    container.searchFilter = ""
-    container.raidFilter = "ALL"
-    container.tabType = tabType
-    container.selectedGroupData = nil
-
-    -- ========================================================================
-    -- FRAME 1: LEFT - Tree Browser (340px width)
-    -- ========================================================================
-    local treePanel = CreateFrame("Frame", nil, container)
-    treePanel:SetWidth(340)
-    treePanel:SetPoint("TOPLEFT", 0, 0)
-    treePanel:SetPoint("BOTTOMLEFT", 0, 0)
-    GUI.ApplyBackdrop(treePanel, "Panel", 0.95)
-    container.treePanel = treePanel
-
-    -- Header
-    local treeHeader = treePanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    treeHeader:SetPoint("TOPLEFT", 10, -8)
-    treeHeader:SetText("LFM Groups")
-    treeHeader:SetTextColor(1, 0.82, 0)
-
-    -- Refresh button and Hide Locked checkbox - inline at top right
-    local refreshBtn = CreateFrame("Button", nil, treePanel, "UIPanelButtonTemplate")
-    refreshBtn:SetSize(60, 18)
-    refreshBtn:SetText("Refresh")
-
-    -- Hide Locked checkbox (only for LFM tab) - positioned at top right
-    if tabType == "lfm" then
-        local hideLockedCheck = CreateFrame("CheckButton", nil, treePanel, "UICheckButtonTemplate")
-        hideLockedCheck:SetSize(20, 20)
-        hideLockedCheck:SetPoint("TOPRIGHT", -6, -4)
-        hideLockedCheck:SetChecked(AIP.TreeBrowser and AIP.TreeBrowser.HideLocked or false)
-        hideLockedCheck:SetScript("OnClick", function(self)
-            if AIP.TreeBrowser then
-                AIP.TreeBrowser.HideLocked = self:GetChecked()
-            end
-            GUI.RefreshBrowserTab(tabType)
-        end)
-        hideLockedCheck:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Hide Locked Instances")
-            GameTooltip:AddLine("Hide groups for instances you are already saved to", 1, 1, 1, true)
-            GameTooltip:Show()
-        end)
-        hideLockedCheck:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        local hideLockedLabel = treePanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        hideLockedLabel:SetPoint("RIGHT", hideLockedCheck, "LEFT", 0, 0)
-        hideLockedLabel:SetText("Locked")
-        hideLockedLabel:SetTextColor(0.8, 0.8, 0.8)
-        container.hideLockedCheck = hideLockedCheck
-
-        -- Hide Viewed checkbox - hides listings we've excluded or already requested
-        local hideViewedCheck = CreateFrame("CheckButton", nil, treePanel, "UICheckButtonTemplate")
-        hideViewedCheck:SetSize(20, 20)
-        hideViewedCheck:SetChecked(AIP.TreeBrowser and AIP.TreeBrowser.HideExcluded)
-        hideViewedCheck:SetScript("OnClick", function(self)
-            if AIP.TreeBrowser then
-                AIP.TreeBrowser.HideExcluded = self:GetChecked()
-            end
-            GUI.RefreshBrowserTab(tabType)
-        end)
-        hideViewedCheck:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Hide Viewed")
-            GameTooltip:AddLine("Hide listings you've excluded or already requested", 1, 1, 1, true)
-            GameTooltip:Show()
-        end)
-        hideViewedCheck:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        local hideViewedLabel = treePanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        hideViewedLabel:SetPoint("RIGHT", hideViewedCheck, "LEFT", 0, 0)
-        hideViewedLabel:SetText("Viewed")
-        hideViewedLabel:SetTextColor(0.8, 0.8, 0.8)
-        container.hideViewedCheck = hideViewedCheck
-
-        -- Chain layout right-to-left on the top row: [Refresh] [Viewed check] [Locked check]
-        hideViewedCheck:SetPoint("RIGHT", hideLockedLabel, "LEFT", -10, 0)
-
-        -- Refresh sits to the left of the Viewed label, vertically centered on the
-        -- same line as the checkboxes (the whole cluster now clears the title).
-        refreshBtn:SetPoint("RIGHT", hideViewedLabel, "LEFT", -10, 0)
-    else
-        refreshBtn:SetPoint("TOPRIGHT", -8, -6)
-    end
-    refreshBtn:SetScript("OnClick", function()
-        GUI.RefreshBrowserTab(tabType)
-    end)
-    refreshBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Refresh List")
-        GameTooltip:AddLine("Update the group list from chat", 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    refreshBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-    -- Search box
-    local searchLabel = treePanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    searchLabel:SetPoint("TOPLEFT", 10, -32)
-    searchLabel:SetText("Search:")
-
-    local searchBox = CreateFrame("EditBox", "AIPSearch" .. tabType, treePanel, "InputBoxTemplate")
-    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(searchBox) end
-    searchBox:SetSize(100, 18)
-    searchBox:SetPoint("LEFT", searchLabel, "RIGHT", 5, 0)
-    searchBox:SetAutoFocus(false)
-    container.searchBox = searchBox
-
-    searchBox:SetScript("OnTextChanged", function(self, userInput)
-        if userInput then
-            container.searchFilter = self:GetText():lower()
-            GUI.RefreshBrowserTab(tabType)
-        end
-    end)
-    searchBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-    searchBox:SetScript("OnEscapePressed", function(self) self:SetText("") self:ClearFocus() end)
-
-    -- Filter dropdown
-    local filterDropdown = CreateFrame("Frame", "AIPFilter" .. tabType, treePanel, "UIDropDownMenuTemplate")
-    filterDropdown:SetPoint("LEFT", searchBox, "RIGHT", 0, -2)
-    UIDropDownMenu_SetWidth(filterDropdown, 80)
-    UIDropDownMenu_SetText(filterDropdown, "All")
-    container.filterDropdown = filterDropdown
-
-    local function FilterInit()
-        local info = UIDropDownMenu_CreateInfo()
-        local filters = {
-            {id = "ALL", name = "All"},
-            {id = "ICC", name = "ICC"},
-            {id = "RS", name = "RS"},
-            {id = "TOC", name = "TOC"},
-            {id = "VOA", name = "VOA"},
-            {id = "ULDUAR", name = "Ulduar"},
-            {id = "NAXX", name = "Naxx"},
-        }
-        for _, f in ipairs(filters) do
-            info = UIDropDownMenu_CreateInfo()
-            info.text = f.name
-            info.value = f.id
-            info.func = function()
-                container.raidFilter = f.id
-                UIDropDownMenu_SetText(filterDropdown, f.name)
-                GUI.RefreshBrowserTab(tabType)
-            end
-            info.checked = (container.raidFilter == f.id)
-            UIDropDownMenu_AddButton(info)
-        end
-    end
-    UIDropDownMenu_Initialize(filterDropdown, FilterInit)
-    GUI.FixDropdownStrata(filterDropdown)
-
-    -- Tree view (dynamically sized based on tree panel)
-    local treeFrame
-    if AIP.TreeBrowser then
-        -- Calculate initial size based on tree panel dimensions
-        local initialWidth = treePanel:GetWidth() - 16  -- 8px padding each side
-        local initialHeight = treePanel:GetHeight() - 55 - 60  -- top offset and bottom buttons
-        if initialWidth < 100 then initialWidth = 320 end  -- fallback for initial creation
-        if initialHeight < 100 then initialHeight = 430 end  -- fallback for initial creation
-
-        treeFrame = AIP.TreeBrowser.CreateTreeView(treePanel, initialWidth, initialHeight)
-        treeFrame:SetPoint("TOPLEFT", 8, -55)
-        treeFrame:SetPoint("BOTTOMRIGHT", treePanel, "BOTTOMRIGHT", -8, 60)  -- Anchor to bottom with space for buttons
-        -- Record the anchor insets so UpdateSize can derive the true available
-        -- size from the parent panel. The tree frame's own GetHeight() is
-        -- unreliable -- it carries an explicit SetSize from creation and keeps
-        -- reporting that stale value even though the anchors stretch the frame.
-        treeFrame._heightInset = 55 + 60   -- TOPLEFT y -55, BOTTOMRIGHT y +60
-        treeFrame._widthInset = 8 + 8      -- TOPLEFT x +8, BOTTOMRIGHT x -8
-        container.treeView = treeFrame
-
-        -- Recompute rows when the parent panel resizes. UpdateSize() with no
-        -- args derives the size from the parent (reliable), so a single direct
-        -- call is enough -- no stale GetHeight, no deferral needed.
-        treePanel:SetScript("OnSizeChanged", function(self)
-            if treeFrame and treeFrame.UpdateSize then treeFrame:UpdateSize() end
-        end)
-
-        -- Also hook OnShow to ensure proper sizing when tab becomes visible
-        treeFrame:HookScript("OnShow", function(self)
-            if self.UpdateSize then
-                -- Delayed call to ensure layout is complete
-                AIP.Utils.DelayedCall(0.05, function()
-                    self:UpdateSize()
-                end)
-            end
-        end)
-    end
-
-    -- Empty state text
-    local emptyTreeText = treePanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    emptyTreeText:SetPoint("CENTER", treePanel, "CENTER", 0, -20)
-    emptyTreeText:SetWidth(280)
-    emptyTreeText:SetJustifyH("CENTER")
-    emptyTreeText:SetText("No group listings yet\n\nListings appear from chat scanning\nand AIP peers.\n\n|cFF33CCFFTip:|r enable channels in Settings,\nor click + Post Group to start your own.")
-    emptyTreeText:SetTextColor(0.5, 0.5, 0.5)
-    emptyTreeText:Hide()
-    container.emptyTreeText = emptyTreeText
-
-    -- Counts text
-    local countsText = treePanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    countsText:SetPoint("BOTTOMLEFT", 10, 35)
-    countsText:SetText("Groups: 0")
-    container.countsText = countsText
-
-    -- Action buttons at bottom of tree panel
-    local addGroupBtn = CreateFrame("Button", nil, treePanel, "UIPanelButtonTemplate")
-    addGroupBtn:SetSize(85, 22)
-    addGroupBtn:SetPoint("BOTTOMLEFT", 8, 8)
-    addGroupBtn:SetText("+ Post Group")
-    addGroupBtn:SetScript("OnClick", function() GUI.ShowAddGroupPopup() end)
-    addGroupBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Broadcast LFM")
-        GameTooltip:AddLine("Broadcast your group to other addon users", 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    addGroupBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-    local enrollBtn = CreateFrame("Button", nil, treePanel, "UIPanelButtonTemplate")
-    enrollBtn:SetSize(75, 22)
-    enrollBtn:SetPoint("LEFT", addGroupBtn, "RIGHT", 5, 0)
-    enrollBtn:SetText("Find Group")
-    enrollBtn:SetScript("OnClick", function() GUI.ShowEnrollPopup() end)
-    enrollBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Broadcast LFG")
-        GameTooltip:AddLine("Broadcast that you're looking for a group", 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    enrollBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-    local clearBtn = CreateFrame("Button", nil, treePanel, "UIPanelButtonTemplate")
-    clearBtn:SetSize(45, 22)
-    clearBtn:SetPoint("LEFT", enrollBtn, "RIGHT", 5, 0)
-    clearBtn:SetText("Clear")
-    clearBtn:SetScript("OnClick", function()
-        if AIP.GroupTracker and AIP.GroupTracker.ClearAll then
-            AIP.GroupTracker.ClearAll()
-        end
-        GUI.RefreshBrowserTab(tabType)
-    end)
-    clearBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Clear Cache")
-        GameTooltip:AddLine("Remove all cached group listings", 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    clearBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-    -- Stop Broadcast button (shows when broadcasting)
-    local stopBroadcastBtn = CreateFrame("Button", nil, treePanel, "UIPanelButtonTemplate")
-    stopBroadcastBtn:SetSize(55, 22)
-    stopBroadcastBtn:SetPoint("LEFT", clearBtn, "RIGHT", 5, 0)
-    stopBroadcastBtn:SetText("Stop")
-    stopBroadcastBtn:Hide()  -- Hidden by default
-    stopBroadcastBtn:SetScript("OnClick", function()
-        GUI.StopBroadcast()
-        stopBroadcastBtn:Hide()
-    end)
-    stopBroadcastBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Stop Broadcasting")
-        if GUI.Broadcast.active then
-            GameTooltip:AddLine("Currently broadcasting " .. (GUI.Broadcast.mode == "lfm" and "LFM" or "LFG"), 0, 1, 0)
-        end
-        GameTooltip:Show()
-    end)
-    stopBroadcastBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    container.stopBroadcastBtn = stopBroadcastBtn
-
-    -- ========================================================================
-    -- FRAME 2: RIGHT TOP - Details Panel (60% width, ~280px height)
-    -- ========================================================================
-    local detailsPanel = CreateFrame("Frame", nil, container)
-    detailsPanel:SetPoint("TOPLEFT", treePanel, "TOPRIGHT", 5, 0)
-    detailsPanel:SetPoint("RIGHT", container, "RIGHT", 0, 0)
-    detailsPanel:SetHeight(280)
-    GUI.ApplyBackdrop(detailsPanel, "SubPanel", 0.95)
-    container.detailsPanel = detailsPanel
-
-    -- Details header
-    local detailsHeader = detailsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    detailsHeader:SetPoint("TOPLEFT", 10, -8)
-    detailsHeader:SetText("Group Details")
-    detailsHeader:SetTextColor(1, 0.82, 0)
-
-    -- No selection text
-    local noSelectText = detailsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    noSelectText:SetPoint("CENTER", detailsPanel, "CENTER", 0, 0)
-    noSelectText:SetText("Select a group from the tree to view details")
-    noSelectText:SetTextColor(0.5, 0.5, 0.5)
-    container.noSelectText = noSelectText
-
-    -- Details content (hidden until selection)
-    local detContent = CreateFrame("Frame", nil, detailsPanel)
-    detContent:SetPoint("TOPLEFT", 10, -28)
-    detContent:SetPoint("BOTTOMRIGHT", -10, 35)
-    detContent:Hide()
-    container.detContent = detContent
-
-    -- Leader
-    local leaderLabel = detContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    leaderLabel:SetPoint("TOPLEFT", 0, 0)
-    leaderLabel:SetText("Leader:")
-    leaderLabel:SetTextColor(0.7, 0.7, 0.7)
-    local leaderValue = detContent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    leaderValue:SetPoint("LEFT", leaderLabel, "RIGHT", 5, 0)
-    container.leaderValue = leaderValue
-
-    -- Raid
-    local raidLabel = detContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    raidLabel:SetPoint("TOPLEFT", 0, -18)
-    raidLabel:SetText("Raid:")
-    raidLabel:SetTextColor(0.7, 0.7, 0.7)
-    local raidValue = detContent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    raidValue:SetPoint("LEFT", raidLabel, "RIGHT", 5, 0)
-    container.raidValue = raidValue
-
-    -- Lockout indicator
-    local lockoutIndicator = detContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lockoutIndicator:SetPoint("LEFT", raidValue, "RIGHT", 8, 0)
-    lockoutIndicator:SetText("|cFFFF4444[LOCKED]|r")
-    lockoutIndicator:Hide()
-    container.lockoutIndicator = lockoutIndicator
-
-    -- Weekly raid quest badge (shows which weekly a listing satisfies)
-    local weeklyIndicator = detContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    weeklyIndicator:SetPoint("LEFT", lockoutIndicator, "RIGHT", 6, 0)
-    weeklyIndicator:Hide()
-    container.weeklyIndicator = weeklyIndicator
-
-    -- Message box
-    local msgLabel = detContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    msgLabel:SetPoint("TOPLEFT", 0, -36)
-    msgLabel:SetText("Message:")
-    msgLabel:SetTextColor(0.7, 0.7, 0.7)
-
-    local msgBg = CreateFrame("Frame", nil, detContent)
-    msgBg:SetPoint("TOPLEFT", 0, -50)
-    msgBg:SetPoint("RIGHT", -5, 0)
-    msgBg:SetHeight(45)
-    GUI.ApplyBackdrop(msgBg, "Inset", 0.7)
-    local msgValue = msgBg:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    msgValue:SetPoint("TOPLEFT", 5, -5)
-    msgValue:SetPoint("BOTTOMRIGHT", -5, 5)
-    msgValue:SetJustifyH("LEFT")
-    msgValue:SetJustifyV("TOP")
-    container.msgValue = msgValue
-    container.msgBg = msgBg
-
-    -- Setup achievement tooltips for message box
-    msgBg:EnableMouse(true)
-    msgBg:SetScript("OnEnter", function(self)
-        local text = msgValue:GetText() or ""
-        local achievementIds = GUI.ExtractAllAchievementIds(text)
-        if #achievementIds > 0 then
-            -- Show tooltip for achievements in message
-            GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT")
-            GameTooltip:AddLine("Achievements in message:", 1, 0.82, 0)
-            GameTooltip:AddLine(" ")
-            for i, achId in ipairs(achievementIds) do
-                local _, name, points, completed = GetAchievementInfo(achId)
-                if name then
-                    local status = completed and "|cFF00FF00\226\156\147|r" or "|cFFFF6666\226\156\151|r"
-                    local pointsStr = points and points > 0 and " |cFFFFD700(" .. points .. " pts)|r" or ""
-                    GameTooltip:AddLine(status .. " " .. name .. pointsStr, 1, 1, 1)
-                end
-            end
-            GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("Hover over achievement links in chat", 0.5, 0.5, 0.5)
-            GameTooltip:AddLine("to see full details", 0.5, 0.5, 0.5)
-            GameTooltip:Show()
-            self.hasAchievementTooltip = true
-        else
-            -- Show generic message tooltip
-            local fullText = container.selectedGroupData and container.selectedGroupData.message or text
-            if fullText and #fullText > 60 then
-                GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT")
-                GameTooltip:AddLine("Full Message:", 1, 0.82, 0)
-                GameTooltip:AddLine(fullText, 1, 1, 1, true)
-                GameTooltip:Show()
-            end
-        end
-    end)
-    msgBg:SetScript("OnLeave", function(self)
-        GameTooltip:Hide()
-        self.hasAchievementTooltip = nil
-    end)
-
-    -- Requirements row
-    local gsLabel = detContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    gsLabel:SetPoint("TOPLEFT", 0, -100)
-    gsLabel:SetText("GearScore:")
-    gsLabel:SetTextColor(0.6, 0.6, 0.6)
-    local gsValue = detContent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    gsValue:SetPoint("LEFT", gsLabel, "RIGHT", 5, 0)
-    container.gsValue = gsValue
-
-    local ilvlLabel = detContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    ilvlLabel:SetPoint("LEFT", gsValue, "RIGHT", 20, 0)
-    ilvlLabel:SetText("iLvl:")
-    ilvlLabel:SetTextColor(0.6, 0.6, 0.6)
-    local ilvlValue = detContent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    ilvlValue:SetPoint("LEFT", ilvlLabel, "RIGHT", 5, 0)
-    container.ilvlValue = ilvlValue
-
-    -- Total filled (inline with GS/iLvl row)
-    local totalFilledLabel = detContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    totalFilledLabel:SetPoint("LEFT", ilvlValue, "RIGHT", 20, 0)
-    totalFilledLabel:SetText("Filled:")
-    totalFilledLabel:SetTextColor(0.6, 0.6, 0.6)
-    local totalFilledValue = detContent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    totalFilledValue:SetPoint("LEFT", totalFilledLabel, "RIGHT", 5, 0)
-    container.totalFilledValue = totalFilledValue
-
-    -- Composition
-    local compLabel = detContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    compLabel:SetPoint("TOPLEFT", 0, -118)
-    compLabel:SetText("Needs:")
-    compLabel:SetTextColor(0.6, 0.6, 0.6)
-    local compValue = detContent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    compValue:SetPoint("LEFT", compLabel, "RIGHT", 5, 0)
-    container.compValue = compValue
-
-    -- Achievement requirement
-    local achieveLabel = detContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    achieveLabel:SetPoint("TOPLEFT", 0, -136)
-    achieveLabel:SetText("Achievement:")
-    achieveLabel:SetTextColor(0.6, 0.6, 0.6)
-    local achieveValue = detContent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    achieveValue:SetPoint("LEFT", achieveLabel, "RIGHT", 5, 0)
-    achieveValue:SetWidth(200)
-    achieveValue:SetJustifyH("LEFT")
-    container.achieveValue = achieveValue
-
-    -- Invite keyword
-    local keywordLabel = detContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    keywordLabel:SetPoint("TOPLEFT", 0, -154)
-    keywordLabel:SetText("Whisper:")
-    keywordLabel:SetTextColor(0.6, 0.6, 0.6)
-    local keywordValue = detContent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    keywordValue:SetPoint("LEFT", keywordLabel, "RIGHT", 5, 0)
-    keywordValue:SetTextColor(0.4, 0.8, 1)
-    container.keywordValue = keywordValue
-
-    -- Looking For (class/spec preferences) - Interactive display with tooltips
-    local lookingForLabel = detContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lookingForLabel:SetPoint("TOPLEFT", 0, -170)
-    lookingForLabel:SetText("Looking for:")
-    lookingForLabel:SetTextColor(0.6, 0.6, 0.6)
-
-    -- Container frame for looking for classes (allows tooltips)
-    local lookingForFrame = CreateFrame("Frame", nil, detContent)
-    lookingForFrame:SetPoint("TOPLEFT", 0, -184)
-    lookingForFrame:SetPoint("RIGHT", -5, 0)
-    lookingForFrame:SetHeight(36)  -- Room for 2 lines
-    container.lookingForFrame = lookingForFrame
-
-    -- Text display (fallback)
-    local lookingForValue = lookingForFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    lookingForValue:SetPoint("TOPLEFT", 0, 0)
-    lookingForValue:SetPoint("RIGHT", -5, 0)
-    lookingForValue:SetJustifyH("LEFT")
-    lookingForValue:SetTextColor(0.9, 0.9, 0.9)
-    container.lookingForValue = lookingForValue
-
-    -- Store class buttons for reuse
-    container.lookingForButtons = {}
-
-    -- Details action buttons - Apply (structured DataBus application to AIP
-    -- peers with status ACKs; detailed whisper to everyone else)
-    local requestInviteBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
-    requestInviteBtn:SetSize(120, 24)
-    requestInviteBtn:SetPoint("BOTTOMLEFT", 10, 8)
-    requestInviteBtn:SetText("Apply")
-    requestInviteBtn:SetScript("OnClick", function()
-        local data = container.selectedGroupData
-        if not data or not data.leader then
-            AIP.Print("Select a group first")
-            return
-        end
-
-        -- AIP peer: structured application over the DataBus (seen/queued/
-        -- invited/declined status comes back automatically)
-        if AIP.Apply and AIP.Apply.SendApply and AIP.Apply.SendApply(data) then
-            if AIP.ChatScanner and AIP.ChatScanner.MarkRequested then
-                AIP.ChatScanner.MarkRequested(data.leader)
-                GUI.RefreshBrowserTab(tabType)
-            end
-            GUI.UpdateApplyStatus(container, data)
-            return
-        end
-
-        -- Non-peer fallback: detailed whisper with player info
-        local _, class = UnitClass("player")
-        local spec = GUI.GetPlayerSpecName()
-        local role = GUI.DetectPlayerRole()
-        local gs = GUI.CalculatePlayerGS()
-        local ilvl = GUI.CalculatePlayerIlvl()
-        local raidKey = data.raid or "Unknown"
-
-        -- Get best achievement for this raid
-        local achieveLink = ""
-        local playerAchievements = GUI.GetPlayerAchievementsForRaid(raidKey)
-        if playerAchievements and #playerAchievements > 0 then
-            achieveLink = GetAchievementLink(playerAchievements[1].id) or ""
-        end
-
-        -- Format: "Hi! Invite please ICC25H - Warrior (Arms) DPS, GS: 5200, iLvl: 245 [Achievement]"
-        local classDisplay = class:sub(1,1) .. class:sub(2):lower()
-        local msg = string.format("Hi! Invite please %s - %s (%s) %s, GS: %d, iLvl: %d %s",
-            raidKey, classDisplay, spec, role, gs, ilvl, achieveLink)
-
-        -- Send whisper
-        SendChatMessage(msg, "WHISPER", nil, data.leader)
-        AIP.Print("Invite request sent to " .. data.leader)
-        if AIP.Apply and AIP.Apply.MarkWhispered then
-            AIP.Apply.MarkWhispered(data.leader, data.raid)
-        end
-        GUI.UpdateApplyStatus(container, data)
-
-        -- Track the request so the row can be marked/hidden until it expires
-        if AIP.ChatScanner and AIP.ChatScanner.MarkRequested then
-            AIP.ChatScanner.MarkRequested(data.leader)
-            GUI.RefreshBrowserTab(tabType)
-        end
-    end)
-    requestInviteBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Apply")
-        GameTooltip:AddLine("AIP leaders: structured application with", 1, 1, 1)
-        GameTooltip:AddLine("live status (seen/queued/invited).", 1, 1, 1)
-        GameTooltip:AddLine("Others: detailed whisper with your stats.", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    requestInviteBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    container.requestInviteBtn = requestInviteBtn
-
-    -- Application status line ("Queued #4") above the action buttons
-    local applyStatus = detailsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    applyStatus:SetPoint("BOTTOMLEFT", 12, 34)
-    applyStatus:SetText("")
-    container.applyStatus = applyStatus
-
-    -- Quick Request button - sends autoinvite keyword
-    local quickRequestBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
-    quickRequestBtn:SetSize(90, 24)
-    quickRequestBtn:SetPoint("LEFT", requestInviteBtn, "RIGHT", 5, 0)
-    quickRequestBtn:SetText("Instant Join")
-    quickRequestBtn:SetScript("OnClick", function()
-        local data = container.selectedGroupData
-        if not data or not data.leader then
-            AIP.Print("Select a group first")
-            return
-        end
-
-        -- First check if group has a stored keyword (from Add Group popup)
-        local keyword = data.inviteKeyword
-
-        -- If no stored keyword, try to extract from message
-        if (not keyword or keyword == "") and data.message then
-            local msg = data.message
-
-            -- Comprehensive patterns to detect invite keywords
-            -- Ordered by specificity (most specific first)
-            local patterns = {
-                -- Quoted patterns (highest priority)
-                'w/%s*"([^"]+)"',           -- w/ "keyword"
-                "w/%s*'([^']+)'",           -- w/ 'keyword'
-                'whisper%s*"([^"]+)"',      -- whisper "keyword"
-                "whisper%s*'([^']+)'",      -- whisper 'keyword'
-                '/w%s*"([^"]+)"',           -- /w "keyword"
-                "/w%s*'([^']+)'",           -- /w 'keyword'
-                '"([^"]+)"%s*for%s*inv',    -- "keyword" for inv
-                "'([^']+)'%s*for%s*inv",    -- 'keyword' for inv
-
-                -- Unquoted patterns
-                "w/%s+([%w%-_]+)",           -- w/ keyword
-                "whisper%s+([%w%-_]+)",      -- whisper keyword
-                "/w%s+([%w%-_]+)",           -- /w keyword
-                "pst%s+([%w%-_]+)",          -- pst keyword
-                "([%w%-_]+)%s+for%s+inv",    -- keyword for inv
-                "([%w%-_]+)%s+to%s+join",    -- keyword to join
-
-                -- AIP protocol pattern
-                "{AIP[^}]*}.-w/%s*([%w%-_]+)",  -- {AIP:x.x} ... w/ keyword
-            }
-
-            for _, pattern in ipairs(patterns) do
-                local found = msg:lower():match(pattern)
-                if found and #found >= 2 and #found <= 20 then
-                    -- Validate it's not a common word
-                    local invalidWords = {["the"]=1, ["and"]=1, ["for"]=1, ["lfm"]=1, ["lf"]=1, ["need"]=1, ["tank"]=1, ["heal"]=1, ["dps"]=1}
-                    if not invalidWords[found:lower()] then
-                        keyword = found
-                        break
-                    end
-                end
-            end
-        end
-
-        -- Default to the global trigger keyword
-        if not keyword or keyword == "" then
-            keyword = AIP.db and AIP.db.triggers and AIP.db.triggers:match("^([^;]+)") or "invme-auto"
-        end
-
-        -- Send keyword whisper
-        SendChatMessage(keyword, "WHISPER", nil, data.leader)
-        AIP.Print("Quick request sent to " .. data.leader .. " with keyword: |cFF00FFFF" .. keyword .. "|r")
-
-        -- Track the request so the row can be marked/hidden until it expires
-        if AIP.ChatScanner and AIP.ChatScanner.MarkRequested then
-            AIP.ChatScanner.MarkRequested(data.leader)
-            GUI.RefreshBrowserTab(tabType)
-        end
-    end)
-    quickRequestBtn:SetScript("OnEnter", function(self)
-        local data = container.selectedGroupData
-        local keyword = "invme-auto"
-        if data then
-            if data.inviteKeyword and data.inviteKeyword ~= "" then
-                keyword = data.inviteKeyword
-            elseif data.message then
-                -- Quick preview of detected keyword
-                local msg = data.message:lower()
-                for _, pat in ipairs({'w/%s*"([^"]+)"', "w/%s*'([^']+)'", "w/%s+([%w%-_]+)"}) do
-                    local found = msg:match(pat)
-                    if found and #found <= 20 then keyword = found break end
-                end
-            end
-        end
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Instant Join")
-        GameTooltip:AddLine("Sends the autoinvite keyword to the group leader", 1, 1, 1, true)
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Detected keyword: |cFF00FFFF" .. keyword .. "|r", 0.7, 0.7, 0.7)
-        GameTooltip:Show()
-    end)
-    quickRequestBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    container.quickRequestBtn = quickRequestBtn
-
-    local blacklistBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
-    blacklistBtn:SetSize(64, 24)
-    blacklistBtn:SetPoint("LEFT", quickRequestBtn, "RIGHT", 5, 0)
-    blacklistBtn:SetText("Block")
-    blacklistBtn:SetScript("OnClick", function()
-        local data = container.selectedGroupData
-        if data and data.leader then
-            AIP.AddToBlacklist(data.leader, "From LFM browser", "lfm")
-            GUI.RefreshBrowserTab(tabType)
-        end
-    end)
-    blacklistBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Blacklist")
-        GameTooltip:AddLine("Add this player to your blacklist", 1, 0.3, 0.3)
-        GameTooltip:Show()
-    end)
-    blacklistBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-    -- Whisper button (plain whisper to open chat)
-    local whisperBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
-    whisperBtn:SetSize(64, 24)
-    whisperBtn:SetPoint("LEFT", blacklistBtn, "RIGHT", 5, 0)
-    whisperBtn:SetText("Whisper")
-    whisperBtn:SetScript("OnClick", function()
-        local leader = container.currentLeader
-            or (container.selectedGroupData and (container.selectedGroupData.leader or container.selectedGroupData.name))
-        if leader then
-            ChatFrame_OpenChat("/w " .. leader .. " ")
-        else
-            AIP.Print("No player selected to whisper")
-        end
-    end)
-    whisperBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Whisper")
-        GameTooltip:AddLine("Open chat to send a custom whisper", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    whisperBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    container.whisperBtn = whisperBtn
-
-    -- Hide/Unhide button - exclude a listing we can't join (requested/no reply,
-    -- or just not interested). Stays hidden until the listing expires.
-    local hideBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
-    hideBtn:SetSize(64, 24)
-    hideBtn:SetPoint("LEFT", whisperBtn, "RIGHT", 5, 0)
-    hideBtn:SetText("Hide")
-    hideBtn:SetScript("OnClick", function()
-        local data = container.selectedGroupData
-        local CS = AIP.ChatScanner
-        if not data or not data.leader or not CS then
-            AIP.Print("Select a group first")
-            return
-        end
-        if CS.IsExcluded(data.leader) then
-            CS.ClearExcluded(data.leader)
-            AIP.Print("Unhid " .. data.leader .. "'s listing")
-        else
-            CS.MarkExcluded(data.leader)
-            AIP.Print("Hid " .. data.leader .. "'s listing")
-        end
-        GUI.RefreshBrowserTab(tabType)
-    end)
-    hideBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        local data = container.selectedGroupData
-        local hidden = data and data.leader and AIP.ChatScanner
-            and AIP.ChatScanner.IsExcluded(data.leader)
-        if hidden then
-            GameTooltip:AddLine("Unhide")
-            GameTooltip:AddLine("Show this listing again", 1, 1, 1, true)
-        else
-            GameTooltip:AddLine("Hide")
-            GameTooltip:AddLine("Hide this listing until it expires (already requested / not interested)", 1, 1, 1, true)
-        end
-        GameTooltip:Show()
-    end)
-    hideBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    container.hideBtn = hideBtn
-
-    -- Favorite/Unfavorite button - add the leader (or LFG player) to favorites so
-    -- their listings are highlighted and they get priority in the queue.
-    local favBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
-    favBtn:SetSize(64, 24)
-    favBtn:SetPoint("LEFT", hideBtn, "RIGHT", 5, 0)
-    favBtn:SetText("Fav")
-    favBtn:SetScript("OnClick", function()
-        local data = container.selectedGroupData
-        local name = data and (data.leader or data.name)
-        if not name then
-            AIP.Print("Select a listing first")
-            return
-        end
-        local isFav = AIP.IsPlayerFavorite and AIP.IsPlayerFavorite(name)
-        if isFav then
-            if AIP.RemoveFromFavorites then AIP.RemoveFromFavorites(name) end
-        else
-            if AIP.AddToFavorites then AIP.AddToFavorites(name, "", "browser") end
-        end
-        GUI.UpdateDetailsPanel(container, data)  -- refresh this button's label
-        GUI.RefreshBrowserTab(tabType)           -- refresh row highlight
-    end)
-    favBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        local data = container.selectedGroupData
-        local name = data and (data.leader or data.name)
-        local isFav = name and AIP.IsPlayerFavorite and AIP.IsPlayerFavorite(name)
-        if isFav then
-            GameTooltip:AddLine("Remove Favorite")
-            GameTooltip:AddLine("Stop highlighting and prioritizing this player", 1, 1, 1, true)
-        else
-            GameTooltip:AddLine("Add Favorite")
-            GameTooltip:AddLine("Highlight this player's listings and give them queue priority", 1, 1, 1, true)
-        end
-        GameTooltip:Show()
-    end)
-    favBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    container.favBtn = favBtn
-
-    -- ========================================================================
-    -- FRAME 3: RIGHT BOTTOM - Queue Panel
-    -- ========================================================================
-    local queuePanel = CreateFrame("Frame", nil, container)
-    queuePanel:SetPoint("TOPLEFT", detailsPanel, "BOTTOMLEFT", 0, -5)
-    queuePanel:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", 0, 0)
-    GUI.ApplyBackdrop(queuePanel, "SubPanel", 0.95)
-    container.queuePanel = queuePanel
-
-    -- Elastic lists: when this panel resizes (window resize / maximize /
-    -- restore / minimize-expand all propagate down to here), recompute how many
-    -- Queue/LFG/Waitlist rows fit and refresh so rows never overflow the panel.
-    queuePanel:SetScript("OnSizeChanged", function()
-        GUI.LayoutQueueColumns(container)
-        GUI.UpdateQueuePanel(container)
-    end)
-
-    -- === Queue Panel Sub-Tabs ===
-    container.queueSubTab = "queue"  -- "queue" or "lfg"
-
-    -- Tab buttons
-    local queueTabBtn = CreateFrame("Button", nil, queuePanel)
-    queueTabBtn:SetSize(70, 20)
-    queueTabBtn:SetPoint("TOPLEFT", 8, -6)
-    local queueTabBg = queueTabBtn:CreateTexture(nil, "BACKGROUND")
-    queueTabBg:SetAllPoints()
-    queueTabBg:SetTexture(0.3, 0.3, 0.4, 1)
-    queueTabBtn.bg = queueTabBg
-    local queueTabText = queueTabBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    queueTabText:SetPoint("CENTER")
-    queueTabText:SetText("Queue")
-    queueTabText:SetTextColor(1, 0.82, 0)
-    queueTabBtn.text = queueTabText
-    container.queueTabBtn = queueTabBtn
-
-    local lfgTabBtn = CreateFrame("Button", nil, queuePanel)
-    lfgTabBtn:SetSize(70, 20)
-    lfgTabBtn:SetPoint("LEFT", queueTabBtn, "RIGHT", 2, 0)
-    local lfgTabBg = lfgTabBtn:CreateTexture(nil, "BACKGROUND")
-    lfgTabBg:SetAllPoints()
-    lfgTabBg:SetTexture(0.15, 0.15, 0.15, 1)
-    lfgTabBtn.bg = lfgTabBg
-    local lfgTabText = lfgTabBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lfgTabText:SetPoint("CENTER")
-    lfgTabText:SetText("LFG (0)")
-    lfgTabText:SetTextColor(0.8, 0.8, 0.8)
-    lfgTabBtn.text = lfgTabText
-    container.lfgTabBtn = lfgTabBtn
-
-    -- Waitlist tab button
-    local waitlistTabBtn = CreateFrame("Button", nil, queuePanel)
-    waitlistTabBtn:SetSize(80, 22)
-    waitlistTabBtn:SetPoint("LEFT", lfgTabBtn, "RIGHT", 2, 0)
-    local waitlistTabBg = waitlistTabBtn:CreateTexture(nil, "BACKGROUND")
-    waitlistTabBg:SetAllPoints()
-    waitlistTabBg:SetTexture(0.15, 0.15, 0.15, 1)
-    waitlistTabBtn.bg = waitlistTabBg
-    local waitlistTabText = waitlistTabBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    waitlistTabText:SetPoint("CENTER")
-    waitlistTabText:SetText("Waitlist (0)")
-    waitlistTabText:SetTextColor(0.8, 0.8, 0.8)
-    waitlistTabBtn.text = waitlistTabText
-    container.waitlistTabBtn = waitlistTabBtn
-
-    -- Tab switch function
-    local function SwitchQueueSubTab(tab)
-        container.queueSubTab = tab
-        -- Reset all tabs
-        queueTabBg:SetTexture(0.15, 0.15, 0.15, 1)
-        queueTabText:SetTextColor(0.8, 0.8, 0.8)
-        lfgTabBg:SetTexture(0.15, 0.15, 0.15, 1)
-        lfgTabText:SetTextColor(0.8, 0.8, 0.8)
-        waitlistTabBg:SetTexture(0.15, 0.15, 0.15, 1)
-        waitlistTabText:SetTextColor(0.8, 0.8, 0.8)
-        if container.queueContent then container.queueContent:Hide() end
-        if container.lfgContent then container.lfgContent:Hide() end
-        if container.waitlistContent then container.waitlistContent:Hide() end
-
-        -- Hide refresh button by default (shown only on LFG tab)
-        if container.refreshLfgBtn then container.refreshLfgBtn:Hide() end
-
-        -- Activate selected tab
-        if tab == "queue" then
-            queueTabBg:SetTexture(0.3, 0.3, 0.4, 1)
-            queueTabText:SetTextColor(1, 0.82, 0)
-            if container.queueContent then container.queueContent:Show() end
-        elseif tab == "lfg" then
-            lfgTabBg:SetTexture(0.3, 0.3, 0.4, 1)
-            lfgTabText:SetTextColor(1, 0.82, 0)
-            if container.lfgContent then container.lfgContent:Show() end
-            -- Show refresh button only on LFG tab
-            if container.refreshLfgBtn then container.refreshLfgBtn:Show() end
-        elseif tab == "waitlist" then
-            waitlistTabBg:SetTexture(0.3, 0.3, 0.4, 1)
-            waitlistTabText:SetTextColor(1, 0.82, 0)
-            if container.waitlistContent then container.waitlistContent:Show() end
-        end
-        GUI.UpdateQueuePanel(container)
-    end
-
-    queueTabBtn:SetScript("OnClick", function() SwitchQueueSubTab("queue") end)
-    lfgTabBtn:SetScript("OnClick", function() SwitchQueueSubTab("lfg") end)
-    waitlistTabBtn:SetScript("OnClick", function() SwitchQueueSubTab("waitlist") end)
-
-    -- === QUEUE CONTENT (Whisper requests) ===
-    local queueContent = CreateFrame("Frame", nil, queuePanel)
-    queueContent:SetPoint("TOPLEFT", 5, -30)
-    queueContent:SetPoint("BOTTOMRIGHT", -5, 30)
-    container.queueContent = queueContent
-
-    local queueEmptyText = queueContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    queueEmptyText:SetPoint("CENTER", 0, 0)
-    queueEmptyText:SetWidth(360)
-    queueEmptyText:SetJustifyH("CENTER")
-    queueEmptyText:SetText("Queue is empty\n\n|cFF888888Players who whisper your invite keyword\nor apply to your listing land here.|r")
-    queueEmptyText:SetTextColor(0.55, 0.55, 0.55)
-    queueEmptyText:Hide()
-    container.queueEmptyText = queueEmptyText
-
-    -- Queue column headers
-    local qHeaders = {
-        {text = "#", x = 5, width = 20},
-        {text = "Player", x = 25, width = 85},
-        {text = "Class", x = 110, width = 55},
-        {text = "Message", x = 165, width = 115},
-        {text = "Time", x = 285, width = 35},
-        {text = "BL?", x = 322, width = 25},
-        {text = "Actions", x = 350, width = 140},
-    }
-    container.queueHeaderLabels = {}
-    for idx, h in ipairs(qHeaders) do
-        local label = queueContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        label:SetPoint("TOPLEFT", h.x, GUI.QUEUE_HEADER_Y)
-        label:SetWidth(h.width)
-        label:SetText(h.text)
-        label:SetTextColor(0.8, 0.8, 0.8)
-        container.queueHeaderLabels[idx] = label
-    end
-
-    -- Header control cluster (right-aligned, single row, chained left-to-right):
-    -- [Search: label] [search box] [+ Add] [Invite All]. All parented to
-    -- queueContent so they track the same right edge as the data area.
-
-    -- Invite All button (rightmost)
-    local inviteAllBtn = CreateFrame("Button", nil, queueContent, "UIPanelButtonTemplate")
-    inviteAllBtn:SetSize(70, 18)
-    inviteAllBtn:SetPoint("TOPRIGHT", -5, 0)
-    inviteAllBtn:SetText("Invite All")
-    inviteAllBtn:SetScript("OnClick", function()
-        if AIP.InviteAllFromQueue then AIP.InviteAllFromQueue() end
-    end)
-    container.inviteAllBtn = inviteAllBtn
-
-    -- Add Player button for queue
-    local addQueueBtn = CreateFrame("Button", nil, queueContent, "UIPanelButtonTemplate")
-    addQueueBtn:SetSize(70, 18)
-    addQueueBtn:SetPoint("RIGHT", inviteAllBtn, "LEFT", -5, 0)
-    addQueueBtn:SetText("+ Add")
-    addQueueBtn:SetScript("OnClick", function()
-        GUI.ShowAddToQueuePopup()
-    end)
-    addQueueBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Add Player to Queue")
-        GameTooltip:AddLine("Manually add a player by name", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    addQueueBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    container.addQueueBtn = addQueueBtn
-
-    -- Search box for queue
-    local queueSearchBox = CreateFrame("EditBox", "AIPQueueSearch", queueContent, "InputBoxTemplate")
-    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(queueSearchBox) end
-    queueSearchBox:SetSize(100, 16)
-    queueSearchBox:SetPoint("RIGHT", addQueueBtn, "LEFT", -12, 0)
-    queueSearchBox:SetAutoFocus(false)
-    queueSearchBox:SetScript("OnTextChanged", function(self)
-        container.queueSearchFilter = self:GetText():lower()
-        GUI.UpdateQueuePanel(container)
-    end)
-    queueSearchBox:SetScript("OnEscapePressed", function(self)
-        self:SetText("")
-        self:ClearFocus()
-    end)
-    queueSearchBox:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Search Queue")
-        GameTooltip:AddLine("Filter by player name or message", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    queueSearchBox:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    container.queueSearchBox = queueSearchBox
-    container.queueSearchFilter = ""
-
-    -- "Search:" label (leftmost in the cluster)
-    local queueSearchLabel = queueContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    queueSearchLabel:SetPoint("RIGHT", queueSearchBox, "LEFT", -8, 0)
-    queueSearchLabel:SetText("Search:")
-    queueSearchLabel:SetTextColor(0.8, 0.8, 0.8)
-
-    -- Queue rows (whisper requests)
-    -- Pool is created at QUEUE_MAX_ROWS; how many actually render is computed
-    -- elastically from the content frame height (see GUI.QueueVisibleRows).
-    container.queueRows = {}
-    local ROW_HEIGHT = GUI.QUEUE_ROW_HEIGHT
-    local NUM_ROWS = GUI.QUEUE_MAX_ROWS
-    for i = 1, NUM_ROWS do
-        local row = CreateFrame("Frame", nil, queueContent)
-        row:SetSize(500, ROW_HEIGHT)
-        row:SetPoint("TOPLEFT", 0, -GUI.QUEUE_HEADER_INSET - ((i - 1) * ROW_HEIGHT))
-        row.numText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.numText:SetPoint("LEFT", 5, 0)
-        row.numText:SetWidth(20)
-        row.nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.nameText:SetPoint("LEFT", 25, 0)
-        row.nameText:SetWidth(80)
-        row.nameText:SetJustifyH("LEFT")
-        row.classText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.classText:SetPoint("LEFT", 110, 0)
-        row.classText:SetWidth(50)
-        row.classText:SetJustifyH("LEFT")
-        row.msgText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.msgText:SetPoint("LEFT", 165, 0)
-        row.msgText:SetWidth(115)
-        row.msgText:SetJustifyH("LEFT")
-        row.msgText:SetTextColor(0.7, 0.7, 0.7)
-        row.timeText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.timeText:SetPoint("LEFT", 285, 0)
-        row.timeText:SetWidth(35)
-        row.timeText:SetJustifyH("CENTER")
-        row.timeText:SetTextColor(0.5, 0.5, 0.5)
-        row.blText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.blText:SetPoint("LEFT", 322, 0)
-        row.blText:SetWidth(25)
-        row.invBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.invBtn:SetSize(28, 16)
-        row.invBtn:SetPoint("LEFT", 350, 0)
-        row.invBtn:SetText("Inv")
-        row.invBtn.index = i
-        row.invBtn:SetScript("OnClick", function(self)
-            local entry = self:GetParent().entryData
-            if entry and entry.name and AIP.InviteFromQueueByName then
-                AIP.InviteFromQueueByName(entry.name)
-            end
-        end)
-        row.invBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Invite Player")
-            GameTooltip:AddLine("Send raid/party invite to this player", 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        row.invBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        row.rejBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.rejBtn:SetSize(28, 16)
-        row.rejBtn:SetPoint("LEFT", 380, 0)
-        row.rejBtn:SetText("Rej")
-        row.rejBtn.index = i
-        row.rejBtn:SetScript("OnClick", function(self)
-            local entry = self:GetParent().entryData
-            if entry and entry.name and AIP.RejectFromQueueByName then
-                AIP.RejectFromQueueByName(entry.name, false)
-            end
-        end)
-        row.rejBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Reject Player")
-            GameTooltip:AddLine("Remove from queue and send rejection whisper", 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        row.rejBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        row.waitBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.waitBtn:SetSize(18, 16)
-        row.waitBtn:SetPoint("LEFT", 410, 0)
-        row.waitBtn:SetText("W")
-        row.waitBtn.index = i
-        row.waitBtn:SetScript("OnClick", function(self)
-            local entry = self:GetParent().entryData
-            if not entry or not entry.name then
-                AIP.Print("No entry data available")
-                return
-            end
-
-            -- Ensure waitlist exists
-            if not AIP.db then AIP.db = {} end
-            if not AIP.db.waitlist then AIP.db.waitlist = {} end
-
-            -- Check if already on waitlist
-            local alreadyOnWaitlist = false
-            for _, wEntry in ipairs(AIP.db.waitlist) do
-                if wEntry.name and wEntry.name:lower() == entry.name:lower() then
-                    alreadyOnWaitlist = true
-                    break
-                end
-            end
-
-            if alreadyOnWaitlist then
-                AIP.Print(entry.name .. " is already on the waitlist")
-                return
-            end
-
-            -- Capitalize name properly
-            local properName = entry.name:sub(1,1):upper() .. entry.name:sub(2):lower()
-
-            -- Add to waitlist
-            local waitlistEntry = {
-                name = properName,
-                role = entry.role or "DPS",
-                addedTime = time(),
-                priority = #AIP.db.waitlist + 1,
-                note = "Moved from queue",
-                class = entry.class,
-                gs = entry.gs,
-            }
-            table.insert(AIP.db.waitlist, waitlistEntry)
-
-            -- Send waitlist response if configured
-            if AIP.db.responseWaitlist and AIP.db.responseWaitlist ~= "" then
-                local position = #AIP.db.waitlist
-                local msg = AIP.db.responseWaitlist
-                -- Use pcall with format() for %d pattern, fallback to gsub for other patterns
-                local success, formatted = pcall(string.format, msg, position)
-                if success then
-                    msg = formatted
-                else
-                    -- Fallback: replace common patterns manually
-                    msg = msg:gsub("%%s", tostring(position))
-                    msg = msg:gsub("#X", tostring(position))
-                end
-                SendChatMessage(msg, "WHISPER", nil, properName)
-            end
-
-            -- Remove from queue
-            if AIP.db.queue then
-                for i = #AIP.db.queue, 1, -1 do
-                    local qEntry = AIP.db.queue[i]
-                    if qEntry.name and qEntry.name:lower() == entry.name:lower() then
-                        table.remove(AIP.db.queue, i)
-                        break
-                    end
-                end
-            end
-
-            AIP.Print(properName .. " moved to waitlist (position #" .. #AIP.db.waitlist .. ")")
-
-            -- Update UI
-            GUI.UpdateQueuePanel(container)
-        end)
-        row.waitBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Move to Waitlist")
-            GameTooltip:AddLine("Move player from queue to waitlist", 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        row.waitBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        row.blBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.blBtn:SetSize(18, 16)
-        row.blBtn:SetPoint("LEFT", 430, 0)
-        row.blBtn:SetText("B")
-        row.blBtn.index = i
-        row.blBtn:SetScript("OnClick", function(self)
-            local entry = self:GetParent().entryData
-            if entry and entry.name and AIP.RejectFromQueueByName then
-                AIP.RejectFromQueueByName(entry.name, true, "Rejected")
-            end
-        end)
-        row.blBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Blacklist Player")
-            GameTooltip:AddLine("Reject and add to blacklist", 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        row.blBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        -- Remove (X) button
-        row.remBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.remBtn:SetSize(18, 16)
-        row.remBtn:SetPoint("LEFT", 450, 0)
-        row.remBtn:SetText("X")
-        row.remBtn.index = i
-        row.remBtn:SetScript("OnClick", function(self)
-            local entry = self:GetParent().entryData
-            if entry and entry.name then
-                -- Remove from queue without rejection message
-                if AIP.db and AIP.db.queue then
-                    for j = #AIP.db.queue, 1, -1 do
-                        if AIP.db.queue[j].name and AIP.db.queue[j].name:lower() == entry.name:lower() then
-                            table.remove(AIP.db.queue, j)
-                            break
-                        end
-                    end
-                end
-                AIP.Print("Removed " .. entry.name .. " from queue")
-                GUI.UpdateQueuePanel(container)
-            end
-        end)
-        row.remBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Remove")
-            GameTooltip:AddLine("Remove from queue (no whisper)", 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        row.remBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        -- Whisper button
-        row.whisperBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.whisperBtn:SetSize(22, 16)
-        row.whisperBtn:SetPoint("LEFT", 470, 0)
-        row.whisperBtn:SetText("W")
-        row.whisperBtn.index = i
-        row.whisperBtn:SetScript("OnClick", function(self)
-            local entry = self:GetParent().entryData
-            if entry and entry.name then
-                ChatFrame_OpenChat("/w " .. entry.name .. " ", DEFAULT_CHAT_FRAME)
-            end
-        end)
-        row.whisperBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Whisper")
-            GameTooltip:AddLine("Open whisper to this player", 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        row.whisperBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        row:Hide()
-        container.queueRows[i] = row
-    end
-
-    -- === LFG CONTENT (Enrollment broadcasts) ===
-    local lfgContent = CreateFrame("Frame", nil, queuePanel)
-    lfgContent:SetPoint("TOPLEFT", 5, -30)
-    lfgContent:SetPoint("BOTTOMRIGHT", -5, 30)
-    lfgContent:Hide()
-    container.lfgContent = lfgContent
-
-    local lfgEmptyText = lfgContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    lfgEmptyText:SetPoint("CENTER", 0, 0)
-    lfgEmptyText:SetWidth(360)
-    lfgEmptyText:SetJustifyH("CENTER")
-    lfgEmptyText:SetText("No LFG players seen yet\n\n|cFF888888Players broadcasting LFG - from chat or\nAIP peers - appear here, best fit first.|r")
-    lfgEmptyText:SetTextColor(0.55, 0.55, 0.55)
-    lfgEmptyText:Hide()
-    container.lfgEmptyText = lfgEmptyText
-
-    -- LFG column headers
-    local lfgHeaders = {
-        {text = "#", x = 5, width = 20},
-        {text = "Player", x = 25, width = 90},
-        {text = "Spec", x = 115, width = 70},
-        {text = "Raid", x = 185, width = 80},
-        {text = "GS", x = 265, width = 50},
-        {text = "Actions", x = 320, width = 180},
-    }
-    container.lfgHeaderLabels = {}
-    for idx, h in ipairs(lfgHeaders) do
-        local label = lfgContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        label:SetPoint("TOPLEFT", h.x, GUI.QUEUE_HEADER_Y)
-        label:SetWidth(h.width)
-        label:SetText(h.text)
-        label:SetTextColor(0.8, 0.8, 0.8)
-        container.lfgHeaderLabels[idx] = label
-    end
-
-    -- Header control cluster (right-aligned, single row): [Search: label]
-    -- [search box]. LFG has no +Add or Invite All. Parented to lfgContent.
-
-    -- Search box for LFG (rightmost)
-    local lfgSearchBox = CreateFrame("EditBox", "AIPLfgSearch", lfgContent, "InputBoxTemplate")
-    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(lfgSearchBox) end
-    lfgSearchBox:SetSize(100, 16)
-    lfgSearchBox:SetPoint("TOPRIGHT", -5, 0)
-    lfgSearchBox:SetAutoFocus(false)
-    lfgSearchBox:SetScript("OnTextChanged", function(self)
-        container.lfgSearchFilter = self:GetText():lower()
-        GUI.UpdateQueuePanel(container)
-    end)
-    lfgSearchBox:SetScript("OnEscapePressed", function(self)
-        self:SetText("")
-        self:ClearFocus()
-    end)
-    lfgSearchBox:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Search LFG")
-        GameTooltip:AddLine("Filter by player name, spec, or raid", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    lfgSearchBox:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    container.lfgSearchBox = lfgSearchBox
-    container.lfgSearchFilter = ""
-
-    -- "Search:" label (leftmost in the cluster)
-    local lfgSearchLabel = lfgContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    lfgSearchLabel:SetPoint("RIGHT", lfgSearchBox, "LEFT", -8, 0)
-    lfgSearchLabel:SetText("Search:")
-    lfgSearchLabel:SetTextColor(0.8, 0.8, 0.8)
-
-    -- LFG rows (enrollment broadcasts)
-    container.lfgRows = {}
-    for i = 1, NUM_ROWS do
-        local row = CreateFrame("Frame", nil, lfgContent)
-        row:SetSize(500, ROW_HEIGHT)
-        row:SetPoint("TOPLEFT", 0, -GUI.QUEUE_HEADER_INSET - ((i - 1) * ROW_HEIGHT))
-        row.numText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.numText:SetPoint("LEFT", 5, 0)
-        row.numText:SetWidth(20)
-        row.nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.nameText:SetPoint("LEFT", 25, 0)
-        row.nameText:SetWidth(85)
-        row.nameText:SetJustifyH("LEFT")
-        row.specText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.specText:SetPoint("LEFT", 115, 0)
-        row.specText:SetWidth(65)
-        row.specText:SetJustifyH("LEFT")
-        row.raidText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.raidText:SetPoint("LEFT", 185, 0)
-        row.raidText:SetWidth(75)
-        row.raidText:SetJustifyH("LEFT")
-        row.gsText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.gsText:SetPoint("LEFT", 265, 0)
-        row.gsText:SetWidth(45)
-
-        -- Row tooltip for full player info
-        row:EnableMouse(true)
-        row.index = i
-        row:SetScript("OnEnter", function(self)
-            local entry = container.lfgData and container.lfgData[self.index]
-            if entry then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                -- Header with name
-                local classColor = RAID_CLASS_COLORS[entry.class] or {r=1, g=1, b=1}
-                GameTooltip:AddLine(entry.name or "Unknown", classColor.r, classColor.g, classColor.b)
-                GameTooltip:AddLine(" ")
-
-                -- Class and Spec
-                local classDisplay = entry.class and (entry.class:sub(1,1) .. entry.class:sub(2):lower()) or "Unknown"
-                GameTooltip:AddDoubleLine("Class:", classDisplay, 0.6, 0.6, 0.6, 1, 1, 1)
-                if entry.spec then
-                    GameTooltip:AddDoubleLine("Spec:", entry.spec, 0.6, 0.6, 0.6, 1, 1, 1)
-                end
-                if entry.role then
-                    GameTooltip:AddDoubleLine("Role:", entry.role, 0.6, 0.6, 0.6, 1, 1, 1)
-                end
-                GameTooltip:AddLine(" ")
-
-                -- Stats
-                if entry.gs and entry.gs > 0 then
-                    local r, g, b = 1, 1, 1
-                    if AIP.Integrations and AIP.Integrations.GetGSColor then
-                        r, g, b = AIP.Integrations.GetGSColor(entry.gs)
-                    end
-                    GameTooltip:AddDoubleLine("GearScore:", tostring(entry.gs), 0.6, 0.6, 0.6, r, g, b)
-                end
-                if entry.ilvl and entry.ilvl > 0 then
-                    GameTooltip:AddDoubleLine("Item Level:", tostring(entry.ilvl), 0.6, 0.6, 0.6, 1, 0.82, 0)
-                end
-                if entry.level and entry.level > 0 then
-                    GameTooltip:AddDoubleLine("Level:", tostring(entry.level), 0.6, 0.6, 0.6, 0.8, 0.8, 0.8)
-                end
-                GameTooltip:AddLine(" ")
-
-                -- Looking for
-                if entry.raid then
-                    GameTooltip:AddDoubleLine("Looking for:", entry.raid, 0.6, 0.6, 0.6, 0.4, 0.8, 1)
-                end
-
-                -- Full message
-                if entry.message then
-                    GameTooltip:AddLine(" ")
-                    GameTooltip:AddLine("Full Message:", 0.6, 0.6, 0.6)
-                    GameTooltip:AddLine(entry.message, 1, 1, 1, true)
-                end
-
-                -- Self indicator
-                if entry.isSelf then
-                    GameTooltip:AddLine(" ")
-                    GameTooltip:AddLine("This is your enrollment", 0, 1, 0)
-                end
-
-                -- Full shared character card (gear + achievements) if broadcast / self.
-                if AIP.CharCard and AIP.CharCard.AppendToTooltip then
-                    AIP.CharCard.AppendToTooltip(GameTooltip, entry.name, entry.isSelf)
-                end
-
-                GameTooltip:Show()
-            end
-        end)
-        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        row.invBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.invBtn:SetSize(50, 16)
-        row.invBtn:SetPoint("LEFT", 320, 0)
-        row.invBtn:SetText("Invite")
-        row.invBtn.index = i
-        row.invBtn:SetScript("OnClick", function(self)
-            local entry = container.lfgData and container.lfgData[self.index]
-            if entry and entry.name then InviteUnit(entry.name) end
-        end)
-        row.whisperBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.whisperBtn:SetSize(40, 16)
-        row.whisperBtn:SetPoint("LEFT", 372, 0)
-        row.whisperBtn:SetText("W")
-        row.whisperBtn.index = i
-        row.whisperBtn:SetScript("OnClick", function(self)
-            local entry = container.lfgData and container.lfgData[self.index]
-            if entry and entry.name then ChatFrame_OpenChat("/w " .. entry.name .. " ") end
-        end)
-        row.whisperBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Whisper")
-            GameTooltip:AddLine("Open whisper to this player", 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        row.whisperBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        -- Add to Queue button
-        row.queueBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.queueBtn:SetSize(40, 16)
-        row.queueBtn:SetPoint("LEFT", 414, 0)
-        row.queueBtn:SetText("Q+")
-        row.queueBtn.index = i
-        row.queueBtn:SetScript("OnClick", function(self)
-            local entry = container.lfgData and container.lfgData[self.index]
-            if entry and entry.name then
-                -- Add to queue
-                if not AIP.db then AIP.db = {} end
-                if not AIP.db.queue then AIP.db.queue = {} end
-
-                -- Check if already in queue
-                local alreadyInQueue = false
-                for _, qEntry in ipairs(AIP.db.queue) do
-                    if qEntry.name and qEntry.name:lower() == entry.name:lower() then
-                        alreadyInQueue = true
-                        break
-                    end
-                end
-
-                if alreadyInQueue then
-                    AIP.Print(entry.name .. " is already in queue")
-                    return
-                end
-
-                -- Create queue entry from LFG data
-                local queueEntry = {
-                    name = entry.name,
-                    message = "LFG: " .. (entry.raid or "Unknown") .. " " .. (entry.role or "DPS"),
-                    time = time(),
-                    class = entry.class,
-                    gs = entry.gs,
-                    isBlacklisted = AIP.IsBlacklisted and AIP.IsBlacklisted(entry.name) or false,
-                }
-                table.insert(AIP.db.queue, queueEntry)
-                AIP.Print(entry.name .. " added to queue from LFG list")
-
-                -- Update UI
-                GUI.UpdateQueuePanel(container)
-            end
-        end)
-        row.queueBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Add to Queue")
-            GameTooltip:AddLine("Add this player to your invite queue", 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        row.queueBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        -- Add to Waitlist button
-        row.waitlistBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.waitlistBtn:SetSize(40, 16)
-        row.waitlistBtn:SetPoint("LEFT", 456, 0)
-        row.waitlistBtn:SetText("WL+")
-        row.waitlistBtn.index = i
-        row.waitlistBtn:SetScript("OnClick", function(self)
-            local entry = container.lfgData and container.lfgData[self.index]
-            if entry and entry.name then
-                -- Ensure waitlist exists
-                if not AIP.db then AIP.db = {} end
-                if not AIP.db.waitlist then AIP.db.waitlist = {} end
-
-                -- Check if already on waitlist
-                local alreadyOnWaitlist = false
-                for _, wEntry in ipairs(AIP.db.waitlist) do
-                    if wEntry.name and wEntry.name:lower() == entry.name:lower() then
-                        alreadyOnWaitlist = true
-                        break
-                    end
-                end
-
-                if alreadyOnWaitlist then
-                    AIP.Print(entry.name .. " is already on the waitlist")
-                    return
-                end
-
-                -- Capitalize name properly
-                local properName = entry.name:sub(1,1):upper() .. entry.name:sub(2):lower()
-
-                -- Create waitlist entry from LFG data
-                local waitlistEntry = {
-                    name = properName,
-                    role = entry.role or "DPS",
-                    addedTime = time(),
-                    priority = #AIP.db.waitlist + 1,
-                    note = "From LFG: " .. (entry.raid or "Unknown"),
-                    class = entry.class,
-                    gs = entry.gs,
-                }
-                table.insert(AIP.db.waitlist, waitlistEntry)
-                AIP.Print(properName .. " added to waitlist from LFG list (position #" .. #AIP.db.waitlist .. ")")
-
-                -- Update UI
-                GUI.UpdateQueuePanel(container)
-            end
-        end)
-        row.waitlistBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Add to Waitlist")
-            GameTooltip:AddLine("Add this player to your waitlist for future raids", 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        row.waitlistBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        row:Hide()
-        container.lfgRows[i] = row
-    end
-
-    -- === WAITLIST CONTENT ===
-    local waitlistContent = CreateFrame("Frame", nil, queuePanel)
-    waitlistContent:SetPoint("TOPLEFT", 5, -30)
-    waitlistContent:SetPoint("BOTTOMRIGHT", -5, 30)
-    waitlistContent:Hide()
-    container.waitlistContent = waitlistContent
-
-    local waitlistEmptyText = waitlistContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    waitlistEmptyText:SetPoint("CENTER", 0, 0)
-    waitlistEmptyText:SetWidth(360)
-    waitlistEmptyText:SetJustifyH("CENTER")
-    waitlistEmptyText:SetText("Waitlist is empty\n\n|cFF888888Park overflow players here - they are\nwhispered when their turn comes.|r")
-    waitlistEmptyText:SetTextColor(0.55, 0.55, 0.55)
-    waitlistEmptyText:Hide()
-    container.waitlistEmptyText = waitlistEmptyText
-
-    -- Waitlist column headers
-    local wlHeaders = {
-        {text = "#", x = 5, width = 20},
-        {text = "Player", x = 25, width = 90},
-        {text = "Role", x = 115, width = 50},
-        {text = "Note", x = 170, width = 130},
-        {text = "Added", x = 305, width = 50},
-        {text = "Actions", x = 360, width = 100},
-    }
-    container.waitlistHeaderLabels = {}
-    for idx, h in ipairs(wlHeaders) do
-        local label = waitlistContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        label:SetPoint("TOPLEFT", h.x, GUI.QUEUE_HEADER_Y)
-        label:SetWidth(h.width)
-        label:SetText(h.text)
-        label:SetTextColor(0.8, 0.8, 0.8)
-        container.waitlistHeaderLabels[idx] = label
-    end
-
-    -- Header control cluster (right-aligned, single row, chained):
-    -- [Search: label] [search box] [+ Add]. Waitlist has no Invite All.
-    -- Parented to waitlistContent so they track the data area's right edge.
-
-    -- Add Player button for waitlist (rightmost)
-    local addWaitlistBtn = CreateFrame("Button", nil, waitlistContent, "UIPanelButtonTemplate")
-    addWaitlistBtn:SetSize(70, 18)
-    addWaitlistBtn:SetPoint("TOPRIGHT", -5, 0)
-    addWaitlistBtn:SetText("+ Add")
-    addWaitlistBtn:SetScript("OnClick", function()
-        GUI.ShowAddToWaitlistPopup()
-    end)
-    addWaitlistBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Add Player to Waitlist")
-        GameTooltip:AddLine("Manually add a player with role and note", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    addWaitlistBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    container.addWaitlistBtn = addWaitlistBtn
-
-    -- Search box for waitlist
-    local waitlistSearchBox = CreateFrame("EditBox", "AIPWaitlistSearch", waitlistContent, "InputBoxTemplate")
-    if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(waitlistSearchBox) end
-    waitlistSearchBox:SetSize(100, 16)
-    waitlistSearchBox:SetPoint("RIGHT", addWaitlistBtn, "LEFT", -12, 0)
-    waitlistSearchBox:SetAutoFocus(false)
-    waitlistSearchBox:SetScript("OnTextChanged", function(self)
-        container.waitlistSearchFilter = self:GetText():lower()
-        GUI.UpdateQueuePanel(container)
-    end)
-    waitlistSearchBox:SetScript("OnEscapePressed", function(self)
-        self:SetText("")
-        self:ClearFocus()
-    end)
-    waitlistSearchBox:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Search Waitlist")
-        GameTooltip:AddLine("Filter by player name, role, or note", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    waitlistSearchBox:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    container.waitlistSearchBox = waitlistSearchBox
-    container.waitlistSearchFilter = ""
-
-    -- "Search:" label (leftmost in the cluster)
-    local waitlistSearchLabel = waitlistContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    waitlistSearchLabel:SetPoint("RIGHT", waitlistSearchBox, "LEFT", -8, 0)
-    waitlistSearchLabel:SetText("Search:")
-    waitlistSearchLabel:SetTextColor(0.8, 0.8, 0.8)
-
-    -- Waitlist rows
-    container.waitlistRows = {}
-    for i = 1, NUM_ROWS do
-        local row = CreateFrame("Frame", nil, waitlistContent)
-        row:SetSize(480, ROW_HEIGHT)
-        row:SetPoint("TOPLEFT", 0, -GUI.QUEUE_HEADER_INSET - ((i - 1) * ROW_HEIGHT))
-        row.numText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.numText:SetPoint("LEFT", 5, 0)
-        row.numText:SetWidth(20)
-        row.nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.nameText:SetPoint("LEFT", 25, 0)
-        row.nameText:SetWidth(85)
-        row.nameText:SetJustifyH("LEFT")
-        row.roleText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.roleText:SetPoint("LEFT", 115, 0)
-        row.roleText:SetWidth(50)
-        row.roleText:SetJustifyH("LEFT")
-        row.noteText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.noteText:SetPoint("LEFT", 170, 0)
-        row.noteText:SetWidth(125)
-        row.noteText:SetJustifyH("LEFT")
-        row.noteText:SetTextColor(0.7, 0.7, 0.7)
-        row.timeText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.timeText:SetPoint("LEFT", 305, 0)
-        row.timeText:SetWidth(45)
-        row.timeText:SetTextColor(0.5, 0.5, 0.5)
-        row.invBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.invBtn:SetSize(35, 16)
-        row.invBtn:SetPoint("LEFT", 360, 0)
-        row.invBtn:SetText("Inv")
-        row.invBtn.index = i
-        row.invBtn:SetScript("OnClick", function(self)
-            local entries = AIP.db and AIP.db.waitlist or {}
-            local entry = entries[self.index]
-            if entry and entry.name then
-                -- Invite the player
-                InviteUnit(entry.name)
-                AIP.Print("Invited " .. entry.name .. " from waitlist")
-                -- Remove from waitlist
-                table.remove(AIP.db.waitlist, self.index)
-                -- Update priorities
-                for j, e in ipairs(AIP.db.waitlist) do
-                    e.priority = j
-                end
-                GUI.UpdateQueuePanel(container)
-            end
-        end)
-        row.invBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Invite")
-            GameTooltip:AddLine("Invite player and remove from waitlist", 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        row.invBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        row.upBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.upBtn:SetSize(22, 16)
-        row.upBtn:SetPoint("LEFT", 397, 0)
-        row.upBtn:SetText("^")
-        row.upBtn.index = i
-        row.upBtn:SetScript("OnClick", function(self)
-            local entries = AIP.db and AIP.db.waitlist or {}
-            local idx = self.index
-            if idx > 1 and entries[idx] then
-                -- Swap with previous entry
-                entries[idx], entries[idx - 1] = entries[idx - 1], entries[idx]
-                -- Update priorities
-                for j, e in ipairs(entries) do
-                    e.priority = j
-                end
-                GUI.UpdateQueuePanel(container)
-            end
-        end)
-        row.upBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Move Up")
-            GameTooltip:AddLine("Increase priority (move up in list)", 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        row.upBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        row.downBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.downBtn:SetSize(22, 16)
-        row.downBtn:SetPoint("LEFT", 421, 0)
-        row.downBtn:SetText("v")
-        row.downBtn.index = i
-        row.downBtn:SetScript("OnClick", function(self)
-            local entries = AIP.db and AIP.db.waitlist or {}
-            local idx = self.index
-            if idx < #entries and entries[idx] then
-                -- Swap with next entry
-                entries[idx], entries[idx + 1] = entries[idx + 1], entries[idx]
-                -- Update priorities
-                for j, e in ipairs(entries) do
-                    e.priority = j
-                end
-                GUI.UpdateQueuePanel(container)
-            end
-        end)
-        row.downBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Move Down")
-            GameTooltip:AddLine("Decrease priority (move down in list)", 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        row.downBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        row.remBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.remBtn:SetSize(22, 16)
-        row.remBtn:SetPoint("LEFT", 445, 0)
-        row.remBtn:SetText("X")
-        row.remBtn.index = i
-        row.remBtn:SetScript("OnClick", function(self)
-            local entries = AIP.db and AIP.db.waitlist or {}
-            local entry = entries[self.index]
-            if entry and entry.name then
-                local removedName = entry.name
-                table.remove(AIP.db.waitlist, self.index)
-                -- Update priorities
-                for j, e in ipairs(AIP.db.waitlist) do
-                    e.priority = j
-                end
-                AIP.Print("Removed " .. removedName .. " from waitlist")
-                GUI.UpdateQueuePanel(container)
-            end
-        end)
-        row.remBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Remove")
-            GameTooltip:AddLine("Remove player from waitlist", 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        row.remBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        -- Whisper button
-        row.whisperBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        row.whisperBtn:SetSize(22, 16)
-        row.whisperBtn:SetPoint("LEFT", 469, 0)
-        row.whisperBtn:SetText("W")
-        row.whisperBtn.index = i
-        row.whisperBtn:SetScript("OnClick", function(self)
-            local entries = AIP.db and AIP.db.waitlist or {}
-            local entry = entries[self.index]
-            if entry and entry.name then
-                ChatFrame_OpenChat("/w " .. entry.name .. " ", DEFAULT_CHAT_FRAME)
-            end
-        end)
-        row.whisperBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Whisper")
-            GameTooltip:AddLine("Open whisper to this player", 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        row.whisperBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        -- Enable mouse for tooltips
-        row:EnableMouse(true)
-        row:SetScript("OnEnter", function(self)
-            local entries = AIP.db and AIP.db.waitlist or {}
-            local e = entries[self.invBtn.index]
-            if not e then return end
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine(e.name or "Unknown", 1, 0.82, 0)
-            GameTooltip:AddLine("Role: " .. (e.role or "DPS"), 0.7, 0.7, 0.7)
-            if e.class then GameTooltip:AddLine("Class: " .. e.class, 1, 1, 1) end
-            if e.gs then GameTooltip:AddDoubleLine("GearScore:", tostring(e.gs), 0.7, 0.7, 0.7, 0, 1, 0) end
-            if e.note and e.note ~= "" then
-                GameTooltip:AddLine(" ")
-                GameTooltip:AddLine("Note: " .. e.note, 1, 1, 1, true)
-            end
-            GameTooltip:Show()
-        end)
-        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        row:Hide()
-        container.waitlistRows[i] = row
-    end
-
-    -- Queue status
-    local queueStatus = queuePanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    queueStatus:SetPoint("BOTTOMLEFT", 10, 8)
-    queueStatus:SetText("Queue: 0 | Waitlist: 0")
-    container.queueStatus = queueStatus
-
-    -- Timer refresh for queue/waitlist time displays (every 5 seconds)
-    queuePanel.timerElapsed = 0
-    queuePanel:SetScript("OnUpdate", function(self, elapsed)
-        self.timerElapsed = self.timerElapsed + elapsed
-        if self.timerElapsed >= 5 then
-            self.timerElapsed = 0
-            -- Update time displays for queue rows
-            if container.queueRows then
-                for _, row in ipairs(container.queueRows) do
-                    if row:IsShown() and row.timeText and row.entryData and row.entryData.time then
-                        local elapsed = time() - row.entryData.time
-                        local timeStr
-                        if elapsed < 60 then
-                            timeStr = elapsed .. "s"
-                        elseif elapsed < 3600 then
-                            timeStr = math.floor(elapsed / 60) .. "m"
-                        else
-                            timeStr = math.floor(elapsed / 3600) .. "h"
-                        end
-                        row.timeText:SetText(timeStr)
-                        if elapsed < 120 then
-                            row.timeText:SetTextColor(0.4, 0.8, 0.4)
-                        elseif elapsed < 300 then
-                            row.timeText:SetTextColor(0.8, 0.8, 0.4)
-                        else
-                            row.timeText:SetTextColor(0.8, 0.4, 0.4)
-                        end
-                    end
-                end
-            end
-            -- Update time displays for waitlist rows
-            if container.waitlistRows then
-                for i, row in ipairs(container.waitlistRows) do
-                    if row:IsShown() and row.timeText and row.entryData and row.entryData.addedTime then
-                        local elapsed = time() - row.entryData.addedTime
-                        local timeStr
-                        if elapsed < 60 then
-                            timeStr = elapsed .. "s"
-                        elseif elapsed < 3600 then
-                            timeStr = math.floor(elapsed / 60) .. "m"
-                        else
-                            timeStr = math.floor(elapsed / 3600) .. "h"
-                        end
-                        row.timeText:SetText(timeStr)
-                    end
-                end
-            end
-        end
-    end)
-
-    local clearQueueBtn = CreateFrame("Button", nil, queuePanel, "UIPanelButtonTemplate")
-    clearQueueBtn:SetSize(50, 20)
-    clearQueueBtn:SetPoint("BOTTOMRIGHT", -10, 5)
-    clearQueueBtn:SetText("Clear")
-    clearQueueBtn:SetScript("OnClick", function()
-        local tab = container.queueSubTab
-        if tab == "queue" then
-            if AIP.ClearQueue then AIP.ClearQueue() end
-            AIP.Print("Queue cleared")
-        elseif tab == "lfg" then
-            GUI.LfgEnrollments = {}
-            if AIP.ChatScanner then AIP.ChatScanner.Players = {} end
-            -- Also clear LFG entries from the queue
-            if AIP.db and AIP.db.queue then
-                for i = #AIP.db.queue, 1, -1 do
-                    if AIP.db.queue[i].isLfgEnrollment then
-                        table.remove(AIP.db.queue, i)
-                    end
-                end
-            end
-            -- Clear DataBus LFG listings if available
-            if AIP.DataBus and AIP.DataBus.ClearLFGListings then
-                AIP.DataBus.ClearLFGListings()
-            end
-            AIP.Print("LFG entries cleared")
-        elseif tab == "waitlist" then
-            if AIP.db then AIP.db.waitlist = {} end
-            AIP.Print("Waitlist cleared")
-        end
-        GUI.UpdateQueuePanel(container)
-    end)
-    clearQueueBtn:SetScript("OnEnter", function(self)
-        local tab = container.queueSubTab
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        if tab == "queue" then
-            GameTooltip:AddLine("Clear Queue")
-            GameTooltip:AddLine("Remove all entries from invite queue", 1, 1, 1, true)
-        elseif tab == "lfg" then
-            GameTooltip:AddLine("Clear LFG")
-            GameTooltip:AddLine("Remove all LFG player entries", 1, 1, 1, true)
-        elseif tab == "waitlist" then
-            GameTooltip:AddLine("Clear Waitlist")
-            GameTooltip:AddLine("Remove all entries from waitlist", 1, 1, 1, true)
-        else
-            GameTooltip:AddLine("Clear")
-        end
-        GameTooltip:Show()
-    end)
-    clearQueueBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    container.clearQueueBtn = clearQueueBtn
-
-    -- Refresh button for LFG tab (to ping for nearby addon users)
-    local refreshLfgBtn = CreateFrame("Button", nil, queuePanel, "UIPanelButtonTemplate")
-    refreshLfgBtn:SetSize(60, 20)
-    refreshLfgBtn:SetPoint("RIGHT", clearQueueBtn, "LEFT", -5, 0)
-    refreshLfgBtn:SetText("Refresh")
-    refreshLfgBtn:Hide()  -- Hidden by default, shown when LFG tab active
-    refreshLfgBtn:SetScript("OnClick", function()
-        -- Trigger DataBus ping to discover nearby addon users
-        if AIP.DataBus and AIP.DataBus.CreateEvent and AIP.DataBus.Broadcast then
-            local ping = AIP.DataBus.CreateEvent("PING", {version = AIP.Version})
-            AIP.DataBus.Broadcast(ping)
-            AIP.Print("Scanning for addon users...")
-        end
-        GUI.UpdateQueuePanel(container)
-    end)
-    refreshLfgBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Refresh LFG")
-        GameTooltip:AddLine("Ping network to discover LFG players from addon users", 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    refreshLfgBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    container.refreshLfgBtn = refreshLfgBtn
-
-    -- Waitlist is now a tab, so button removed
-
-    -- Initial column layout. Deferred so the content frames have their real
-    -- (anchor-derived) width before we measure it; also covers the case where
-    -- the panel is created while hidden.
-    GUI.LayoutQueueColumns(container)
-    if AIP.Utils and AIP.Utils.DelayedCall then
-        AIP.Utils.DelayedCall(0.1, function() GUI.LayoutQueueColumns(container) end)
-    end
-end
-
--- Create inspection panel content
-function GUI.CreateInspectionPanel(panel)
-    -- Player header
-    local headerFrame = CreateFrame("Frame", nil, panel)
-    headerFrame:SetHeight(70)
-    headerFrame:SetPoint("TOPLEFT", 10, -10)
-    headerFrame:SetPoint("TOPRIGHT", -10, -10)
-
-    -- Class icon placeholder
-    local classIcon = headerFrame:CreateTexture(nil, "ARTWORK")
-    classIcon:SetSize(50, 50)
-    classIcon:SetPoint("TOPLEFT")
-    classIcon:SetTexture("Interface\\ICONS\\INV_Misc_QuestionMark")
-    panel.classIcon = classIcon
-
-    -- Player name
-    local playerName = headerFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    playerName:SetPoint("TOPLEFT", classIcon, "TOPRIGHT", 10, -5)
-    playerName:SetText("Select a player")
-    panel.playerName = playerName
-
-    -- Class and spec
-    local classSpec = headerFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    classSpec:SetPoint("TOPLEFT", playerName, "BOTTOMLEFT", 0, -3)
-    classSpec:SetTextColor(0.7, 0.7, 0.7)
-    panel.classSpec = classSpec
-
-    -- GearScore
-    local gsText = headerFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    gsText:SetPoint("TOPLEFT", classSpec, "BOTTOMLEFT", 0, -3)
-    panel.gsText = gsText
-
-    -- Role icon
-    local roleIcon = headerFrame:CreateTexture(nil, "ARTWORK")
-    roleIcon:SetSize(24, 24)
-    roleIcon:SetPoint("TOPRIGHT", -10, -10)
-    panel.roleIcon = roleIcon
-
-    -- Status badges
-    local badgeFrame = CreateFrame("Frame", nil, headerFrame)
-    badgeFrame:SetSize(200, 20)
-    badgeFrame:SetPoint("TOPRIGHT", -10, -40)
-    panel.badgeFrame = badgeFrame
-
-    -- Divider
-    local divider1 = panel:CreateTexture(nil, "ARTWORK")
-    divider1:SetHeight(1)
-    divider1:SetPoint("TOPLEFT", 10, -80)
-    divider1:SetPoint("TOPRIGHT", -10, -80)
-    divider1:SetTexture(0.3, 0.3, 0.3, 1)
-
-    -- Equipment Analysis section
-    local equipHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    equipHeader:SetPoint("TOPLEFT", 10, -90)
-    equipHeader:SetText("=== Equipment Analysis ===")
-    equipHeader:SetTextColor(1, 0.82, 0)
-
-    local enchantText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    enchantText:SetPoint("TOPLEFT", equipHeader, "BOTTOMLEFT", 0, -8)
-    panel.enchantText = enchantText
-
-    local enchantList = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    enchantList:SetPoint("TOPLEFT", enchantText, "BOTTOMLEFT", 10, -3)
-    enchantList:SetTextColor(0.7, 0.7, 0.7)
-    panel.enchantList = enchantList
-
-    local gemText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    gemText:SetPoint("TOPLEFT", enchantList, "BOTTOMLEFT", -10, -8)
-    panel.gemText = gemText
-
-    -- Divider
-    local divider2 = panel:CreateTexture(nil, "ARTWORK")
-    divider2:SetHeight(1)
-    divider2:SetPoint("TOPLEFT", 10, -190)
-    divider2:SetPoint("TOPRIGHT", -10, -190)
-    divider2:SetTexture(0.3, 0.3, 0.3, 1)
-
-    -- Achievements section
-    local achieveHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    achieveHeader:SetPoint("TOPLEFT", 10, -200)
-    achieveHeader:SetText("=== Raid Achievements ===")
-    achieveHeader:SetTextColor(1, 0.82, 0)
-
-    local achieveText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    achieveText:SetPoint("TOPLEFT", achieveHeader, "BOTTOMLEFT", 0, -8)
-    achieveText:SetWidth(350)
-    achieveText:SetJustifyH("LEFT")
-    panel.achieveText = achieveText
-
-    -- Divider
-    local divider3 = panel:CreateTexture(nil, "ARTWORK")
-    divider3:SetHeight(1)
-    divider3:SetPoint("TOPLEFT", 10, -290)
-    divider3:SetPoint("TOPRIGHT", -10, -290)
-    divider3:SetTexture(0.3, 0.3, 0.3, 1)
-
-    -- Performance estimate section
-    local perfHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    perfHeader:SetPoint("TOPLEFT", 10, -300)
-    perfHeader:SetText("=== Performance Estimate ===")
-    perfHeader:SetTextColor(1, 0.82, 0)
-
-    local perfText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    perfText:SetPoint("TOPLEFT", perfHeader, "BOTTOMLEFT", 0, -8)
-    perfText:SetWidth(350)
-    perfText:SetJustifyH("LEFT")
-    panel.perfText = perfText
-
-    -- Message (original LFM/LFG message)
-    local msgHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    msgHeader:SetPoint("BOTTOMLEFT", 10, 60)
-    msgHeader:SetText("Message:")
-    msgHeader:SetTextColor(1, 0.82, 0)
-
-    local msgText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    msgText:SetPoint("TOPLEFT", msgHeader, "BOTTOMLEFT", 0, -5)
-    msgText:SetPoint("BOTTOMRIGHT", -10, 10)
-    msgText:SetJustifyH("LEFT")
-    msgText:SetJustifyV("TOP")
-    msgText:SetTextColor(0.7, 0.7, 0.7)
-    panel.msgText = msgText
-end
-
 -- Create composition tab (RaidComp-style layout)
 function GUI.CreateCompositionTab(container)
     local header = container:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -3534,6 +1532,61 @@ function GUI.CreateCompositionTab(container)
     recommendBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     container.recommendBtn = recommendBtn
 
+    -- Save the CURRENT group's composition as a custom template (works as a
+    -- raid member too - "emulate the comp of a raid I joined")
+    local saveTplBtn = CreateFrame("Button", nil, container, "UIPanelButtonTemplate")
+    saveTplBtn:SetSize(85, 22)
+    saveTplBtn:SetPoint("LEFT", recommendBtn, "RIGHT", 5, 0)
+    saveTplBtn:SetText("Save Group")
+    saveTplBtn:SetScript("OnClick", function()
+        StaticPopup_Show("AIP_SAVE_COMP_TEMPLATE")
+    end)
+    saveTplBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Save Group as Template", 1, 0.82, 0)
+        GameTooltip:AddLine("Snapshots the current group's size and role split", 1, 1, 1, true)
+        GameTooltip:AddLine("as a reusable Custom Template (works as a member of", 1, 1, 1, true)
+        GameTooltip:AddLine("someone else's raid too).", 1, 1, 1, true)
+        GameTooltip:AddLine("Delete via /aip comp deltpl <name>", 0.6, 0.6, 0.6)
+        GameTooltip:Show()
+    end)
+    saveTplBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    container.saveTplBtn = saveTplBtn
+
+    StaticPopupDialogs["AIP_SAVE_COMP_TEMPLATE"] = StaticPopupDialogs["AIP_SAVE_COMP_TEMPLATE"] or {
+        text = "Save current group composition as template:",
+        button1 = "Save",
+        button2 = "Cancel",
+        hasEditBox = true,
+        maxLetters = 32,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        OnAccept = function(self)
+            -- 3.3.5a: the dialog's editbox is a named global child, not .editBox
+            local eb = (self.editBox) or (self.GetName and _G[self:GetName() .. "EditBox"])
+            local name = eb and eb:GetText() or ""
+            local Comp = AIP.Composition
+            if Comp and Comp.SaveCurrentAsTemplate then
+                local key, err = Comp.SaveCurrentAsTemplate(name)
+                if key then
+                    local t = Comp.RaidTemplates[key]
+                    AIP.Print(string.format("Saved custom template |cFF00FF00%s|r: %d players (%dT/%dH/%dD)",
+                        t.name, t.size, t.tanks, t.healers, t.dps))
+                    if GUI.UpdateCompositionTab then GUI.UpdateCompositionTab() end
+                else
+                    AIP.Print(err or "Could not save the template.")
+                end
+            end
+        end,
+        EditBoxOnEnterPressed = function(self)
+            local parent = self:GetParent()
+            StaticPopupDialogs["AIP_SAVE_COMP_TEMPLATE"].OnAccept(parent)
+            parent:Hide()
+        end,
+        EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+    }
+
     GUI.RebuildVariationButtons(container)
 
     -- Helper to update template dropdown when category changes
@@ -3556,6 +1609,10 @@ function GUI.CreateCompositionTab(container)
                             if AIP.Composition then
                                 AIP.Composition.SetTemplate(key)
                                 GUI.UpdateCompositionTab()
+                                -- Tandem binding: re-point the LFM popup too
+                                if GUI.SyncPopupToTemplate then
+                                    GUI.SyncPopupToTemplate(key)
+                                end
                             end
                         end
                         info.notCheckable = true
@@ -3566,9 +1623,10 @@ function GUI.CreateCompositionTab(container)
         end)
     end
 
-    -- Initialize category dropdown
+    -- Initialize category dropdown (from the registry so Custom Templates and
+    -- any future category appear automatically)
     UIDropDownMenu_Initialize(catDropdown, function()
-        local categories = {
+        local categories = (AIP.Composition and AIP.Composition.TemplateCategories) or {
             {id = "WOTLK", name = "WotLK Raids"},
             {id = "WOTLK_DUNGEON", name = "WotLK Dungeons"},
             {id = "TBC", name = "TBC Raids"},
@@ -5368,18 +3426,33 @@ function GUI.UpdateQueuePanel(container)
 
             if entry and i <= vis then
                 row.numText:SetText(origIndex)
-                row.nameText:SetText(entry.name or "-")
 
-                -- Color role text
-                local roleColors = {
-                    TANK = {0.5, 0.5, 1},
-                    HEALER = {0.5, 1, 0.5},
-                    DPS = {1, 0.5, 0.5},
-                }
+                -- Fit chip for protocol applicants (parity with the queue rows:
+                -- the leader can scan verdicts without hovering every row)
+                local displayName = entry.name or "-"
+                if entry.isApplication and AIP.FitEngine and AIP.FitEngine.ScoreApplicant and GUI.MyGroup then
+                    local fit = AIP.FitEngine.ScoreApplicant(entry, GUI.MyGroup)
+                    displayName = AIP.FitEngine.Chip(fit) .. " " .. displayName
+                end
+                row.nameText:SetText(displayName)
+
+                -- Class-colored name when the class is known
+                local classColor = entry.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[entry.class:upper()]
+                if classColor then
+                    row.nameText:SetTextColor(classColor.r, classColor.g, classColor.b)
+                else
+                    row.nameText:SetTextColor(1, 1, 1)
+                end
+
+                -- Color role text (shared role palette)
+                local roleColors = (AIP.UI and AIP.UI.Colors and AIP.UI.Colors.roleRGB) or {}
                 local color = roleColors[entry.role] or {1, 1, 1}
                 row.roleText:SetText(entry.role or "DPS")
                 row.roleText:SetTextColor(color[1], color[2], color[3])
 
+                if row.gsText then
+                    row.gsText:SetText(entry.gs and tostring(entry.gs) or "-")
+                end
                 row.noteText:SetText((entry.note or ""):sub(1, 20))
                 row.timeText:SetText(AIP.FormatTimeAgo and AIP.FormatTimeAgo(entry.addedTime) or "-")
 
@@ -5424,7 +3497,18 @@ function GUI.UpdateQueuePanel(container)
         if #lfgEntries == 0 then container.lfgEmptyText:Show() else container.lfgEmptyText:Hide() end
     end
     if container.waitlistEmptyText then
-        if #waitlistEntries == 0 then container.waitlistEmptyText:Show() else container.waitlistEmptyText:Hide() end
+        if #waitlistEntries == 0 then
+            -- Distinguish "no matches for the filter" from a truly empty list
+            if waitlistSearchFilter ~= "" and totalWaitlist > 0 then
+                container.waitlistEmptyText:SetText("No matches for '" .. waitlistSearchFilter .. "'\n\n|cFF888888"
+                    .. totalWaitlist .. " player" .. (totalWaitlist ~= 1 and "s" or "") .. " on the waitlist - clear the search to see them.|r")
+            else
+                container.waitlistEmptyText:SetText("Waitlist is empty\n\n|cFF888888Park overflow players here - they are\nwhispered when their turn comes.|r")
+            end
+            container.waitlistEmptyText:Show()
+        else
+            container.waitlistEmptyText:Hide()
+        end
     end
 
     -- Update status footer (single source: counts + mode + needs strip)
@@ -5584,83 +3668,132 @@ function GUI.UpdateDetailsPanel(container, data)
         container.keywordValue:SetText(keywordText)
     end
 
-    -- Looking For (interpret roleSpecs array with class colors and tooltips)
-    local lookingForText = "-"
-    if data.roleSpecs and AIP.Parsers then
-        local roleLabels = {
-            TANK = {label = "Tanks", color = "00FFFF"},
-            HEALER = {label = "Healers", color = "00FF00"},
-            MDPS = {label = "Melee", color = "FF6666"},
-            RDPS = {label = "Ranged", color = "FFFF00"},
+    -- Looking For: four fixed role sections (Tanks/Heals/Melee/Ranged), each
+    -- rendering the wanted classes for that role as a colored array. Empty
+    -- role -> dimmed "-". Class needs (counts) prefix a class when known.
+    if container.lookingForRoleLines and container.lookingForRoleMeta then
+        -- Optional per-class counts from the tandem listing (leader side)
+        local needCount = {}   -- needCount[role][class] = n  (DPS applies to both M/R rows)
+        for _, row in ipairs(data.classNeeds or {}) do
+            if row.class and (row.count or 0) > 0 then
+                needCount[row.role] = needCount[row.role] or {}
+                needCount[row.role][row.class] = (needCount[row.role][row.class] or 0) + row.count
+            end
+        end
+
+        -- A "DPS" need count covers melee AND ranged; show it only on the
+        -- FIRST DPS row a class appears in (meta order: MDPS before RDPS) so
+        -- "2x Druid" never reads as 4 across the two rows.
+        -- A class present ONLY in classNeeds (no spec codes - e.g. the peer's
+        -- chat [T:] block was trimmed, or the DataBus need field survived a
+        -- trim that dropped specs) still gets a row entry, on the DPS row its
+        -- class actually plays from (pure-ranged classes -> Ranged).
+        local needOnlyDpsRow = {
+            WARRIOR = "MDPS", DEATHKNIGHT = "MDPS", ROGUE = "MDPS",
+            PALADIN = "MDPS", SHAMAN = "MDPS", DRUID = "MDPS",
+            MAGE = "RDPS", WARLOCK = "RDPS", HUNTER = "RDPS", PRIEST = "RDPS",
         }
-        local roleOrder = {"TANK", "HEALER", "MDPS", "RDPS"}
-        local parts = {}
+        local dpsCountShown = {}
+        local roleDicts = {TANK = data.tanks, HEALER = data.healers, MDPS = data.mdps, RDPS = data.rdps}
 
-        for _, role in ipairs(roleOrder) do
-            local specs = data.roleSpecs[role]
-            if specs and #specs > 0 then
-                local roleInfo = roleLabels[role]
-                -- Group specs by class for cleaner display
-                local classCodes = {}  -- {className = {codes}}
-                for _, code in ipairs(specs) do
-                    local info = AIP.Parsers.SpecCodeInfo and AIP.Parsers.SpecCodeInfo[code]
-                    if info then
-                        local className = info.class
-                        classCodes[className] = classCodes[className] or {}
-                        table.insert(classCodes[className], {code = code, spec = info.spec, shortClass = info.shortClass})
+        -- Classes that already have spec codes on EITHER DPS row: their need
+        -- count attaches to that real spec row - never appended as need-only
+        -- (else "2x Ele Shaman" would render on the Melee row)
+        local dpsSpecClasses = {}
+        if data.roleSpecs and AIP.Parsers and AIP.Parsers.SpecCodeInfo then
+            for _, dk in ipairs({"MDPS", "RDPS"}) do
+                for _, code in ipairs(data.roleSpecs[dk] or {}) do
+                    local si = AIP.Parsers.SpecCodeInfo[code]
+                    if si and si.class then dpsSpecClasses[si.class] = true end
+                end
+            end
+        end
+        for _, r in ipairs(container.lookingForRoleMeta) do
+            local line = container.lookingForRoleLines[r.key]
+            if line then
+                local head = "|cFF" .. r.hex .. r.label .. ":|r "
+                local isDps = (r.key == "MDPS" or r.key == "RDPS")
+                local needRole = isDps and "DPS" or r.key
+                local specs = data.roleSpecs and data.roleSpecs[r.key]
+
+                -- Group spec codes by class -> ordered class array
+                local classCodes, order = {}, {}
+                if specs and #specs > 0 and AIP.Parsers then
+                    for _, code in ipairs(specs) do
+                        local info = AIP.Parsers.SpecCodeInfo and AIP.Parsers.SpecCodeInfo[code]
+                        local className = info and info.class or "UNKNOWN"
+                        if not classCodes[className] then
+                            classCodes[className] = {shortClass = (info and info.shortClass) or code}
+                            table.insert(order, className)
+                        end
+                    end
+                    table.sort(order)
+                end
+
+                -- Append classes that only appear in the need counts
+                for className in pairs(needCount[needRole] or {}) do
+                    if not classCodes[className] and not (isDps and dpsSpecClasses[className]) then
+                        local wantRow = isDps and (needOnlyDpsRow[className] or "MDPS") or r.key
+                        if wantRow == r.key and not (isDps and dpsCountShown[className]) then
+                            local short = AIP.LFMFormat and AIP.LFMFormat.NeedCode
+                                and AIP.LFMFormat.NeedCode(className, needRole)
+                                or className:sub(1, 1) .. className:sub(2, 3):lower()
+                            classCodes[className] = {shortClass = short}
+                            table.insert(order, className)
+                        end
+                    end
+                end
+
+                if #order > 0 then
+                    local parts = {}
+                    for _, className in ipairs(order) do
+                        local color = AIP.Parsers and AIP.Parsers.ClassColors and AIP.Parsers.ClassColors[className]
+                        local hex = color and color.hex or "FFFFFF"
+                        local n = needCount[needRole] and needCount[needRole][className]
+                        if n and isDps then
+                            if dpsCountShown[className] then
+                                n = nil
+                            else
+                                dpsCountShown[className] = true
+                            end
+                        end
+                        local prefix = n and (n .. "x ") or ""
+                        table.insert(parts, prefix .. "|cFF" .. hex .. classCodes[className].shortClass .. "|r")
+                    end
+                    line:SetText(head .. table.concat(parts, ", "))
+                else
+                    -- No class detail for this role (vague/compact listing, or
+                    -- an untargeted role): fall back to the truthful role
+                    -- count so the row still says how many slots are open
+                    local dict = roleDicts[r.key]
+                    local open = dict and ((dict.needed or 0) - (dict.current or 0)) or nil
+                    if open and open > 0 then
+                        line:SetText(head .. "|cFFFFD100" .. open .. " more|r")
+                    elseif dict and (dict.needed or 0) > 0 then
+                        line:SetText(head .. "|cFF666666full|r")
                     else
-                        -- Unknown code, show as-is
-                        classCodes["UNKNOWN"] = classCodes["UNKNOWN"] or {}
-                        table.insert(classCodes["UNKNOWN"], {code = code, spec = code, shortClass = code})
+                        line:SetText(head .. "|cFF666666-|r")
                     end
                 end
-
-                -- Build class list with colors
-                local classStrings = {}
-                local sortedClasses = {}
-                for className in pairs(classCodes) do
-                    table.insert(sortedClasses, className)
-                end
-                table.sort(sortedClasses)
-
-                for _, className in ipairs(sortedClasses) do
-                    local codes = classCodes[className]
-                    local color = AIP.Parsers.ClassColors and AIP.Parsers.ClassColors[className]
+            end
+        end
+    elseif container.lookingForValue then
+        -- Legacy single-line fallback (pre-split UI still loaded)
+        local lookingForText = "-"
+        if data.lookingForSpecs and #data.lookingForSpecs > 0 then
+            local coloredSpecs = {}
+            for _, code in ipairs(data.lookingForSpecs) do
+                local info = AIP.Parsers and AIP.Parsers.SpecCodeInfo and AIP.Parsers.SpecCodeInfo[code]
+                if info then
+                    local color = AIP.Parsers.ClassColors and AIP.Parsers.ClassColors[info.class]
                     local hex = color and color.hex or "FFFFFF"
-                    local shortClass = codes[1].shortClass
-                    -- Show class name with spec codes in parentheses
-                    local specList = {}
-                    for _, c in ipairs(codes) do
-                        table.insert(specList, c.code)
-                    end
-                    table.insert(classStrings, "|cFF" .. hex .. shortClass .. "|r")
-                end
-
-                if #classStrings > 0 then
-                    table.insert(parts, "|cFF" .. roleInfo.color .. roleInfo.label .. ":|r " .. table.concat(classStrings, ", "))
+                    table.insert(coloredSpecs, "|cFF" .. hex .. code .. "|r")
+                else
+                    table.insert(coloredSpecs, code)
                 end
             end
+            lookingForText = table.concat(coloredSpecs, ", ")
         end
-
-        if #parts > 0 then
-            lookingForText = table.concat(parts, " | ")
-        end
-    elseif data.lookingForSpecs and #data.lookingForSpecs > 0 then
-        -- Fallback to flat list with class colors
-        local coloredSpecs = {}
-        for _, code in ipairs(data.lookingForSpecs) do
-            local info = AIP.Parsers and AIP.Parsers.SpecCodeInfo and AIP.Parsers.SpecCodeInfo[code]
-            if info then
-                local color = AIP.Parsers.ClassColors and AIP.Parsers.ClassColors[info.class]
-                local hex = color and color.hex or "FFFFFF"
-                table.insert(coloredSpecs, "|cFF" .. hex .. code .. "|r")
-            else
-                table.insert(coloredSpecs, code)
-            end
-        end
-        lookingForText = table.concat(coloredSpecs, ", ")
-    end
-    if container.lookingForValue then
         container.lookingForValue:SetText(lookingForText)
     end
 
@@ -6067,17 +4200,33 @@ function GUI.MaybeDataBusBroadcast(dryRun)
     if dryRun or not AIP.DataBus then return end
 
     if B.mode == "lfm" and GUI.MyGroup then
+        -- Compact payload (LFMFormat wire codec): the old shape - four role
+        -- dicts + a nested roleSpecs table - serialized past the 255-byte
+        -- addon-message cap for any detailed listing, so peers received
+        -- NOTHING. comp/specs/need strings carry the same data small; the
+        -- legacy dicts ride along for old receivers and are the first thing
+        -- BroadcastLFM sheds if the message is still too long. Empty
+        -- optionals are omitted entirely (every serialized field costs cap).
+        local MyG = GUI.MyGroup
+        local LF = AIP.LFMFormat
+        local vague = (MyG.detailMode == "vague")
+        local specsStr = (not vague) and LF and LF.EncodeRoleSpecs(MyG.roleSpecs) or ""
+        local needStr = (not vague) and LF and LF.EncodeNeeds(MyG.classNeeds) or ""
         AIP.DataBus.BroadcastLFM({
-            raid = GUI.MyGroup.raid,
-            tanks = GUI.MyGroup.tanks,
-            healers = GUI.MyGroup.healers,
-            mdps = GUI.MyGroup.mdps,
-            rdps = GUI.MyGroup.rdps,
-            gsMin = GUI.MyGroup.gsMin,
-            ilvlMin = GUI.MyGroup.ilvlMin,
-            triggerKey = GUI.MyGroup.inviteKeyword,
-            roleSpecs = GUI.MyGroup.roleSpecs,
-            weekly = GUI.MyGroup.weekly,
+            raid = MyG.raid,
+            comp = LF and LF.EncodeComp(MyG) or nil,
+            tanks = MyG.tanks,
+            healers = MyG.healers,
+            mdps = MyG.mdps,
+            rdps = MyG.rdps,
+            gsMin = (MyG.gsMin and MyG.gsMin > 0) and MyG.gsMin or nil,
+            ilvlMin = (MyG.ilvlMin and MyG.ilvlMin > 0) and MyG.ilvlMin or nil,
+            triggerKey = MyG.inviteKeyword,
+            specs = specsStr ~= "" and specsStr or nil,
+            need = needStr ~= "" and needStr or nil,
+            dm = MyG.detailMode and (vague and "V" or "D") or nil,
+            note = (MyG.note and MyG.note ~= "") and MyG.note or nil,
+            weekly = (MyG.weekly and MyG.weekly ~= "") and MyG.weekly or nil,
         })
     elseif B.mode == "lfg" and GUI.MyEnrollment then
         AIP.DataBus.BroadcastLFG({
@@ -6238,6 +4387,22 @@ function GUI.UpdateEnrollmentStatus()
             needOf("tanks", "T"); needOf("healers", "H"); needOf("mdps", "M"); needOf("rdps", "R")
             if #needs > 0 then
                 statusText = statusText .. " | |cFFFFD100Need: " .. table.concat(needs, " ") .. "|r"
+                -- Tandem class needs (first few, colored) - the leader's
+                -- at-a-glance view of WHICH classes to recruit next
+                if g.classNeeds and #g.classNeeds > 0 then
+                    local classParts, shown = {}, 0
+                    for _, row in ipairs(g.classNeeds) do
+                        if shown >= 3 then
+                            classParts[#classParts + 1] = "|cFF888888+" .. (#g.classNeeds - shown) .. "|r"
+                            break
+                        end
+                        local cls = (AIP.Composition and AIP.Composition.ColoredClassName)
+                            and AIP.Composition.ColoredClassName(row.class) or row.class
+                        classParts[#classParts + 1] = row.count .. "x" .. cls
+                        shown = shown + 1
+                    end
+                    statusText = statusText .. " " .. table.concat(classParts, " ")
+                end
                 if AIP.FitEngine and AIP.ChatScanner and AIP.ChatScanner.Players then
                     local matching = 0
                     for _, player in pairs(AIP.ChatScanner.Players) do
@@ -6452,6 +4617,58 @@ function GUI.RegenerateBroadcastMessage()
         achieveLink = GetAchievementLink(ownGroup.achievementId) or ""
     end
 
+    -- Tandem: shrink the [Need:] counts as recruits join. The POSTED counts
+    -- (classNeedsBase, from the popup's per-spec count boxes) are the truth -
+    -- each newly-joined player of a needed class decrements that class's
+    -- count (class-level approximation: spec of a joiner isn't inspectable).
+    -- Falls back to the template recommendation engine for listings posted
+    -- before the count boxes existed.
+    local Comp = AIP.Composition
+    local vague = (ownGroup.detailMode == "vague")
+        or (GUI.MyGroup and GUI.MyGroup.detailMode == "vague")
+    local base = GUI.MyGroup and GUI.MyGroup.classNeedsBase
+    local snap = GUI.MyGroup and GUI.MyGroup.classCountsAtPost
+    if vague then
+        -- Vague listing: never inject class-level detail on regeneration
+        -- (belt-and-braces: also clear any stale detailed fields on the record)
+        ownGroup.classNeeds = nil
+        ownGroup.roleSpecs = nil
+        ownGroup.selectedClasses = nil
+        if GUI.MyGroup then
+            GUI.MyGroup.classNeeds = nil
+            GUI.MyGroup.roleSpecs = nil
+            GUI.MyGroup.selectedClasses = nil
+        end
+    elseif base and snap and Comp and Comp.ScanRaid then
+        local raid = Comp.ScanRaid()
+        local joined = {}
+        for class, n in pairs((raid and raid.classCounts) or {}) do
+            joined[class] = math.max(0, n - (snap[class] or 0))
+        end
+        local remaining = {}
+        for _, row in ipairs(base) do
+            local take = math.min(row.count or 0, joined[row.class] or 0)
+            joined[row.class] = (joined[row.class] or 0) - take
+            local left = (row.count or 0) - take
+            if left > 0 then
+                table.insert(remaining, {class = row.class, role = row.role, count = left})
+            end
+        end
+        ownGroup.classNeeds = remaining
+        if GUI.MyGroup then GUI.MyGroup.classNeeds = remaining end
+    else
+        local templateKey = ownGroup.templateKey or (GUI.MyGroup and GUI.MyGroup.templateKey)
+        if Comp and Comp.GetClassNeeds and templateKey then
+            local needs = Comp.GetClassNeeds(templateKey)
+            if needs.ok then
+                local list = GUI.FilterClassNeedsBySelection(needs.list, ownGroup.selectedClasses
+                    or (GUI.MyGroup and GUI.MyGroup.selectedClasses))
+                ownGroup.classNeeds = list
+                if GUI.MyGroup then GUI.MyGroup.classNeeds = list end
+            end
+        end
+    end
+
     local msg = AIP.LFMFormat.BuildLFM({
         raidKey = ownGroup.raid or "?",
         weekly = ownGroup.weekly,
@@ -6462,6 +4679,7 @@ function GUI.RegenerateBroadcastMessage()
         gsMin = ownGroup.gsMin,
         ilvlMin = ownGroup.ilvlMin,
         roleSpecs = ownGroup.roleSpecs,
+        classNeeds = ownGroup.classNeeds,
         keyword = ownGroup.inviteKeyword or (AIP.db and AIP.db.triggers) or "inv",
         achievementLink = achieveLink,
         note = ownGroup.note,
@@ -6469,6 +4687,97 @@ function GUI.RegenerateBroadcastMessage()
     })
 
     return msg
+end
+
+-- Filter class-need rows to the classes actually selected in Looking-For
+-- (selectedClasses = {TANK={{class,spec}..}, HEALER=.., MDPS=.., RDPS=..}),
+-- so the [Need:] block, MyGroup.classNeeds and the FitEngine verdicts never
+-- contradict the leader's manual spec selection. nil selection = no filter.
+function GUI.FilterClassNeedsBySelection(list, selectedClasses)
+    if not list then return nil end
+    if not selectedClasses then return list end
+    local checked = {TANK = {}, HEALER = {}, DPS = {}}
+    local any = false
+    for role, entries in pairs(selectedClasses) do
+        local target = (role == "MDPS" or role == "RDPS") and "DPS" or role
+        if checked[target] then
+            for _, e in ipairs(entries) do
+                if e.class then
+                    checked[target][e.class:upper()] = true
+                    any = true
+                end
+            end
+        end
+    end
+    if not any then return list end  -- empty selection data: keep the needs
+    local out = {}
+    for _, row in ipairs(list) do
+        local set = checked[row.role]
+        if set and set[row.class] then
+            table.insert(out, row)
+        end
+    end
+    return out
+end
+
+-- Reverse of Comp.TemplateKeyForRaid: find the popup (raidType, size, heroic)
+-- combo whose raid key resolves to the given template. Brute-forces the small
+-- RaidSizeInfo space using the same key-building rules as GetRaidKey.
+function GUI.RaidKeyForTemplate(templateKey)
+    local Comp = AIP.Composition
+    if not (templateKey and Comp and Comp.TemplateKeyForRaid) then return nil end
+    for raidType, info in pairs(GUI.RaidSizeInfo or {}) do
+        if raidType ~= "CUSTOM" then
+            for _, size in ipairs(info.sizes or {}) do
+                -- Normal first: templates without a distinct heroic entry
+                -- (Ulduar, 5-mans) must reverse-map as NON-heroic
+                local variants = info.hasHeroic and {false, true} or {false}
+                for _, heroic in ipairs(variants) do
+                    local key
+                    if raidType == "TOC" and heroic then
+                        key = "TOGC" .. size
+                    else
+                        key = raidType .. size .. (heroic and "H" or "N")
+                    end
+                    if Comp.TemplateKeyForRaid(key) == templateKey then
+                        return raidType, size, heroic
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- Composition tab/window -> LFM popup binding: selecting a template re-points
+-- the popup's raid selection (only when the popup already exists). Custom
+-- templates map to the CUSTOM raid type carrying the template's name.
+function GUI.SyncPopupToTemplate(templateKey)
+    local popup = GUI.AddGroupPopup
+    if not popup then return end
+    local Comp = AIP.Composition
+    local t = Comp and Comp.RaidTemplates and Comp.RaidTemplates[templateKey]
+    if not t then return end
+    if popup.classNeedsMeta and popup.classNeedsMeta.templateKey == templateKey then
+        return  -- already bound to this template
+    end
+    if t.custom then
+        popup.raidType = "CUSTOM"
+        popup.weeklyToken = nil
+        if popup.customInput then popup.customInput:SetText(t.name or templateKey) end
+    else
+        local raidType, size, heroic = GUI.RaidKeyForTemplate(templateKey)
+        if not raidType then return end  -- no popup equivalent (e.g. WEEKLY_RAID)
+        popup.raidType = raidType
+        popup.raidSize = size
+        popup.weeklyToken = nil
+        if popup.heroicCheck then popup.heroicCheck:SetChecked(heroic and true or false) end
+        if popup.UpdateSizeDropdown then popup.UpdateSizeDropdown() end
+        local sizeDD = _G["AIPAddGroupSize"]
+        if sizeDD then UIDropDownMenu_SetText(sizeDD, size) end
+    end
+    if popup.UpdateRaidDropdownText then popup.UpdateRaidDropdownText() end
+    if popup.ApplyTemplateDefaults then popup.ApplyTemplateDefaults() end
 end
 
 -- Update broadcast message after composition change
@@ -6567,6 +4876,12 @@ function GUI.ShowAddGroupPopup()
     end
     if GUI.AddGroupPopup.UpdateWeeklyStrip then
         GUI.AddGroupPopup.UpdateWeeklyStrip()
+    end
+    -- Recompute class needs against the CURRENT group (no auto-select): the
+    -- roster may have changed since the popup was last open, and stale needs
+    -- would otherwise be posted and broadcast
+    if GUI.AddGroupPopup.UpdateClassNeeds then
+        GUI.AddGroupPopup.UpdateClassNeeds(false)
     end
     if GUI.AddGroupPopup.RefreshPreview then
         GUI.AddGroupPopup.RefreshPreview()
@@ -6798,19 +5113,15 @@ GUI.ClassSpecs = {
 
 function GUI.CreateAddGroupPopup()
     local popup = CreateFrame("Frame", "AIPAddGroupPopup", UIParent)
-    popup:SetSize(430, 320)  -- collapsed height; SetExpanded() grows it
-    popup:SetPoint("CENTER", -220, 0)  -- Offset left so it doesn't overlap with Enroll popup
+    popup:SetSize(500, 340)  -- collapsed height; SetExpanded() grows it (500 wide: per-spec count boxes)
+    popup:SetPoint("CENTER", -255, 0)  -- offset left clears the Enroll popup at the new 500 width
     popup:SetFrameStrata("DIALOG")
-    popup:SetMovable(true)
-    popup:EnableMouse(true)
-    popup:RegisterForDrag("LeftButton")
-    popup:SetScript("OnDragStart", popup.StartMoving)
-    popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
+    AIP.UI.MakeDraggable(popup)
     popup:SetClampedToScreen(true)
     GUI.StylePopup(popup)
 
-    local COLLAPSED_HEIGHT = 320
-    local EXPANDED_HEIGHT = 668  -- 655 put the customize toggle 7px over the reserved box
+    local COLLAPSED_HEIGHT = 340  -- 320 + 20px so the needs hint clears the Customize button
+    local EXPANDED_HEIGHT = 688  -- 668 + 20px for the composition "Need:" line
 
     local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -15)
@@ -6889,8 +5200,8 @@ function GUI.CreateAddGroupPopup()
     popup.presetTiles = {}
     local function makeTile(index)
         local tile = CreateFrame("Button", nil, popup)
-        tile:SetSize(126, 52)
-        tile:SetPoint("TOPLEFT", 20 + (index - 1) * 131, -112)
+        tile:SetSize(150, 52)
+        tile:SetPoint("TOPLEFT", 20 + (index - 1) * 155, -112)
         GUI.ApplyBackdrop(tile, "Inset", 0.9)
         tile.titleText = tile:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         tile.titleText:SetPoint("TOP", 0, -8)
@@ -6911,10 +5222,22 @@ function GUI.CreateAddGroupPopup()
     popup.presetTiles.weekly = makeTile(2)
     popup.presetTiles.fresh = makeTile(3)
 
+    -- One-line class-needs hint under the quick-post tiles, so the tandem
+    -- suggestions are visible without expanding the full form. Clipped to a
+    -- single line - it must never bleed into the PREVIEW section below.
+    local collapsedNeedsText = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    collapsedNeedsText:SetPoint("TOPLEFT", 20, -168)
+    collapsedNeedsText:SetPoint("RIGHT", popup, "RIGHT", -20, 0)
+    collapsedNeedsText:SetHeight(13)
+    collapsedNeedsText:SetJustifyH("LEFT")
+    if collapsedNeedsText.SetWordWrap then collapsedNeedsText:SetWordWrap(false) end
+    collapsedNeedsText:SetText("")
+    popup.collapsedNeedsText = collapsedNeedsText
+
     -- Detail frame: the full customization form, hidden while collapsed
     local detail = CreateFrame("Frame", nil, popup)
     detail:SetPoint("TOPLEFT", 0, -96)
-    detail:SetSize(430, 415)
+    detail:SetSize(500, 435)
     detail:Hide()
     popup.detail = detail
 
@@ -7141,6 +5464,7 @@ function GUI.CreateAddGroupPopup()
     local compLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     compLabel:SetPoint("TOPLEFT", 20, 0)
     compLabel:SetText("Composition:")
+    popup.compositionRowWidgets = { compLabel }
 
     local tankLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     tankLabel:SetPoint("TOPLEFT", 30, -20)
@@ -7150,6 +5474,8 @@ function GUI.CreateAddGroupPopup()
     tankContainer:SetPoint("LEFT", tankLabel, "RIGHT", 5, 0)
     tankInput:SetText("2")
     popup.tankInput = tankInput
+    table.insert(popup.compositionRowWidgets, tankLabel)
+    table.insert(popup.compositionRowWidgets, tankContainer)
 
     local healLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     healLabel:SetPoint("LEFT", tankContainer, "RIGHT", 10, 0)
@@ -7159,6 +5485,8 @@ function GUI.CreateAddGroupPopup()
     healContainer:SetPoint("LEFT", healLabel, "RIGHT", 5, 0)
     healInput:SetText("6")
     popup.healInput = healInput
+    table.insert(popup.compositionRowWidgets, healLabel)
+    table.insert(popup.compositionRowWidgets, healContainer)
 
     local mdpsLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     mdpsLabel:SetPoint("LEFT", healContainer, "RIGHT", 10, 0)
@@ -7168,6 +5496,8 @@ function GUI.CreateAddGroupPopup()
     mdpsContainer:SetPoint("LEFT", mdpsLabel, "RIGHT", 3, 0)
     mdpsInput:SetText("8")
     popup.mdpsInput = mdpsInput
+    table.insert(popup.compositionRowWidgets, mdpsLabel)
+    table.insert(popup.compositionRowWidgets, mdpsContainer)
 
     local rdpsLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     rdpsLabel:SetPoint("LEFT", mdpsContainer, "RIGHT", 8, 0)
@@ -7177,6 +5507,8 @@ function GUI.CreateAddGroupPopup()
     rdpsContainer:SetPoint("LEFT", rdpsLabel, "RIGHT", 3, 0)
     rdpsInput:SetText("9")
     popup.rdpsInput = rdpsInput
+    table.insert(popup.compositionRowWidgets, rdpsLabel)
+    table.insert(popup.compositionRowWidgets, rdpsContainer)
 
     -- === Requirements Row ===
     local reqLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -7218,10 +5550,64 @@ function GUI.CreateAddGroupPopup()
     classLabel:SetText("Looking For Classes:")
     local classHint = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     classHint:SetPoint("LEFT", classLabel, "RIGHT", 8, 0)
-    classHint:SetText("|cFF888888(click a role name to toggle all)|r")
+    classHint:SetText("|cFF888888(box = how many needed; role name toggles all)|r")
+
+    -- Composition detail mode: MINIMAL shows only the Note (role counts still
+    -- come from the template, just not shown/editable); COMPACT broadcasts
+    -- role counts only ([T:x/y]); DETAILED broadcasts the class list + counts
+    -- ([T:PP..] + [Need:..]). The choice persists (AIP.db.lfmDetailMode) and
+    -- rides the listing so FitEngine/regen/DataBus all respect it too.
+    local MODE_LABEL = { minimal = "Minimal", compact = "Compact", detailed = "Detailed" }
+    local MODE_TOOLTIP = {
+        minimal = "Only the note is customized here - role counts still come from the selected template, they're just not shown.",
+        compact = "Broadcast role counts only ([T:x/y]) - any class may apply.",
+        detailed = "Broadcast the class list and per-class counts ([Need:...]).",
+    }
+    popup.modeButtons = {}
+    local function updateModeButtonHighlight()
+        for mode, btn in pairs(popup.modeButtons) do
+            if mode == popup.detailMode then
+                btn.text:SetTextColor(0.4, 0.8, 1)
+            else
+                btn.text:SetTextColor(0.6, 0.6, 0.6)
+            end
+        end
+    end
+    popup.UpdateModeButtonHighlight = updateModeButtonHighlight
+    local function makeModeButton(mode, xOffset)
+        local btn = CreateFrame("Button", nil, detail)
+        btn:SetSize(58, 18)
+        btn:SetPoint("TOPRIGHT", detail, "TOPRIGHT", xOffset, -124)
+        local fs = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        fs:SetPoint("CENTER", 0, 0)
+        fs:SetText(MODE_LABEL[mode])
+        btn.text = fs
+        btn:SetScript("OnClick", function()
+            popup.detailMode = mode
+            if AIP.db then AIP.db.lfmDetailMode = mode end
+            if popup.ApplyDetailMode then popup.ApplyDetailMode(mode) end
+            updateModeButtonHighlight()
+            if RefreshPreview then RefreshPreview() end
+        end)
+        btn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine("Composition detail: " .. MODE_LABEL[mode])
+            GameTooltip:AddLine(MODE_TOOLTIP[mode], 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        popup.modeButtons[mode] = btn
+        return btn
+    end
+    makeModeButton("detailed", -20)
+    makeModeButton("compact", -84)
+    makeModeButton("minimal", -148)
+    popup.detailMode = (AIP.db and AIP.db.lfmDetailMode) or "detailed"
+    if popup.detailMode == "vague" then popup.detailMode = "compact" end -- legacy SavedVariables value
 
     popup.classChecks = {}
-    local specSpacing = 55
+    popup.classGridWidgets = {}   -- everything dimmed/disabled in vague mode
+    local specSpacing = 76  -- check(20) + icon(20) + count box(18) + gap
 
     -- Role label doubling as an all/none toggle for its group
     local function makeRoleToggle(text, r, g, b, yOff, roleKey)
@@ -7238,6 +5624,7 @@ function GUI.CreateAddGroupPopup()
             GameTooltip:Show()
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        table.insert(popup.classGridWidgets, btn)
         btn:SetScript("OnClick", function()
             local group = popup.classChecks[roleKey]
             if not group then return end
@@ -7248,6 +5635,15 @@ function GUI.CreateAddGroupPopup()
             end
             for _, check in pairs(group) do
                 check:SetChecked(anyUnchecked)
+                if check.countInput then
+                    if anyUnchecked then
+                        if (tonumber(check.countInput:GetText()) or 0) <= 0 then
+                            check.countInput:SetText("1")
+                        end
+                    else
+                        check.countInput:SetText("0")
+                    end
+                end
             end
             if RefreshPreview then RefreshPreview() end
         end)
@@ -7264,14 +5660,53 @@ function GUI.CreateAddGroupPopup()
         icon:SetPoint("LEFT", check, "RIGHT", -2, 0)
         icon:SetTexture(spec.icon)
         check.specData = spec
+
+        -- Per-spec need-count box: how many players of this class/spec are
+        -- wanted. Feeds the [Need:] block, MyGroup.classNeeds and the
+        -- FitEngine verdicts. 0 = spec accepted but not counted.
+        local countInput, countContainer = GUI.CreateStyledEditBox(detail, 16, 12, true)
+        countContainer:SetPoint("LEFT", icon, "RIGHT", 2, 0)
+        countInput:SetText("0")
+        countInput:SetMaxLetters(2)
+        check.countInput = countInput
+        countInput:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(spec.class .. " - " .. spec.spec)
+            GameTooltip:AddLine("How many of this class/spec you still need.", 1, 1, 1)
+            GameTooltip:AddLine("Shown as [Need: ...] in the broadcast; 0 = accepted, not advertised.", 0.7, 0.7, 0.7)
+            GameTooltip:Show()
+        end)
+        countInput:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        countInput:HookScript("OnTextChanged", function(self, isUser)
+            if isUser then
+                local n = tonumber(self:GetText()) or 0
+                if n > 0 and not check:GetChecked() then check:SetChecked(true) end
+                if RefreshPreview then RefreshPreview() end
+            end
+        end)
+
         check:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:AddLine(spec.class .. " - " .. spec.spec)
             GameTooltip:Show()
         end)
         check:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        check:SetScript("OnClick", function() if RefreshPreview then RefreshPreview() end end)
+        check:SetScript("OnClick", function(self)
+            if self.countInput then
+                if self:GetChecked() then
+                    if (tonumber(self.countInput:GetText()) or 0) <= 0 then
+                        self.countInput:SetText("1")
+                    end
+                else
+                    self.countInput:SetText("0")
+                end
+            end
+            if RefreshPreview then RefreshPreview() end
+        end)
         popup.classChecks[roleKey][spec.class .. spec.spec] = check
+        table.insert(popup.classGridWidgets, check)
+        table.insert(popup.classGridWidgets, countContainer)
+        table.insert(popup.classGridWidgets, countInput)  -- EnableMouse(false) blocks typing
         return check
     end
 
@@ -7305,9 +5740,48 @@ function GUI.CreateAddGroupPopup()
         dpsCount = dpsCount + 1
     end
 
+    -- Fully show/hide (not just dim) the Composition row and Class grid per
+    -- mode - Minimal hides both, Compact shows only Composition, Detailed
+    -- shows only the Class grid (its counts drive the composition totals,
+    -- see SyncCompositionFromClassGrid in the next task).
+    local function ApplyDetailMode(mode)
+        local showComposition = (mode == "compact")
+        local showClassGrid = (mode == "detailed")
+        for _, w in ipairs(popup.compositionRowWidgets) do
+            if showComposition then w:Show() else w:Hide() end
+        end
+        for _, w in ipairs(popup.classGridWidgets) do
+            if showClassGrid then w:Show() else w:Hide() end
+            w:SetAlpha(1)
+            if w.Disable and w.Enable then w:Enable() end
+            if w.EnableMouse then w:EnableMouse(true) end
+        end
+        if mode == "minimal" then
+            classHint:SetText("|cFFFF8800minimal mode - only the note is broadcast beyond the template's role counts|r")
+        elseif mode == "compact" then
+            classHint:SetText("|cFFFF8800compact mode - role counts only, class list not broadcast|r")
+        else
+            classHint:SetText("|cFF888888(box = how many needed; role name toggles all)|r")
+        end
+    end
+    popup.ApplyDetailMode = ApplyDetailMode
+
+    -- === Need summary (from the per-spec count boxes) ===
+    -- Single CLIPPED line - the count boxes above are the full picture and
+    -- /aip needs prints the detailed list, so this can never wrap over the
+    -- Note row again (the old 2-line version did).
+    local needsText = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    needsText:SetPoint("TOPLEFT", 20, -276)
+    needsText:SetPoint("RIGHT", detail, "RIGHT", -20, 0)
+    needsText:SetHeight(13)
+    needsText:SetJustifyH("LEFT")
+    if needsText.SetWordWrap then needsText:SetWordWrap(false) end
+    needsText:SetText("")
+    popup.needsText = needsText
+
     -- === Note Row ===
     local noteLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    noteLabel:SetPoint("TOPLEFT", 20, -282)
+    noteLabel:SetPoint("TOPLEFT", 20, -302)
     noteLabel:SetText("Note:")
     local noteInput, noteContainer = GUI.CreateStyledEditBox(detail, 300, 18, false)
     noteContainer:SetPoint("LEFT", noteLabel, "RIGHT", 5, 0)
@@ -7315,7 +5789,7 @@ function GUI.CreateAddGroupPopup()
 
     -- === Auto-Invite Keyword Row ===
     local keywordLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    keywordLabel:SetPoint("TOPLEFT", 20, -310)
+    keywordLabel:SetPoint("TOPLEFT", 20, -330)
     keywordLabel:SetText("Invite Keyword:")
     keywordLabel:SetTextColor(0.4, 0.8, 1)
     local keywordInput, keywordContainer = GUI.CreateStyledEditBox(detail, 110, 18, false)
@@ -7331,7 +5805,7 @@ function GUI.CreateAddGroupPopup()
     -- === Broadcast checkbox ===
     local broadcastCheck = CreateFrame("CheckButton", nil, detail, "UICheckButtonTemplate")
     broadcastCheck:SetSize(22, 22)
-    broadcastCheck:SetPoint("TOPLEFT", 20, -336)
+    broadcastCheck:SetPoint("TOPLEFT", 20, -356)
     broadcastCheck:SetChecked(true)
     popup.broadcastCheck = broadcastCheck
     local broadcastLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -7340,7 +5814,7 @@ function GUI.CreateAddGroupPopup()
 
     -- === Reserved Items (read-only display from DB) ===
     local reservedLabel = detail:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    reservedLabel:SetPoint("TOPLEFT", 20, -362)
+    reservedLabel:SetPoint("TOPLEFT", 20, -382)
     reservedLabel:SetText("Reserved Items:")
     reservedLabel:SetTextColor(1, 0.5, 0)
 
@@ -7349,8 +5823,8 @@ function GUI.CreateAddGroupPopup()
     reservedEditHint:SetText("|cFF888888(edit in Raid Mgmt tab)|r")
 
     local reservedFrame = CreateFrame("Frame", nil, detail)
-    reservedFrame:SetSize(390, 34)
-    reservedFrame:SetPoint("TOPLEFT", 20, -380)
+    reservedFrame:SetSize(460, 34)
+    reservedFrame:SetPoint("TOPLEFT", 20, -400)
     GUI.ApplyBackdrop(reservedFrame, "Inset", 0.9)
 
     local reservedDisplay = reservedFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -7382,7 +5856,7 @@ function GUI.CreateAddGroupPopup()
     previewHint:SetText("|cFF888888(exactly what gets broadcast)|r")
 
     local previewFrame = CreateFrame("Frame", nil, popup)
-    previewFrame:SetSize(390, 46)
+    previewFrame:SetSize(460, 46)
     previewFrame:SetPoint("BOTTOMLEFT", 20, 68)
     GUI.ApplyBackdrop(previewFrame, "Inset", 0.9)
 
@@ -7404,12 +5878,16 @@ function GUI.CreateAddGroupPopup()
     -- LOGIC: role spec collection, preview, presets, defaults, expansion
     -- ========================================================================
 
-    -- Collect checked specs -> roleSpecs (codes), lookingForSpecs, selectedClasses
+    -- Collect checked specs -> roleSpecs (codes), lookingForSpecs,
+    -- selectedClasses (now incl. per-spec count), and classNeeds (the
+    -- per-class need counts aggregated from the count boxes; role folded to
+    -- TANK/HEALER/DPS to match Comp/FitEngine vocabulary)
     local function CollectRoleSpecs()
         local LF = AIP.LFMFormat
         local roleSpecs = {TANK = {}, HEALER = {}, MDPS = {}, RDPS = {}}
         local lookingForSpecs = {}
         local selectedClasses = {TANK = {}, HEALER = {}, MDPS = {}, RDPS = {}}
+        local needByKey, classNeeds = {}, {}
 
         for role, roleChecks in pairs(popup.classChecks) do
             for _, check in pairs(roleChecks) do
@@ -7430,19 +5908,47 @@ function GUI.CreateAddGroupPopup()
                         table.insert(lookingForSpecs, code)
                     end
 
+                    local count = check.countInput and (tonumber(check.countInput:GetText()) or 0) or 0
                     table.insert(selectedClasses[targetRole], {
                         class = check.specData.class,
                         spec = check.specData.spec,
+                        count = count,
                     })
+
+                    if count > 0 then
+                        local needRole = (targetRole == "MDPS" or targetRole == "RDPS") and "DPS" or targetRole
+                        local key = check.specData.class .. ":" .. needRole
+                        local row = needByKey[key]
+                        if not row then
+                            row = {class = check.specData.class, role = needRole, count = 0}
+                            needByKey[key] = row
+                            table.insert(classNeeds, row)
+                        end
+                        row.count = row.count + count
+                    end
                 end
             end
         end
-        return roleSpecs, lookingForSpecs, selectedClasses
+
+        local ROLE_ORDER = {TANK = 1, HEALER = 2, DPS = 3}
+        table.sort(classNeeds, function(a, b)
+            local ra, rb = ROLE_ORDER[a.role] or 9, ROLE_ORDER[b.role] or 9
+            if ra ~= rb then return ra < rb end
+            return a.class < b.class
+        end)
+
+        return roleSpecs, lookingForSpecs, selectedClasses, classNeeds
     end
 
-    -- Build the LFM config table off the current popup state
+    -- Build the LFM config table off the current popup state.
+    -- Vague mode strips every class-level detail: the message and the listing
+    -- carry only the [x/y] + [T:x/y ...] role counts (FitEngine then skips
+    -- spec/class scoring - all its class checks are nil-guarded).
     local function BuildConfig()
-        local roleSpecs, lookingForSpecs, selectedClasses = CollectRoleSpecs()
+        local roleSpecs, lookingForSpecs, selectedClasses, classNeeds = CollectRoleSpecs()
+        if popup.detailMode == "vague" then
+            roleSpecs, lookingForSpecs, selectedClasses, classNeeds = nil, {}, nil, nil
+        end
         local achieveLink = ""
         if popup.selectedAchievement then
             achieveLink = GetAchievementLink(popup.selectedAchievement) or ""
@@ -7461,6 +5967,7 @@ function GUI.CreateAddGroupPopup()
             gsMin = tonumber(popup.gsInput:GetText()) or 0,
             ilvlMin = tonumber(popup.ilvlInput:GetText()) or 0,
             roleSpecs = roleSpecs,
+            classNeeds = classNeeds,  -- straight from the per-spec count boxes
             keyword = inviteKeyword,
             achievementLink = achieveLink,
             note = popup.noteInput:GetText() or "",
@@ -7468,11 +5975,50 @@ function GUI.CreateAddGroupPopup()
         }, roleSpecs, lookingForSpecs, selectedClasses
     end
 
+    -- One-line "Need (x/y): 2xMag 1xPP +3" summary rendered from the ACTUAL
+    -- count boxes (cfg.classNeeds); mirrored into the collapsed hint. Driven
+    -- from RefreshPreview so every count/checkbox edit refreshes it.
+    local function RenderNeedsSummary(classNeeds)
+        if popup.detailMode == "vague" then
+            local vagueTxt = "|cFF888888Vague listing: role counts only - any class can apply.|r"
+            needsText:SetText(vagueTxt)
+            if popup.collapsedNeedsText then popup.collapsedNeedsText:SetText(vagueTxt) end
+            return
+        end
+        local meta = popup.classNeedsMeta
+        local head = "|cFFFFCC00Need|r"
+        if meta and meta.total then
+            head = head .. " |cFF888888(" .. (meta.occupied or 0) .. "/" .. (meta.total or 0) .. ")|r"
+        end
+        local LFm = AIP.LFMFormat
+        local maxParts = (LFm and LFm.MAX_NEED_PARTS) or 5  -- match the broadcast cap
+        local parts, extra = {}, 0
+        for _, row in ipairs(classNeeds or {}) do
+            if (row.count or 0) > 0 then
+                if #parts < maxParts then
+                    parts[#parts + 1] = row.count .. "x" .. (LFm and LFm.NeedCode(row.class, row.role) or row.class)
+                else
+                    extra = extra + row.count
+                end
+            end
+        end
+        local txt
+        if #parts == 0 then
+            txt = head .. ": |cFF888888no counts set - use the boxes above (0 = any)|r"
+        else
+            txt = head .. ": " .. table.concat(parts, " ")
+            if extra > 0 then txt = txt .. " |cFF888888+" .. extra .. "|r" end
+        end
+        needsText:SetText(txt)
+        if popup.collapsedNeedsText then popup.collapsedNeedsText:SetText(txt) end
+    end
+
     RefreshPreview = function()
         if not AIP.LFMFormat then return end
         local cfg = BuildConfig()
         local msg, trimmed = AIP.LFMFormat.BuildLFM(cfg)
         previewText:SetText(msg)
+        RenderNeedsSummary(cfg.classNeeds)
 
         -- Schedule line: the real rotor math, so the pacing is visible
         local targets = GUI.BuildBroadcastTargets and GUI.BuildBroadcastTargets("lfm") or {}
@@ -7491,9 +6037,80 @@ function GUI.CreateAddGroupPopup()
     end
     popup.RefreshPreview = RefreshPreview
 
+    -- Auto-select the Looking-For checkboxes AND prefill the count boxes from
+    -- the template recommendations (the tandem "autoselect"). The class's
+    -- recommended count goes on its FIRST spec box in the role; other specs of
+    -- the same class stay checked with 0 (spec-flexible, counted once).
+    local function ApplyRecommendedSpecs(needs)
+        if not (needs and needs.ok and needs.list and #needs.list > 0) then return end
+        local wanted = {}   -- wanted[role][class] = count left to assign
+        for _, row in ipairs(needs.list) do
+            wanted[row.role] = wanted[row.role] or {}
+            wanted[row.role][row.class] = (wanted[row.role][row.class] or 0) + (row.count or 0)
+        end
+        for roleKey, group in pairs(popup.classChecks) do
+            local roleWanted = wanted[roleKey]
+            for _, check in pairs(group) do
+                local cls = check.specData and check.specData.class
+                local n = roleWanted and cls and roleWanted[cls] or nil
+                check:SetChecked(n and true or false)  -- n == 0 still checked (spec-flexible)
+                if check.countInput then
+                    if n and n > 0 then
+                        check.countInput:SetText(tostring(n))
+                        roleWanted[cls] = 0
+                    else
+                        check.countInput:SetText("0")
+                    end
+                end
+            end
+        end
+    end
+
+    -- Recompute the recommendation rows vs the LIVE group for the currently
+    -- selected raid (prefill source + occupied/total meta). Auto-selection
+    -- only fires the first time a given template is picked (lastAutoSelectKey)
+    -- - a heroic or size toggle back must not wipe manual counts.
+    local function UpdateClassNeeds(autoSelect)
+        local Comp = AIP.Composition
+        popup.classNeeds = nil
+        popup.classNeedsMeta = nil
+        local templateKey = Comp and Comp.TemplateKeyForRaid
+            and Comp.TemplateKeyForRaid(GetRaidKey()) or nil
+        if templateKey and Comp.GetClassNeeds then
+            -- BINDING: the popup's raid selection IS the Composition tab's
+            -- active template (and vice versa via GUI.SyncPopupToTemplate).
+            -- Only while the popup is actually SHOWN - merely creating or
+            -- re-opening it must not hijack the tab (GetClassNeeds computes
+            -- non-destructively via save/restore in that case).
+            if Comp.SetTemplate and Comp.CurrentRaid
+                and Comp.CurrentRaid.template ~= templateKey
+                and popup:IsShown() then
+                Comp.SetTemplate(templateKey, true)
+                if GUI.UpdateCompositionTab then GUI.UpdateCompositionTab() end
+            end
+            local needs = Comp.GetClassNeeds(templateKey)
+            if needs.ok then
+                popup.classNeeds = needs.list
+                popup.classNeedsMeta = {occupied = needs.occupied, total = needs.total,
+                    templateKey = needs.templateKey}
+                if autoSelect and popup.lastAutoSelectKey ~= needs.templateKey then
+                    popup.lastAutoSelectKey = needs.templateKey
+                    ApplyRecommendedSpecs(needs)
+                end
+            end
+        end
+    end
+    popup.UpdateClassNeeds = UpdateClassNeeds
+
     ApplyTemplateDefaults = function()
         local raidKey = GetRaidKey()
-        local defaults = GUI.RaidTemplateDefaults[raidKey]
+        -- GetRaidKey() returns the free-typed custom name (or literal "Custom")
+        -- for raidType == "CUSTOM" - never the canonical "CUSTOM" key
+        -- GUI.RaidTemplateDefaults.CUSTOM actually uses, so look that up
+        -- explicitly or switching to Custom would silently keep whatever
+        -- numeric fields the previously-selected raid template left behind.
+        local defaultsKey = (popup.raidType == "CUSTOM") and "CUSTOM" or raidKey
+        local defaults = GUI.RaidTemplateDefaults[defaultsKey]
         if defaults then
             popup.tankInput:SetText(tostring(defaults.tanks))
             popup.healInput:SetText(tostring(defaults.healers))
@@ -7509,6 +6126,7 @@ function GUI.CreateAddGroupPopup()
         UpdateCustomFieldVisibility()
         UpdateLockoutWarning()
         UpdateWeeklyStrip()
+        UpdateClassNeeds(true)
         RefreshPreview()
     end
     popup.ApplyTemplateDefaults = ApplyTemplateDefaults
@@ -7519,12 +6137,14 @@ function GUI.CreateAddGroupPopup()
         if expanded then
             quickLabel:Hide()
             for _, tile in pairs(popup.presetTiles) do tile:Hide() end
+            if popup.collapsedNeedsText then popup.collapsedNeedsText:Hide() end
             detail:Show()
             popup:SetHeight(EXPANDED_HEIGHT)
             customizeText:SetText("|cFF66AAFF[-] Hide details|r")
         else
             quickLabel:Show()
             popup.RefreshTiles()
+            if popup.collapsedNeedsText then popup.collapsedNeedsText:Show() end
             detail:Hide()
             popup:SetHeight(COLLAPSED_HEIGHT)
             customizeText:SetText("|cFF66AAFF[+] Customize...|r")
@@ -7616,7 +6236,7 @@ function GUI.CreateAddGroupPopup()
     -- ========================================================================
     local createBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
     createBtn:SetSize(100, 24)
-    createBtn:SetPoint("BOTTOMLEFT", 100, 16)
+    createBtn:SetPoint("BOTTOM", popup, "BOTTOM", -60, 16)  -- pair centered in the 500-wide popup
     createBtn:SetText("Post Group")
     createBtn:SetScript("OnClick", function()
         local raidKey = GetRaidKey()
@@ -7659,6 +6279,9 @@ function GUI.CreateAddGroupPopup()
                 selectedClasses = selectedClasses,
                 lookingForSpecs = lookingForSpecs,
                 roleSpecs = roleSpecs,
+                classNeeds = cfg.classNeeds,
+                detailMode = popup.detailMode,
+                templateKey = popup.classNeedsMeta and popup.classNeedsMeta.templateKey,
                 note = noteText,
                 reservedItems = reservedItems,
                 lootBans = lootBans,
@@ -7680,8 +6303,34 @@ function GUI.CreateAddGroupPopup()
             inviteKeyword = inviteKeyword,
             selectedClasses = selectedClasses,
             roleSpecs = roleSpecs,
+            classNeeds = cfg.classNeeds,
+            detailMode = popup.detailMode,
+            templateKey = popup.classNeedsMeta and popup.classNeedsMeta.templateKey,
+            note = noteText,
             time = time(),
         }
+
+        -- Ensure the tandem binding at Post time: normally the live binding in
+        -- UpdateClassNeeds already did this while the popup was shown; this
+        -- covers the quick-post path where no selection was touched.
+        if AIP.Composition and AIP.Composition.SetTemplate
+            and popup.classNeedsMeta and popup.classNeedsMeta.templateKey
+            and AIP.Composition.CurrentRaid
+            and AIP.Composition.CurrentRaid.template ~= popup.classNeedsMeta.templateKey then
+            AIP.Composition.SetTemplate(popup.classNeedsMeta.templateKey, true)
+        end
+
+        -- Baseline for live [Need:] decrementing: the posted counts plus a
+        -- snapshot of the group's class counts at post time. Broadcast
+        -- regeneration subtracts newly-joined classes from these counts, so
+        -- the leader's manual numbers are honored (not recomputed away).
+        GUI.MyGroup.classNeedsBase = cfg.classNeeds
+        if AIP.Composition and AIP.Composition.ScanRaid then
+            local raid = AIP.Composition.ScanRaid()
+            local snap = {}
+            for class, n in pairs((raid and raid.classCounts) or {}) do snap[class] = n end
+            GUI.MyGroup.classCountsAtPost = snap
+        end
 
         -- Remember this config for the Quick Post "Last" tile
         if AIP.db then
@@ -7723,13 +6372,20 @@ function GUI.CreateAddGroupPopup()
     cancelBtn:SetText("Cancel")
     cancelBtn:SetScript("OnClick", function() popup:Hide() end)
 
+    -- Hide BEFORE the initial ApplyTemplateDefaults() call: CreateFrame frames
+    -- default to shown, so UpdateClassNeeds' popup:IsShown() check (meant to
+    -- gate the tab-sync to real user interaction) would otherwise see the
+    -- brand-new popup as "shown" during construction and silently hijack the
+    -- Composition tab to the popup's default raid on the very first open.
+    popup:Hide()
+
     -- Apply initial defaults, start collapsed (preset-first)
     UpdateSizeDropdown()
     UpdateRaidDropdownText()
     ApplyTemplateDefaults()
+    if popup.ApplyDetailMode then popup.ApplyDetailMode(popup.detailMode) end
+    if popup.UpdateModeButtonHighlight then popup.UpdateModeButtonHighlight() end
     SetExpanded(false)
-
-    popup:Hide()
     tinsert(UISpecialFrames, "AIPAddGroupPopup")
     GUI.AddGroupPopup = popup
 end
@@ -8069,11 +6725,7 @@ function GUI.CreateEnrollPopup()
     popup:SetSize(400, 480)  -- Optimized size for content
     popup:SetPoint("CENTER", 220, 0)  -- Offset right so it doesn't overlap with Add Group popup
     popup:SetFrameStrata("DIALOG")
-    popup:SetMovable(true)
-    popup:EnableMouse(true)
-    popup:RegisterForDrag("LeftButton")
-    popup:SetScript("OnDragStart", popup.StartMoving)
-    popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
+    AIP.UI.MakeDraggable(popup)
     popup:SetClampedToScreen(true)
     GUI.StylePopup(popup)
 
@@ -8733,286 +7385,6 @@ function GUI.CreateEnrollPopup()
     GUI.EnrollPopup = popup
 end
 
--- ============================================================================
--- ADD TO QUEUE POPUP
--- ============================================================================
-function GUI.ShowAddToQueuePopup()
-    if not GUI.AddToQueuePopup then
-        GUI.CreateAddToQueuePopup()
-    end
-    -- Clear fields
-    if GUI.AddToQueuePopup.nameInput then
-        GUI.AddToQueuePopup.nameInput:SetText("")
-    end
-    if GUI.AddToQueuePopup.noteInput then
-        GUI.AddToQueuePopup.noteInput:SetText("")
-    end
-    GUI.AddToQueuePopup:Show()
-    GUI.AddToQueuePopup.nameInput:SetFocus()
-end
-
-function GUI.CreateAddToQueuePopup()
-    local popup = CreateFrame("Frame", "AIPAddToQueuePopup", UIParent)
-    popup:SetSize(280, 140)
-    popup:SetPoint("CENTER")
-    popup:SetFrameStrata("DIALOG")
-    popup:SetMovable(true)
-    popup:EnableMouse(true)
-    popup:RegisterForDrag("LeftButton")
-    popup:SetScript("OnDragStart", popup.StartMoving)
-    popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
-    popup:SetClampedToScreen(true)
-    GUI.StylePopup(popup)
-
-    local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", 0, -15)
-    title:SetText("Add to Queue")
-    title:SetTextColor(1, 0.82, 0)
-
-    local closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -5, -5)
-
-    -- Player name
-    local nameLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    nameLabel:SetPoint("TOPLEFT", 20, -45)
-    nameLabel:SetText("Player Name:")
-
-    local nameInput, nameContainer = GUI.CreateStyledEditBox(popup, 150, 18, false)
-    nameContainer:SetPoint("LEFT", nameLabel, "RIGHT", 10, 0)
-    popup.nameInput = nameInput
-
-    -- Note/message
-    local noteLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    noteLabel:SetPoint("TOPLEFT", 20, -75)
-    noteLabel:SetText("Note (optional):")
-
-    local noteInput, noteContainer = GUI.CreateStyledEditBox(popup, 140, 18, false)
-    noteContainer:SetPoint("LEFT", noteLabel, "RIGHT", 10, 0)
-    popup.noteInput = noteInput
-
-    -- Buttons
-    local addBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-    addBtn:SetSize(80, 24)
-    addBtn:SetPoint("BOTTOMLEFT", 50, 15)
-    addBtn:SetText("Add")
-    addBtn:SetScript("OnClick", function()
-        local name = popup.nameInput:GetText():trim()
-        if name == "" then
-            AIP.Print("Please enter a player name")
-            return
-        end
-
-        local note = popup.noteInput:GetText():trim()
-        if note == "" then note = "Manual add" end
-
-        -- Ensure queue db exists
-        if not AIP.db then AIP.db = {} end
-        if not AIP.db.queue then AIP.db.queue = {} end
-
-        -- Check if already in queue
-        local alreadyInQueue = false
-        for _, entry in ipairs(AIP.db.queue) do
-            if entry.name and entry.name:lower() == name:lower() then
-                alreadyInQueue = true
-                break
-            end
-        end
-
-        if alreadyInQueue then
-            AIP.Print(name .. " is already in queue")
-            return
-        end
-
-        -- Capitalize name
-        local properName = name:sub(1,1):upper() .. name:sub(2):lower()
-
-        -- Add to queue directly
-        local entry = {
-            name = properName,
-            message = note,
-            time = time(),
-            isBlacklisted = AIP.IsBlacklisted and AIP.IsBlacklisted(name) or false,
-        }
-        table.insert(AIP.db.queue, entry)
-        AIP.Print(properName .. " added to queue manually")
-
-        -- Update UI
-        local container = GUI.Frame and GUI.Frame.tabContents and GUI.Frame.tabContents["lfm"]
-        if container then
-            GUI.UpdateQueuePanel(container)
-        end
-
-        popup:Hide()
-    end)
-
-    local cancelBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-    cancelBtn:SetSize(80, 24)
-    cancelBtn:SetPoint("LEFT", addBtn, "RIGHT", 20, 0)
-    cancelBtn:SetText("Cancel")
-    cancelBtn:SetScript("OnClick", function() popup:Hide() end)
-
-    -- Enter key submits
-    popup.nameInput:SetScript("OnEnterPressed", function() addBtn:Click() end)
-    popup.noteInput:SetScript("OnEnterPressed", function() addBtn:Click() end)
-
-    popup:Hide()
-    tinsert(UISpecialFrames, "AIPAddToQueuePopup")
-    GUI.AddToQueuePopup = popup
-end
-
--- ============================================================================
--- ADD TO WAITLIST POPUP
--- ============================================================================
-function GUI.ShowAddToWaitlistPopup()
-    if not GUI.AddToWaitlistPopup then
-        GUI.CreateAddToWaitlistPopup()
-    end
-    -- Clear fields
-    if GUI.AddToWaitlistPopup.nameInput then
-        GUI.AddToWaitlistPopup.nameInput:SetText("")
-    end
-    if GUI.AddToWaitlistPopup.noteInput then
-        GUI.AddToWaitlistPopup.noteInput:SetText("")
-    end
-    GUI.AddToWaitlistPopup:Show()
-    GUI.AddToWaitlistPopup.nameInput:SetFocus()
-end
-
-function GUI.CreateAddToWaitlistPopup()
-    local popup = CreateFrame("Frame", "AIPAddToWaitlistPopup", UIParent)
-    popup:SetSize(300, 170)
-    popup:SetPoint("CENTER")
-    popup:SetFrameStrata("DIALOG")
-    popup:SetMovable(true)
-    popup:EnableMouse(true)
-    popup:RegisterForDrag("LeftButton")
-    popup:SetScript("OnDragStart", popup.StartMoving)
-    popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
-    popup:SetClampedToScreen(true)
-    GUI.StylePopup(popup)
-
-    local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", 0, -15)
-    title:SetText("Add to Waitlist")
-    title:SetTextColor(1, 0.82, 0)
-
-    local closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -5, -5)
-
-    -- Player name
-    local nameLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    nameLabel:SetPoint("TOPLEFT", 20, -45)
-    nameLabel:SetText("Player Name:")
-
-    local nameInput, nameContainer = GUI.CreateStyledEditBox(popup, 150, 18, false)
-    nameContainer:SetPoint("LEFT", nameLabel, "RIGHT", 10, 0)
-    popup.nameInput = nameInput
-
-    -- Role dropdown
-    local roleLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    roleLabel:SetPoint("TOPLEFT", 20, -75)
-    roleLabel:SetText("Role:")
-
-    local roleDropdown = CreateFrame("Frame", "AIPWaitlistRoleDropdown", popup, "UIDropDownMenuTemplate")
-    roleDropdown:SetPoint("LEFT", roleLabel, "RIGHT", -10, -2)
-    UIDropDownMenu_SetWidth(roleDropdown, 100)
-    UIDropDownMenu_SetText(roleDropdown, "DPS")
-    popup.selectedRole = "DPS"
-
-    UIDropDownMenu_Initialize(roleDropdown, function()
-        for _, role in ipairs({"TANK", "HEALER", "DPS"}) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = role
-            info.value = role
-            info.func = function()
-                popup.selectedRole = role
-                UIDropDownMenu_SetText(roleDropdown, role)
-            end
-            UIDropDownMenu_AddButton(info)
-        end
-    end)
-    GUI.FixDropdownStrata(roleDropdown)
-
-    -- Note
-    local noteLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    noteLabel:SetPoint("TOPLEFT", 20, -105)
-    noteLabel:SetText("Note:")
-
-    local noteInput, noteContainer = GUI.CreateStyledEditBox(popup, 180, 18, false)
-    noteContainer:SetPoint("LEFT", noteLabel, "RIGHT", 10, 0)
-    popup.noteInput = noteInput
-
-    -- Buttons
-    local addBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-    addBtn:SetSize(80, 24)
-    addBtn:SetPoint("BOTTOMLEFT", 60, 15)
-    addBtn:SetText("Add")
-    addBtn:SetScript("OnClick", function()
-        local name = popup.nameInput:GetText():trim()
-        if name == "" then
-            AIP.Print("Please enter a player name")
-            return
-        end
-
-        local role = popup.selectedRole or "DPS"
-        local note = popup.noteInput:GetText():trim()
-
-        -- Ensure waitlist db exists
-        if not AIP.db then AIP.db = {} end
-        if not AIP.db.waitlist then AIP.db.waitlist = {} end
-
-        -- Check if already on waitlist
-        local alreadyOnWaitlist = false
-        for _, entry in ipairs(AIP.db.waitlist) do
-            if entry.name and entry.name:lower() == name:lower() then
-                alreadyOnWaitlist = true
-                break
-            end
-        end
-
-        if alreadyOnWaitlist then
-            AIP.Print(name .. " is already on the waitlist")
-            return
-        end
-
-        -- Capitalize name
-        local properName = name:sub(1,1):upper() .. name:sub(2):lower()
-
-        -- Add to waitlist directly
-        local entry = {
-            name = properName,
-            role = role,
-            note = note,
-            addedTime = time(),
-            priority = #AIP.db.waitlist + 1,
-        }
-        table.insert(AIP.db.waitlist, entry)
-        AIP.Print(properName .. " added to waitlist as " .. role)
-
-        -- Update the waitlist panel
-        local container = GUI.Frame and GUI.Frame.tabContents and GUI.Frame.tabContents["lfm"]
-        if container then
-            GUI.UpdateQueuePanel(container)
-        end
-
-        popup:Hide()
-    end)
-
-    local cancelBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-    cancelBtn:SetSize(80, 24)
-    cancelBtn:SetPoint("LEFT", addBtn, "RIGHT", 20, 0)
-    cancelBtn:SetText("Cancel")
-    cancelBtn:SetScript("OnClick", function() popup:Hide() end)
-
-    -- Enter key submits
-    popup.nameInput:SetScript("OnEnterPressed", function() addBtn:Click() end)
-    popup.noteInput:SetScript("OnEnterPressed", function() addBtn:Click() end)
-
-    popup:Hide()
-    tinsert(UISpecialFrames, "AIPAddToWaitlistPopup")
-    GUI.AddToWaitlistPopup = popup
-end
-
 -- Hook into tree selection to update details panel
 local origSelectNode = AIP.TreeBrowser and AIP.TreeBrowser.SelectNode
 if AIP.TreeBrowser then
@@ -9042,15 +7414,14 @@ if AIP.TreeBrowser then
             end
         end
 
-        -- Determine which tab container to update
+        -- Determine which tab container to update. LFM and LFG both render
+        -- into the single "lfm" browser container (see GUI.RefreshBrowserTab) -
+        -- there is no separate "lfg" tab, so an lfg_-prefixed node must route
+        -- here too, not to the unrelated Favorites tab (which silently ate
+        -- every LFG player-row click: the details panel never updated).
         local container = nil
         if GUI.Frame and GUI.Frame.tabContents then
-            -- Check current tab or node type to pick correct container
-            if nodeId and nodeId:find("^lfg_") then
-                container = GUI.Frame.tabContents["favorites"]  -- LFG uses favorites tab
-            else
-                container = GUI.Frame.tabContents["lfm"]
-            end
+            container = GUI.Frame.tabContents["lfm"]
         end
 
         if container then
@@ -9140,9 +7511,7 @@ function GUI.ShowRecommendations()
         popup:SetSize(430, 330)
         popup:SetPoint("CENTER")
         popup:SetFrameStrata("DIALOG")
-        popup:SetMovable(true); popup:EnableMouse(true); popup:RegisterForDrag("LeftButton")
-        popup:SetScript("OnDragStart", popup.StartMoving)
-        popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
+        AIP.UI.MakeDraggable(popup)
         GUI.StylePopup(popup)
 
         local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")

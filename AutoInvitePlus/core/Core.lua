@@ -137,6 +137,14 @@ local defaults = {
     autoInviteGreen = false,   -- leaders: auto-invite GREEN-verdict applicants
     autoApplyGreen = false,    -- seekers: auto-apply to GREEN AIP-peer listings
 
+    -- LFM <-> composition tandem (class needs + waitlist applications)
+    applyToWaitlist = true,       -- APPLY applicants land on the waitlist (false = legacy queue)
+    applyFeedbackWhisper = true,  -- whisper the FitEngine verdict back to applicants
+    lfmDetailMode = "detailed",   -- "detailed" = classes+counts; "compact" = role counts only; "minimal" = note only (role counts still from template)
+
+    -- Custom composition templates (Comp.RegisterCustomTemplate)
+    customCompTemplates = {},     -- [key] = {name, size, tanks, healers, dps, minGS}
+
     -- Response messages
     responseInvite = "[AutoInvite+] You have been invited!",
     responseReject = "[AutoInvite+] Sorry, the raid is full.",
@@ -318,8 +326,12 @@ local function CheckTriggers(message)
     local msg = message:lower():gsub("%s+", " "):trim()
     local triggers = GetParsedTriggers()
 
+    -- Word-boundary match (like Parsers.DetectRole/DetectClass) so a short/common
+    -- trigger word can't false-positive on a substring of an unrelated word
+    -- ("raid" inside "upgraded", "inv" inside "invalid").
     for i = 1, #triggers do
-        if msg:find(triggers[i], 1, true) then
+        local pattern = "%f[%w]" .. AIP.Utils.EscapePattern(triggers[i]) .. "%f[%W]"
+        if msg:find(pattern) then
             return true
         end
     end
@@ -330,8 +342,11 @@ local function CheckTriggers(message)
         -- Trim BEFORE the empty check: find("", ...) matches everything, so a
         -- whitespace-only keyword would auto-invite on every single message.
         local kw = myGroup.inviteKeyword:lower():trim()
-        if kw ~= "" and msg:find(kw, 1, true) then
-            return true
+        if kw ~= "" then
+            local pattern = "%f[%w]" .. AIP.Utils.EscapePattern(kw) .. "%f[%W]"
+            if msg:find(pattern) then
+                return true
+            end
         end
     end
     return false
@@ -486,7 +501,8 @@ local function InvitePlayer(name)
 
     -- Check if group is full
     if IsGroupFull() then
-        SendChatMessage("[AutoInvite+] Sorry, no spots available.", "WHISPER", nil, name)
+        local reject = (AIP.db.responseReject and AIP.db.responseReject ~= "") and AIP.db.responseReject or "[AutoInvite+] Sorry, no spots available."
+        SendChatMessage(reject, "WHISPER", nil, name)
         return false
     end
 
@@ -501,7 +517,8 @@ local function InvitePlayer(name)
 
     -- Send the invite
     InviteUnit(name)
-    SendChatMessage("[AutoInvite+] Sending invite!", "WHISPER", nil, name)
+    local invited = (AIP.db.responseInvite and AIP.db.responseInvite ~= "") and AIP.db.responseInvite or "[AutoInvite+] Sending invite!"
+    SendChatMessage(invited, "WHISPER", nil, name)
     Print("Invited: " .. name)
 
     -- Truthful application status: if this player applied via the DataBus
@@ -611,7 +628,7 @@ function AIP.ResetDefaults()
         inviteHistory = true, lootHistory = true, raidSessions = true,
         nextRaidSessionId = true, currentRaidSessionId = true,
         raidWarningTemplates = true, lfmTemplates = true,
-        lootBans = true, msTracking = true,
+        lootBans = true, msTracking = true, customCompTemplates = true,
         announceDefaultsFixed = true,   -- keep the one-time announcer-migration flag
     }
 
@@ -772,14 +789,18 @@ local function ProcessMessage(author, message, channel)
     if not author or author == "" then return end
     if author:lower() == UnitName("player"):lower() then return end
 
-    -- Skip LFM messages - they contain trigger keywords as advertisement, not as request
-    -- Check for common LFM patterns to avoid adding raid leaders to queue
-    local msgLower = message:lower()
-    if msgLower:match("^lfm%s") or msgLower:match("%slfm%s") or
-       msgLower:match("lf%d+m") or msgLower:match('w/%s*"') or
-       msgLower:match("%[t:%d+/%d+") then
-        Debug("ProcessMessage: skipping LFM message from " .. author)
-        return
+    -- Skip LFM messages - they contain trigger keywords as advertisement, not as request.
+    -- Only applies to scanned public/guild channels: a whisper is inherently a direct
+    -- 1:1 request to the leader (and often uses this addon's own w/"keyword" convention),
+    -- so the ad heuristic must not eat it.
+    if channel ~= "whisper" then
+        local msgLower = message:lower()
+        if msgLower:match("^lfm%s") or msgLower:match("%slfm%s") or
+           msgLower:match("lf%d+m") or msgLower:match('w/%s*"') or
+           msgLower:match("%[t:%d+/%d+") then
+            Debug("ProcessMessage: skipping LFM message from " .. author)
+            return
+        end
     end
 
     -- Check if message contains trigger
@@ -1091,6 +1112,12 @@ local function OnEvent(self, event, ...)
 
             AIP.db = AutoInvitePlusDB
 
+            -- Re-register saved custom composition templates into the live
+            -- Comp.RaidTemplates registry (data file loads before the DB)
+            if AIP.Composition and AIP.Composition.LoadCustomTemplates then
+                AIP.Composition.LoadCustomTemplates()
+            end
+
             -- Broadcast state never survives /reload, so a persisted lfm/lfg
             -- player mode would be a lie (mode indicator on, nothing sending).
             AIP.db.playerMode = "none"
@@ -1265,6 +1292,37 @@ local function SlashHandler(msg)
             AIP.Composition.SlashHandler(rest)
         end
 
+    -- Class needs (LFM <-> composition tandem): per-class recruit counts for
+    -- the active listing's template (or the composition tab's template)
+    elseif cmd == "needs" then
+        local Comp = AIP.Composition
+        if not (Comp and Comp.GetClassNeeds) then
+            Print("Composition module not loaded.")
+            return
+        end
+        local myGroup = AIP.CentralGUI and AIP.CentralGUI.MyGroup
+        local templateKey = myGroup and myGroup.templateKey or nil
+        local needs = Comp.GetClassNeeds(templateKey)
+        if not needs.ok then
+            Print(needs.message or "Select a template first (LFM popup or Composition tab).")
+            return
+        end
+        Print(string.format("Class needs |cFF888888(%d/%d)|r for %s:",
+            needs.occupied or 0, needs.total or 0, needs.templateKey or "?"))
+        if #needs.list == 0 then
+            Print("  |cFF00FF00Roles are covered for this target.|r")
+        else
+            for _, row in ipairs(needs.list) do
+                local spec = Comp.SuggestedSpec and Comp.SuggestedSpec(row.role, row.class)
+                Print(string.format("  %dx %s %s|cFF888888%s%s|r",
+                    row.count,
+                    Comp.ColoredClassName and Comp.ColoredClassName(row.class) or row.class,
+                    row.role,
+                    spec and (" - " .. spec) or "",
+                    (#row.buffs > 0) and (" (brings " .. table.concat(row.buffs, ", ") .. ")") or ""))
+            end
+        end
+
     -- LFM Browser (new - Central GUI)
     elseif cmd == "lfm" or cmd == "browser" or cmd == "scan" then
         if AIP.CentralGUI then
@@ -1312,10 +1370,12 @@ local function SlashHandler(msg)
         if AIP.Roster and AIP.Roster.SlashHandler then
             AIP.Roster.SlashHandler(rest)
         end
-    elseif cmd == "waitlist" or cmd == "wait" then
-        if AIP.Roster then
-            AIP.Roster.SlashHandler("waitlist " .. rest)
-        end
+    -- NOTE: no top-level "waitlist"/"wait" alias here on purpose. The real
+    -- matchmaking waitlist (modules/Waitlist.lua, the Queue panel's Waitlist
+    -- tab, APPLY protocol) has no slash command of its own - it's GUI-driven.
+    -- Roster.SlashHandler's own separate "waitlist" store (a vestigial,
+    -- disconnected roster feature) stays reachable via "/aip roster waitlist"
+    -- only, so it can't be mistaken for the primary one.
 
     -- Integrations (new)
     elseif cmd == "lockouts" or cmd == "locks" then
@@ -1566,8 +1626,11 @@ local function SlashHandler(msg)
         Print("|cFFFFFF00Raid Organization:|r")
         Print("  /aip comp - Raid composition advisor")
         Print("  /aip comp recommend - Suggest classes to recruit")
+        Print("  /aip comp savetpl <name> - Save the current group's comp as a custom template")
+        Print("  /aip comp deltpl <name> - Delete a custom template")
+        Print("  /aip needs - Per-class recruit counts for your listing/template")
         Print("  /aip roster - Roster manager (save/load)")
-        Print("  /aip waitlist - Waitlist management")
+        Print("  /aip roster waitlist - Legacy roster waitlist (separate from the Queue panel's Waitlist tab)")
         Print("|cFFFFFF00Raid Tools:|r")
         Print("  /aip bar - Toggle the floating announcement bar")
         Print("  /aip roll [item] - Start a roll / toggle roll window")
