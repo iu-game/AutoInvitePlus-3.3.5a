@@ -297,7 +297,17 @@ local function pvpPlanArch()
     if a == "healerCrit" or a == "casterHot" then return "healer" end
     if a == "casterDPS" then return "caster" end
     if a == "agiDPS" then return "agiMelee" end
-    if a == "strDPS" or a == "tank" then return "strMelee" end
+    if a == "tank" then
+        -- "tank" is Strength-scaled for Warrior/Paladin/DK, but
+        -- IS.PlayerArchetype also assigns it to feral druid bear tanks
+        -- (Agility-scaled) - CharacterPanel.lua already special-cases this
+        -- exact ambiguity; PvPData had no equivalent check and was sending
+        -- bear tanks Strength gems/enchants/weapon-enchant advice.
+        local _, class = UnitClass("player")
+        if class == "DRUID" then return "agiMelee" end
+        return "strMelee"
+    end
+    if a == "strDPS" then return "strMelee" end
     return "caster"
 end
 
@@ -547,6 +557,50 @@ PvP.Gear = {
         [13] = { { "Medallion of the Alliance", 42123, 200, "PvP trinket (Alliance) - CC break + resil" }, { "Medallion of the Horde", 42122, 200, "PvP trinket (Horde) - CC break + resil" } },
         [16] = { { "Wrathful Gladiator's Slicer", 51521, 264, "1H sword" }, { "Wrathful Gladiator's Bonecracker", 51445, 264, "1H mace" }, { "Wrathful Gladiator's Right Ripper", 51523, 264, "fist (MH)" } },
         [17] = { { "Wrathful Gladiator's Slicer", 51521, 264, "1H sword" }, { "Wrathful Gladiator's Bonecracker", 51445, 264, "1H mace" }, { "Wrathful Gladiator's Left Ripper", 51443, 264, "fist (OH)" } },
+    },
+    War_Arms_DPS = {
+        [1] = { { "Wrathful Gladiator's Plate Helm", 51543, 270, "arena set" } },
+        [2] = { { "Wrathful Gladiator's Pendant of Triumph", 51355, 264, "honor (AP+crit)" }, { "Wrathful Gladiator's Pendant of Victory", 51357, 264, "honor (AP+hit)" } },
+        [3] = { { "Wrathful Gladiator's Plate Shoulders", 51545, 270, "arena set" } },
+        [15] = { { "Wrathful Gladiator's Cloak of Triumph", 51354, 264, "honor (AP+crit)" }, { "Wrathful Gladiator's Cloak of Victory", 51356, 264, "honor (AP+hit)" } },
+        [5] = { { "Wrathful Gladiator's Plate Chestpiece", 51541, 270, "arena set" } },
+        [9] = { { "Wrathful Gladiator's Bracers of Triumph", 51364, 264, "honor (str/AP plate)" } },
+        [10] = { { "Wrathful Gladiator's Plate Gauntlets", 51542, 270, "arena set" } },
+        [6] = { { "Wrathful Gladiator's Girdle of Triumph", 51362, 264, "honor (str/AP plate)" } },
+        [7] = { { "Wrathful Gladiator's Plate Legguards", 51544, 270, "arena set" } },
+        [8] = { { "Wrathful Gladiator's Greaves of Triumph", 51363, 264, "honor (str/AP plate)" } },
+        [11] = { { "Wrathful Gladiator's Band of Triumph", 51358, 264, "honor (AP+crit)" } },
+        [13] = { { "Medallion of the Alliance", 42123, 200, "PvP trinket (Alliance) - CC break + resil" }, { "Medallion of the Horde", 42122, 200, "PvP trinket (Horde) - CC break + resil" } },
+        [16] = { { "Wrathful Gladiator's Greatsword", 51392, 264, "2H sword" }, { "Wrathful Gladiator's Decapitator", 51388, 264, "2H axe" }, { "Wrathful Gladiator's Bonegrinder", 51390, 264, "2H mace" } },
+    },
+    War_Fury_DPS = {
+        [1] = { { "Wrathful Gladiator's Plate Helm", 51543, 270, "arena set" } },
+        [2] = { { "Wrathful Gladiator's Pendant of Triumph", 51355, 264, "honor (AP+crit)" }, { "Wrathful Gladiator's Pendant of Victory", 51357, 264, "honor (AP+hit)" } },
+        [3] = { { "Wrathful Gladiator's Plate Shoulders", 51545, 270, "arena set" } },
+        [15] = { { "Wrathful Gladiator's Cloak of Triumph", 51354, 264, "honor (AP+crit)" }, { "Wrathful Gladiator's Cloak of Victory", 51356, 264, "honor (AP+hit)" } },
+        [5] = { { "Wrathful Gladiator's Plate Chestpiece", 51541, 270, "arena set" } },
+        [9] = { { "Wrathful Gladiator's Bracers of Triumph", 51364, 264, "honor (str/AP plate)" } },
+        [10] = { { "Wrathful Gladiator's Plate Gauntlets", 51542, 270, "arena set" } },
+        [6] = { { "Wrathful Gladiator's Girdle of Triumph", 51362, 264, "honor (str/AP plate)" } },
+        [7] = { { "Wrathful Gladiator's Plate Legguards", 51544, 270, "arena set" } },
+        [8] = { { "Wrathful Gladiator's Greaves of Triumph", 51363, 264, "honor (str/AP plate)" } },
+        [11] = { { "Wrathful Gladiator's Band of Triumph", 51358, 264, "honor (AP+crit)" } },
+        [13] = { { "Medallion of the Alliance", 42123, 200, "PvP trinket (Alliance) - CC break + resil" }, { "Medallion of the Horde", 42122, 200, "PvP trinket (Horde) - CC break + resil" } },
+        [16] = { { "Wrathful Gladiator's Greatsword", 51392, 264, "2H sword (Titan's Grip)" }, { "Wrathful Gladiator's Decapitator", 51388, 264, "2H axe (Titan's Grip)" }, { "Wrathful Gladiator's Bonegrinder", 51390, 264, "2H mace (Titan's Grip)" } },
+        [17] = { { "Wrathful Gladiator's Greatsword", 51392, 264, "2H sword (Titan's Grip OH)" }, { "Wrathful Gladiator's Decapitator", 51388, 264, "2H axe (Titan's Grip OH)" }, { "Wrathful Gladiator's Bonegrinder", 51390, 264, "2H mace (Titan's Grip OH)" } },
+    },
+    Sham_Elemental = {
+        [1] = { { "Wrathful Gladiator's Mail Helm", 51511, 270, "arena set" } },
+        [2] = { { "Wrathful Gladiator's Pendant of Ascendancy", nil, 264, "caster SP neck (honor)" } },  -- unverified, name-only
+        [3] = { { "Wrathful Gladiator's Mail Spaulders", 51514, 270, "arena set" } },
+        [15] = { { "Wrathful Gladiator's Cloak of Ascendancy", nil, 264, "caster SP cloak (honor)" } },  -- unverified, name-only
+        [5] = { { "Wrathful Gladiator's Mail Armor", 51509, 270, "arena set" } },
+        [10] = { { "Wrathful Gladiator's Mail Gauntlets", 51510, 270, "arena set" } },
+        [7] = { { "Wrathful Gladiator's Mail Leggings", 51512, 270, "arena set" } },
+        [11] = { { "Wrathful Gladiator's Band of Dominance", nil, 264, "caster SP ring (honor)" } },  -- unverified, name-only
+        [13] = { { "Medallion of the Alliance", 42123, 200, "PvP trinket (Alliance) - CC break + resil" }, { "Medallion of the Horde", 42122, 200, "PvP trinket (Horde) - CC break + resil" } },
+        [16] = { { "Wrathful Gladiator's Mageblade", nil, 264, "1H caster main-hand" } },  -- unverified, name-only
+        [17] = { { "Wrathful Gladiator's Redoubt", nil, 264, "caster shield" } },  -- unverified, name-only
     },
 }
 

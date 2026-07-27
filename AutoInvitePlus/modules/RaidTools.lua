@@ -794,6 +794,14 @@ function RT.EmitClassDuties(key)
     end
 end
 
+-- Lua 5.1's WotLK sandbox has no `bit` library global - test a single
+-- power-of-two combat-log flag bit manually (division-based). `flag` must be
+-- a power of two (e.g. COMBAT_LOG_OBJECT_REACTION_HOSTILE = 0x00000040).
+local function hasCombatLogFlag(value, flag)
+    if not value then return false end
+    return math.floor(value / flag) % 2 == 1
+end
+
 -- Combat-log driven boss ability detection + signature-ability countdowns.
 function RT.OnMechanicCombatLog(...)
     if not (AIP.db and AIP.db.mechanicAnnounce) then return end
@@ -821,7 +829,9 @@ function RT.OnMechanicCombatLog(...)
     local duties = RT.MechanicClassDuties[spellName]
     if not msg and not (interval and interval > 0) and not duties then return end
     -- Only react to a hostile caster (the boss), never the player/allies.
-    if srcFlags and bit and bit.band and bit.band(srcFlags, 0x00000040) == 0 then return end
+    -- (`bit` is not a global in this client - see hasCombatLogFlag above;
+    -- the previous `bit.band` check silently never ran.)
+    if srcFlags and not hasCombatLogFlag(srcFlags, 0x00000040) then return end
 
     if msg and not mechThrottled("s:" .. spellName, 3) then
         RT.EmitMechanic(msg)
@@ -1112,10 +1122,20 @@ function RT.AnnounceReserved()
         return
     end
     RT.Send("=== Reserved Items (Soft Reserve) ===", "RAID_WARNING")
+    -- Stagger the per-item lines so we don't trip the chat throttle (mirrors
+    -- AnnounceBuffDelegation/EmitClassDuties above) - an unstaggered burst of
+    -- 4-5+ RAID_WARNING sends in one frame risks lines being dropped or the
+    -- chat-ban detector firing.
+    local delay = 0
     for rawLine in reserved:gmatch("[^\r\n]+") do
         local itemLine = rawLine:gsub("^%s+", ""):gsub("%s+$", "")
         if itemLine ~= "" then
-            RT.Send(itemLine, "RAID_WARNING")
+            if AIP.Utils and AIP.Utils.DelayedCall then
+                delay = delay + 0.4
+                AIP.Utils.DelayedCall(delay, function() RT.Send(itemLine, "RAID_WARNING") end)
+            else
+                RT.Send(itemLine, "RAID_WARNING")
+            end
         end
     end
 end

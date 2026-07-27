@@ -27,7 +27,7 @@ RM.DefaultTemplates = {
     -- Positioning
     {name = "Spread Out", message = "SPREAD OUT! Stay 10 yards apart!"},
     {name = "Stack Up", message = "STACK ON TANK! Group up tight!"},
-    {name = "Stack on Star", message = "STACK ON {star}! Everyone to star marker!"},
+    {name = "Stack on Star", message = "STACK ON THE STAR! Everyone to star marker!"},
     {name = "Move Out", message = "MOVE OUT OF BAD! Check your feet!"},
     {name = "Run Away", message = "RUN AWAY FROM BOSS! Get out!"},
     {name = "Range Spread", message = "RANGED: Spread out! Melee: Stay in!"},
@@ -35,8 +35,8 @@ RM.DefaultTemplates = {
 
     -- Target Switches
     {name = "Switch to Adds", message = "SWITCH TO ADDS NOW! Kill adds first!"},
-    {name = "Focus Skull", message = "FOCUS {skull}! Kill skull target!"},
-    {name = "Kill Order", message = "Kill order: {skull} > {cross} > {square}"},
+    {name = "Focus Skull", message = "FOCUS SKULL! Kill skull target!"},
+    {name = "Kill Order", message = "Kill order: Skull > Cross > Square"},
     {name = "Interrupt", message = "INTERRUPT NOW! Stop the cast!"},
     {name = "Dispel", message = "DISPEL IMMEDIATELY! Remove debuffs!"},
 
@@ -1009,7 +1009,17 @@ function RM.Create(parent)
     sendBtn:SetScript("OnClick", function()
         local msg = content.msgInput:GetText()
         if msg and msg ~= "" then
-            SendChatMessage(msg, "RAID_WARNING")
+            -- Route through RT.Send (matches the Reserved Items "Announce"
+            -- button): a raw SendChatMessage(msg, "RAID_WARNING") is silently
+            -- dropped by the client for anyone who isn't leader/assist, but
+            -- this still printed "sent!". RT.Send falls back
+            -- RAID_WARNING -> RAID -> PARTY -> SAY based on rank/group state,
+            -- so the message actually reaches the raid either way.
+            if AIP.RaidTools and AIP.RaidTools.Send then
+                AIP.RaidTools.Send(msg, "RAID_WARNING")
+            else
+                SendChatMessage(msg, "RAID_WARNING")
+            end
             AIP.Print("Raid warning sent!")
         end
     end)
@@ -1100,17 +1110,51 @@ function RM.Create(parent)
     announceResBtn:SetScript("OnClick", function()
         local items = content.reservedInput:GetText()
         if items and items ~= "" then
-            local itemList = items:gsub("\n", ", "):gsub(", $", "")
-            -- Route through the smart sender so non-officers fall back to
-            -- RAID/PARTY/SAY instead of silently sending nothing on RAID_WARNING.
-            if AIP.RaidTools and AIP.RaidTools.Send then
-                AIP.RaidTools.Send("Reserved items: " .. itemList, "RAID_WARNING")
-            else
-                SendChatMessage("Reserved items: " .. itemList, "RAID_WARNING")
+            local send = (AIP.RaidTools and AIP.RaidTools.Send)
+                or function(msg, channel) SendChatMessage(msg, channel) end
+            -- One item per line already (reservedInput puts each shift-clicked
+            -- link on its own line). WoW chat truncates at 255 bytes, and a
+            -- raid reserving several items (item links commonly 30-50+ chars
+            -- each) easily exceeds that as one concatenated line - send one
+            -- message per item instead, staggered to respect chat throttle
+            -- (mirrors RaidTools.lua's other multi-line broadcasters).
+            send("Reserved items:", "RAID_WARNING")
+            local delay = 0
+            for line in items:gmatch("[^\n]+") do
+                local trimmed = line:trim()
+                if trimmed ~= "" then
+                    delay = delay + 0.3
+                    local msg = trimmed
+                    AIP.Utils.DelayedCall(delay, function() send(msg, "RAID_WARNING") end)
+                end
             end
         end
     end)
     content.announceResBtn = announceResBtn
+
+    -- Loot database browser (AIP.LootDB): pick boss drops straight into the
+    -- reserved list, Atlas-style
+    local browseLootBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    browseLootBtn:SetSize(60, 18)
+    browseLootBtn:SetPoint("LEFT", announceResBtn, "RIGHT", 4, 0)
+    browseLootBtn:SetText("Browse")
+    browseLootBtn:SetScript("OnClick", function()
+        if not (AIP.LootDB and AIP.LootDB.Instances) then
+            AIP.Print("Loot database not loaded (log out and back in after updating).")
+            return
+        end
+        RM.ShowLootBrowser()
+    end)
+    browseLootBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Browse Boss Loot")
+        GameTooltip:AddLine("Atlas-style drop lists per raid and boss.", 1, 1, 1)
+        GameTooltip:AddLine("Click an item to add it to the reserved list;", 1, 1, 1)
+        GameTooltip:AddLine("shift-click links it into chat.", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    browseLootBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    content.browseLootBtn = browseLootBtn
 
     -- Loot Bans (right of reserved items)
     local lootBanLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -2094,6 +2138,246 @@ function RM.RefreshLootBanDisplay(content)
 end
 
 -- ============================================================================
+-- LOOT BROWSER (AIP.LootDB) - Atlas-style instance -> boss -> drops dialog.
+-- Click a row = add to the reserved list; shift-click = link into chat.
+-- ============================================================================
+
+local lootBrowser
+local LB_ROWS = 14
+
+local function LootBrowserAddReserved(item)
+    local LDB = AIP.LootDB
+    local link = (LDB and LDB.Link) and LDB.Link(item) or ("[" .. (item.name or "?") .. "]")
+    if IsShiftKeyDown() and ChatFrame1EditBox and ChatFrame1EditBox:IsVisible() then
+        ChatFrame1EditBox:Insert(link)
+        return
+    end
+    local input = RM.Content and RM.Content.reservedInput
+    if input then
+        local cur = input:GetText() or ""
+        if cur ~= "" and not cur:match("\n$") then cur = cur .. "\n" end
+        input:SetText(cur .. link)   -- OnTextChanged persists to AIP.db.reservedItems
+        AIP.Print("Reserved: " .. link)
+    end
+end
+
+local function LootBrowserRefresh()
+    local f = lootBrowser
+    if not f then return end
+    local LDB = AIP.LootDB
+    local inst = f.instances[f.instIndex]
+    local boss = inst and inst.bosses and inst.bosses[f.bossIndex]
+    UIDropDownMenu_SetText(f.instDD, inst and inst.name or "-")
+    UIDropDownMenu_SetText(f.bossDD, boss and boss.name or "-")
+    local items = (boss and boss.items) or {}
+    local maxOff = math.max(0, #items - LB_ROWS)
+    if (f.offset or 0) > maxOff then f.offset = maxOff end
+    if (f.offset or 0) < 0 then f.offset = 0 end
+    local source = (boss and boss.name or "?") .. " - " .. (inst and inst.name or "?")
+    local unresolved = 0
+    for i = 1, LB_ROWS do
+        local row = f.rows[i]
+        local item = items[(f.offset or 0) + i]
+        if item then
+            row.item = item
+            row.source = source
+            local link = (LDB and LDB.Link) and LDB.Link(item) or ("[" .. (item.name or "?") .. "]")
+            -- Not yet a real link but has a verified id: ask the server for
+            -- it (once) so the next repoll renders the true clickable link
+            if item.id and link:sub(1, 2) ~= "|c" then
+                unresolved = unresolved + 1
+                if LDB and LDB.Request then LDB.Request(item.id) end
+            end
+            local extra = {}
+            if item.slot then extra[#extra + 1] = item.slot end
+            if item.hc then extra[#extra + 1] = "|cFFFF6666HC|r" end
+            if item.rate then extra[#extra + 1] = "~" .. item.rate .. "%" end
+            row.text:SetText(link .. (#extra > 0 and ("  |cFF888888" .. table.concat(extra, " - ") .. "|r") or ""))
+            row:Show()
+        else
+            row.item = nil
+            row:Hide()
+        end
+    end
+    f.countText:SetText(#items .. " item" .. (#items ~= 1 and "s" or "")
+        .. (maxOff > 0 and "  |cFF888888(mousewheel to scroll)|r" or ""))
+
+    -- Repoll while server answers trickle into the item cache (no
+    -- GET_ITEM_INFO_RECEIVED event on 3.3.5a). Progress resets the budget;
+    -- a hard cap stops the loop for ids the server genuinely doesn't have.
+    if unresolved > 0 and f:IsShown() and AIP.Utils and AIP.Utils.DelayedCall then
+        if f.lastUnresolved and unresolved < f.lastUnresolved then f.repolls = 0 end
+        f.lastUnresolved = unresolved
+        f.repolls = (f.repolls or 0) + 1
+        if f.repolls <= 6 and not f.repollPending then
+            f.repollPending = true
+            AIP.Utils.DelayedCall(1, function()
+                f.repollPending = nil
+                if f:IsShown() then LootBrowserRefresh() end
+            end)
+        end
+    else
+        f.lastUnresolved = nil
+        f.repolls = 0
+    end
+end
+
+local function CreateLootBrowser()
+    local f = CreateFrame("Frame", "AIPLootBrowser", UIParent)
+    f:SetSize(400, 400)
+    f:SetPoint("CENTER", 120, 0)
+    f:SetFrameStrata("DIALOG")
+    f:SetClampedToScreen(true)
+    if AIP.UI and AIP.UI.MakeDraggable then AIP.UI.MakeDraggable(f) end
+    if AIP.CentralGUI and AIP.CentralGUI.StylePopup then
+        AIP.CentralGUI.StylePopup(f)
+    elseif AIP.UI and AIP.UI.ApplyBackdrop then
+        AIP.UI.ApplyBackdrop(f, "Window", 1)
+    end
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOP", 0, -14)
+    title:SetText("Boss Loot Browser")
+    title:SetTextColor(1, 0.82, 0)
+
+    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    closeBtn:SetPoint("TOPRIGHT", -5, -5)
+
+    f.instances = (AIP.LootDB and AIP.LootDB.Instances) or {}
+    f.instIndex, f.bossIndex, f.offset = 1, 1, 0
+
+    local instDD = CreateFrame("Frame", "AIPLootBrowserInst", f, "UIDropDownMenuTemplate")
+    instDD:SetPoint("TOPLEFT", 0, -36)
+    UIDropDownMenu_SetWidth(instDD, 160)
+    f.instDD = instDD
+    UIDropDownMenu_Initialize(instDD, function()
+        for idx, inst in ipairs(f.instances) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = inst.name
+            info.checked = (idx == f.instIndex)
+            info.func = function()
+                f.instIndex, f.bossIndex, f.offset = idx, 1, 0
+                f.repolls, f.lastUnresolved = 0, nil   -- fresh repoll budget
+                LootBrowserRefresh()
+            end
+            UIDropDownMenu_AddButton(info)
+        end
+    end)
+
+    local bossDD = CreateFrame("Frame", "AIPLootBrowserBoss", f, "UIDropDownMenuTemplate")
+    bossDD:SetPoint("LEFT", instDD, "RIGHT", -20, 0)
+    UIDropDownMenu_SetWidth(bossDD, 150)
+    f.bossDD = bossDD
+    UIDropDownMenu_Initialize(bossDD, function()
+        local inst = f.instances[f.instIndex]
+        for idx, boss in ipairs((inst and inst.bosses) or {}) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = boss.name
+            info.checked = (idx == f.bossIndex)
+            info.func = function()
+                f.bossIndex, f.offset = idx, 0
+                f.repolls, f.lastUnresolved = 0, nil   -- fresh repoll budget
+                LootBrowserRefresh()
+            end
+            UIDropDownMenu_AddButton(info)
+        end
+    end)
+
+    local listFrame = CreateFrame("Frame", nil, f)
+    listFrame:SetPoint("TOPLEFT", 15, -72)
+    listFrame:SetPoint("BOTTOMRIGHT", -15, 34)
+    listFrame:EnableMouseWheel(true)
+    listFrame:SetScript("OnMouseWheel", function(_, delta)
+        f.offset = (f.offset or 0) - delta * 3
+        f.repolls = 0   -- newly scrolled-in rows get a fresh repoll budget
+        LootBrowserRefresh()
+    end)
+
+    f.rows = {}
+    for i = 1, LB_ROWS do
+        local row = CreateFrame("Button", nil, listFrame)
+        row:SetSize(360, 20)
+        row:SetPoint("TOPLEFT", 5, -(i - 1) * 21)
+        row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.text:SetPoint("LEFT", 0, 0)
+        row.text:SetPoint("RIGHT", 0, 0)
+        row.text:SetJustifyH("LEFT")
+        if row.text.SetWordWrap then row.text:SetWordWrap(false) end
+        row:SetScript("OnClick", function(self)
+            if self.item then LootBrowserAddReserved(self.item) end
+        end)
+        row:SetScript("OnEnter", function(self)
+            if not self.item then return end
+            local item = self.item
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            local link = item.id and select(2, GetItemInfo(item.id))
+            if link then
+                GameTooltip:SetHyperlink(link)   -- full item stats tooltip
+            else
+                GameTooltip:AddLine(item.name or "?", 1, 1, 1)
+                if item.id then
+                    if AIP.LootDB and AIP.LootDB.Request then AIP.LootDB.Request(item.id) end
+                    GameTooltip:AddLine("Fetching item from server...", 0.6, 0.6, 0.6)
+                end
+            end
+            -- Drop details from the loot database
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Drops from: " .. (self.source or "?")
+                .. (item.hc and " |cFFFF6666(Heroic)|r" or ""), 1, 0.82, 0)
+            if item.slot then
+                GameTooltip:AddLine("Slot: " .. item.slot, 0.8, 0.8, 0.8)
+            end
+            if item.rate then
+                GameTooltip:AddLine("Drop rate: ~" .. item.rate .. "%", 0.8, 0.8, 0.8)
+            elseif item.note then
+                GameTooltip:AddLine("Drop rate: unknown", 0.5, 0.5, 0.5)
+            end
+            if item.note then
+                GameTooltip:AddLine(item.note, 0.6, 0.75, 0.6, true)
+            end
+            GameTooltip:AddLine("Click: add to reserved - Shift-click: link in chat", 0.4, 0.8, 1)
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        f.rows[i] = row
+    end
+
+    f.countText = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.countText:SetPoint("BOTTOMLEFT", 18, 14)
+    f.countText:SetTextColor(0.6, 0.6, 0.6)
+
+    f:Hide()
+    tinsert(UISpecialFrames, "AIPLootBrowser")
+    return f
+end
+
+function RM.ShowLootBrowser(instanceKey)
+    if not (AIP.LootDB and AIP.LootDB.Instances) then return end
+    if not lootBrowser then lootBrowser = CreateLootBrowser() end
+    lootBrowser.instances = AIP.LootDB.Instances
+    if instanceKey and AIP.LootDB.GetInstance then
+        -- GetInstance strips a trailing "HC" suffix (e.g. "ICC25HC" -> the
+        -- "ICC25" entry) - match on the resolved instance object instead of
+        -- re-comparing the raw key, or an HC-suffixed key would silently
+        -- match nothing here even though LootDB knows the instance.
+        local resolved = AIP.LootDB.GetInstance(instanceKey)
+        if resolved then
+            for idx, inst in ipairs(lootBrowser.instances) do
+                if inst == resolved then
+                    lootBrowser.instIndex, lootBrowser.bossIndex, lootBrowser.offset = idx, 1, 0
+                    break
+                end
+            end
+        end
+    end
+    -- Show BEFORE refreshing: the link repoll scheduler inside Refresh is
+    -- gated on IsShown() and would never arm against a hidden frame
+    lootBrowser.repolls, lootBrowser.lastUnresolved = 0, nil
+    lootBrowser:Show()
+    LootBrowserRefresh()
+end
+
+-- ============================================================================
 -- UPDATE FUNCTION
 -- ============================================================================
 
@@ -2230,9 +2514,14 @@ msEventFrame:SetScript("OnEvent", function(self, event, message, author)
     if not AIP.db.msTracking then AIP.db.msTracking = {} end
 
     local msgLower = message:lower()
+    -- Only accept ms/os registration from an actual raid/party member - without
+    -- this, anyone who knows the addon's whisper keywords could plant a phantom
+    -- "In Raid" row that persists in SavedVariables until manually cleared.
+    local inRaid = RM.GetRaidMembers()[author] ~= nil
 
     local msSpec = msgLower:match("^ms%s+(.+)$")
     if msSpec then
+        if not inRaid then return end
         AIP.db.msTracking[author] = AIP.db.msTracking[author] or {}
         AIP.db.msTracking[author].ms = msSpec:sub(1,1):upper() .. msSpec:sub(2)
         AIP.db.msTracking[author].inRaid = true
@@ -2243,6 +2532,7 @@ msEventFrame:SetScript("OnEvent", function(self, event, message, author)
 
     local osSpec = msgLower:match("^os%s+(.+)$")
     if osSpec then
+        if not inRaid then return end
         AIP.db.msTracking[author] = AIP.db.msTracking[author] or {}
         AIP.db.msTracking[author].os = osSpec:sub(1,1):upper() .. osSpec:sub(2)
         AIP.db.msTracking[author].inRaid = true
@@ -2275,6 +2565,9 @@ RM.BossList = {
     "Sindragosa",
     "The Lich King",
     -- RS
+    "Baltharus the Warborn",
+    "Saviana Ragefire",
+    "General Zarithrian",
     "Halion",
     -- TOC
     "Northrend Beasts",
@@ -2815,7 +3108,8 @@ rollEventFrame:SetScript("OnEvent", function(self, event, message)
     local isBanned, banBoss = RM.IsPlayerLootBanned(playerName, RM.CurrentBoss)
     if isBanned then
         local rollNum = tonumber(roll)
-        if rollNum and rollNum >= 50 then  -- Only warn for decent rolls
+        if rollNum then  -- Warn on every roll - this is the safety net a loot ban exists for; a
+                         -- >=50 cutoff meant a banned player winning on a 1-49 roll got zero warning.
             local warnMsg = "|cFFFF4444WARNING:|r " .. playerName .. " rolled " .. roll .. " but is |cFFFF4444LOOT BANNED|r"
             if banBoss then
                 warnMsg = warnMsg .. " (" .. banBoss .. ")"

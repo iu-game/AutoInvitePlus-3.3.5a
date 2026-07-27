@@ -1649,7 +1649,7 @@ function P.Update()
     if not frame then return end
     updateHeader()
     if frame.loadModel then frame.loadModel() end
-    for _, key in ipairs({ "threatCoach", "postPull", "gearShare", "rotationHelper", "tooltipScore", "paperdollAudit", "dbmBridge" }) do
+    for _, key in ipairs({ "threatCoach", "postPull", "gearShare", "cardShare", "rotationHelper", "tooltipScore", "paperdollAudit", "dbmBridge" }) do
         local c = frame["chk_" .. key]
         if c then c:SetChecked(AIP.db and AIP.db[key]) end
     end

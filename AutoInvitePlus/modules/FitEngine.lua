@@ -116,6 +116,7 @@ function Fit.ScoreApplicant(applicant, listing, opts)
 
     -- Role need against live composition counts
     local slots = roleSlots(applicant.role)
+    local roleHasOpenSlot -- nil = unknown, used below to keep the classNeeds reason non-contradictory
     if slots then
         local anyOpen, anyKnown = false, false
         for _, key in ipairs(slots) do
@@ -123,6 +124,7 @@ function Fit.ScoreApplicant(applicant, listing, opts)
             if open ~= nil then anyKnown = true end
             if open then anyOpen = true end
         end
+        if anyKnown then roleHasOpenSlot = anyOpen end
         if anyKnown and not anyOpen then
             addReason(reasons, (applicant.role or "role") .. " slots already full")
             hardFail = true
@@ -151,6 +153,44 @@ function Fit.ScoreApplicant(applicant, listing, opts)
                 addReason(reasons, "class/spec not on the Looking-For list")
                 softFail = true
             end
+        end
+    end
+
+    -- Class-need coverage from the composition tandem (listing.classNeeds =
+    -- {{class, role, count}} from Comp.GetClassNeeds). Being on the need list
+    -- is a strong plus; a class with zero open need means that position is
+    -- already covered by another player - a soft concern only, because the
+    -- role-full check above already hard-fails when the whole role is closed.
+    if listing.classNeeds and #listing.classNeeds > 0 and applicant.class then
+        local cls = applicant.class:upper()
+        -- nil role stays nil (no role filter); anything else folds to T/H/D
+        local roleUpper = applicant.role and AIP.Utils.FoldRole(applicant.role) or nil
+        local needed = 0
+        for _, n in ipairs(listing.classNeeds) do
+            if n.class and n.class:upper() == cls
+                and (not roleUpper or not n.role or n.role == roleUpper) then
+                needed = needed + (n.count or 0)
+            end
+        end
+        local prettyClass = cls:sub(1, 1) .. cls:sub(2):lower()
+        if needed > 0 then
+            score = score + 15
+            addReason(reasons, needed .. "x " .. prettyClass .. " needed")
+        elseif roleHasOpenSlot == false then
+            -- The role itself has no open slots at all - "position covered" is
+            -- accurate here and matches the hard-fail reason already added above.
+            score = score - 5
+            addReason(reasons, "no open " .. prettyClass .. " need right now - position covered")
+        else
+            -- Informational only: class needs come from the composition
+            -- TEMPLATE and can lag the leader's hand-edited role counts, so a
+            -- missing class must never block GREEN (no softFail) - the role
+            -- gate above already hard-fails when the role is truly full. The
+            -- role itself is still open (or unknown), so don't claim "covered"
+            -- - that would contradict the "<role> needed" reason in the same
+            -- whisper.
+            score = score - 5
+            addReason(reasons, prettyClass .. " isn't the current recruiting pick, but " .. (applicant.role or "the role") .. " is still open")
         end
     end
 
@@ -220,6 +260,7 @@ function Fit.ScoreListing(listing, me)
 
     -- Do they need my role?
     local slots = roleSlots(me.role)
+    local roleHasOpenSlot -- nil = unknown, reused below by the classNeeds check
     if slots then
         local anyOpen, anyKnown = false, false
         for _, key in ipairs(slots) do
@@ -227,12 +268,40 @@ function Fit.ScoreListing(listing, me)
             if open ~= nil then anyKnown = true end
             if open then anyOpen = true end
         end
+        if anyKnown then roleHasOpenSlot = anyOpen end
         if anyKnown and not anyOpen then
             addReason(reasons, "their " .. (me.role or "role") .. " slots are full")
             hardFail = true
         elseif anyOpen then
             score = score + 20
             addReason(reasons, "they need a " .. (me.role or "player"))
+        end
+    end
+
+    -- Class-need coverage from the composition tandem, symmetric with
+    -- ScoreApplicant's classNeeds block: listing.classNeeds = {{class, role,
+    -- count}} rides the listing (ChatScanner/DataBus), so a browser/match-alert
+    -- viewer gets the same "they specifically need your class" signal a leader
+    -- already sees for an incoming applicant.
+    if listing.classNeeds and #listing.classNeeds > 0 and me.class then
+        local cls = me.class:upper()
+        local roleUpper = me.role and AIP.Utils.FoldRole(me.role) or nil
+        local needed = 0
+        for _, n in ipairs(listing.classNeeds) do
+            if n.class and n.class:upper() == cls
+                and (not roleUpper or not n.role or n.role == roleUpper) then
+                needed = needed + (n.count or 0)
+            end
+        end
+        if needed > 0 then
+            score = score + 15
+            addReason(reasons, "they need " .. needed .. "x your class")
+        elseif roleHasOpenSlot == false then
+            score = score - 5
+            addReason(reasons, "no open need for your class right now - position covered")
+        else
+            score = score - 5
+            addReason(reasons, "your class isn't their current recruiting pick, but " .. (me.role or "the role") .. " is still open")
         end
     end
 

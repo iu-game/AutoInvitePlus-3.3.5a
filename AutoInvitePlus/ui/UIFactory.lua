@@ -30,7 +30,27 @@ UI.Colors = {
     dimRGB    = { 0.55, 0.55, 0.55 },  -- empty states, hints
     accentRGB = { 0.2, 0.8, 1 },
     borderRGB = { 0.34, 0.37, 0.46 },  -- theme slate border
+    -- Role tints (queue/waitlist rows, composition labels)
+    roleRGB = {
+        TANK   = { 0.5, 0.5, 1 },
+        HEALER = { 0.5, 1, 0.5 },
+        DPS    = { 1, 0.5, 0.5 },
+    },
 }
+
+-- ============================================================================
+-- FRAME BEHAVIOR HELPERS
+-- ============================================================================
+
+-- Standard movable-popup setup (replaces the five-line drag boilerplate
+-- repeated by every popup builder)
+function UI.MakeDraggable(frame)
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+end
 
 -- ============================================================================
 -- STANDARD BACKDROP CONFIGURATIONS

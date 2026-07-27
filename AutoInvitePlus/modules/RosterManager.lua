@@ -801,8 +801,13 @@ function Roster.UpdateWaitlistUI()
             row.roleText:SetText(entry.role or "")
 
             row.invBtn:SetScript("OnClick", function()
-                AIP.InvitePlayer(entry.name)
-                Roster.RemoveFromWaitlist(entry.name)
+                -- Only remove on a successful invite (mirrors
+                -- Roster.InviteFromWaitlist above) - unconditional removal
+                -- silently dropped the player from the waitlist even when the
+                -- invite failed (raid full, offline, throttled).
+                if AIP.InvitePlayer(entry.name) then
+                    Roster.RemoveFromWaitlist(entry.name)
+                end
             end)
 
             row.remBtn:SetScript("OnClick", function()

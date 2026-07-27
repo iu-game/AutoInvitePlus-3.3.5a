@@ -122,7 +122,12 @@ function GA.BestFromBags()
     local mh2H = mhLink and select(9, GetItemInfo(mhLink)) == "INVTYPE_2HWEAPON" or false
     -- Classes that can equip an off-hand weapon. Hunters CANNOT dual-wield or use
     -- an off-hand in 3.3.5a (main-hand melee + ranged only), so they're excluded.
-    local canDW = (class == "WARRIOR" or class == "ROGUE" or class == "DEATHKNIGHT" or class == "SHAMAN")
+    -- Shaman dual-wield is spec-gated (Enhancement's "Dual Wield" talent), unlike
+    -- the other three which are class-gated - an Elemental/Resto Shaman without
+    -- it can't physically equip a weapon in the off-hand slot, so recommending
+    -- one as a bags upgrade would be advice the player can't act on.
+    local canDW = (class == "WARRIOR" or class == "ROGUE" or class == "DEATHKNIGHT"
+        or (class == "SHAMAN" and IS and IS.PlayerArchetype and IS.PlayerArchetype() == "agiDPS"))
 
     -- Pre-score equipped items per slot.
     local equippedScore = {}

@@ -674,6 +674,30 @@ function LH.Create(parent)
                         GameTooltip:AddLine("Source: " .. self.data.source, 0.5, 0.5, 0.8)
                     end
                 end
+                -- LootDB cross-reference: which boss/instance drops this item.
+                -- Some items (tier tokens, some trinkets) drop from several
+                -- bosses - list every known source rather than guessing one.
+                local dbId = self.data.itemLink and tonumber(self.data.itemLink:match("item:(%d+)"))
+                if dbId and AIP.LootDB and AIP.LootDB.FindItemAll then
+                    local hits = AIP.LootDB.FindItemAll(dbId)
+                    if hits and hits[1] then
+                        GameTooltip:AddLine(" ")
+                        if #hits == 1 then
+                            local hit = hits[1]
+                            GameTooltip:AddLine("Drops from: " .. (hit.boss or "?")
+                                .. " - " .. ((hit.inst and hit.inst.name) or "?")
+                                .. (hit.item.rate and (" (~" .. hit.item.rate .. "%)") or "")
+                                .. (hit.item.hc and " |cFFFF6666[HC]|r" or ""), 0.2, 0.8, 1)
+                        else
+                            GameTooltip:AddLine("Drops from:", 0.2, 0.8, 1)
+                            for _, hit in ipairs(hits) do
+                                GameTooltip:AddLine("  " .. (hit.boss or "?")
+                                    .. " - " .. ((hit.inst and hit.inst.name) or "?")
+                                    .. (hit.item.hc and " |cFFFF6666[HC]|r" or ""), 0.2, 0.8, 1)
+                            end
+                        end
+                    end
+                end
                 GameTooltip:Show()
             end
         end)
@@ -1703,11 +1727,23 @@ function LH.PostBossLootToChat(chatType)
     headerName = headerName or (session and session.zone) or "Raid"
     local catLabel = LH.CurrentCategory and (" [" .. LH.CurrentCategory .. "]") or ""
 
-    SendChatMessage("=== " .. headerName .. " Loot" .. catLabel .. " ===", chatType)
+    -- RAID/PARTY are exempt from the public-lane budget (ChatGate treats them
+    -- as bypass group types and sends immediately either way), but SAY is the
+    -- exact public lane ChatGate exists to pace - a dozen+ unthrottled SAY
+    -- sends in one frame risks a server chat-mute.
+    local function post(msg)
+        if AIP.ChatGate and AIP.ChatGate.Send then
+            AIP.ChatGate.Send(msg, chatType, nil, {owner = "LootHistory"})
+        else
+            SendChatMessage(msg, chatType)
+        end
+    end
+
+    post("=== " .. headerName .. " Loot" .. catLabel .. " ===")
     for _, entry in ipairs(loot) do
         local who = entry.winner
         local suffix = (who and who ~= "" and who ~= "Unknown") and (" -> " .. who) or ""
-        SendChatMessage((entry.itemLink or entry.itemName or "?") .. suffix, chatType)
+        post((entry.itemLink or entry.itemName or "?") .. suffix)
     end
 
     AIP.Print("Posted " .. #loot .. " items to " .. chatType .. " chat.")

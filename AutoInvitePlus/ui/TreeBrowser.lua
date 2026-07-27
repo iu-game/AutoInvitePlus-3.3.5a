@@ -55,8 +55,9 @@ end
 -- Track known categories to avoid resetting expand state
 TB.KnownCategories = {}
 
--- Settings for hiding locked instances
-TB.HideLocked = false
+-- Settings for hiding locked instances (checked by default: listings you are
+-- saved to are noise until you untick the browser's "Locked" filter)
+TB.HideLocked = true
 
 -- Hide listings we've already dealt with (manually excluded or already requested).
 -- Runtime flag mirroring HideLocked; defaults on.

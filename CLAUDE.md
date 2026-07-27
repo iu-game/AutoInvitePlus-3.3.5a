@@ -2,37 +2,135 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Repository layout
+## Repository snapshot
 
-This repo ships **two separate World of Warcraft 3.3.5a (WotLK, Interface `30300`) addons**, each in its own top-level folder:
+This repo contains two separate World of Warcraft 3.3.5a (Wrath of the Lich King, Interface 30300) addons:
 
-- **`AutoInvitePlus/`** — the primary addon (v6.2.0). Raid-organization suite: keyword auto-invite, LFM/LFG chat browser, gear-tiered composition advisor, queue/waitlist, blacklist/favorites, loot history, and in-raid assist tools. This is where nearly all development happens.
-- **`GearScoreLite/`** — a **vendored third-party addon** (v1.84, by Mirrikat45 & Leo), bundled because it is one of AutoInvitePlus's optional GearScore dependencies (`## OptionalDeps: GearScore, GearScoreLite, PlayerScore`). Treat it as an external dependency — don't refactor it as if it were our code; upstream it only.
+- AutoInvitePlus/ — the primary addon under active development. The current addon version is 6.7.1 in both AutoInvitePlus/AutoInvitePlus.toc and AutoInvitePlus/core/Core.lua.
+- GearScoreLite/ — a vendored third-party dependency bundled for compatibility with AutoInvitePlus. Treat it as external code; do not refactor it as if it were part of the main addon.
 
-Also at the root: `README.md` (user-facing feature/command overview), `Screenshots/`, `LICENSE`, and `.github/workflows/main.yml` (release CI).
+The root also contains release automation in .github/workflows/main.yml, user-facing docs in README.md, and screenshots.
 
-## No build/lint/test toolchain
+## Working assumptions
 
-The code is interpreted **Lua 5.1** loaded directly by the WoW client — there is nothing to compile and no test runner. The dev loop is:
+- This code targets Lua 5.1 and the WoW client directly. There is no build, test, lint, or package-manager workflow.
+- The practical dev loop is: edit a .lua file, /reload in-game, then observe the result and any Lua errors.
+- Use /console scriptErrors 1 if you need in-game error output; an addon such as BugSack/BugGrabber can also help.
+- Load order is controlled by the .toc file, not by require or module imports. If you add a new .lua file, add it to the relevant .toc so it actually loads.
 
-1. Edit a `.lua` file.
-2. `/reload` in-game (or restart the client).
-3. Observe. Lua errors surface in-game — enable with `/console scriptErrors 1`, or use an addon like BugSack/BugGrabber.
+## AutoInvitePlus architecture
 
-Each addon's load order is defined by its `.toc` file (`AutoInvitePlus/AutoInvitePlus.toc`, `GearScoreLite/GearScoreLite.toc`), **not** by `require`. Files load top-to-bottom. **If you add a new `.lua` file you must add it to the `.toc`, or it will never load.**
+The main addon is organized as a single global namespace, with most files using a local alias such as local AIP = AutoInvitePlus. Cross-module access is done through AIP.* and is usually guarded.
 
-For UI work without live chat, AutoInvitePlus provides fixtures: `/aip testdata` / `/aip cleartest` (browser/queue) and `/aip testloot` / `/aip cleartestloot` (loot history).
+### Layering
 
-## Releasing
+The intended structure is:
 
-CI is `.github/workflows/main.yml`, triggered on **any git tag push** (`tags: "*"`). It zips both `AutoInvitePlus/` and `GearScoreLite/` and publishes them as GitHub Release assets. To cut a release:
+- core/ — foundational utilities and lifecycle code
+  - Utils.lua: shared helpers, event wrapper, delayed-call helper, and namespace setup
+  - Parsers.lua: chat parsing and message normalization
+  - ChatGate.lua: outbound chat throttling and broadcast pacing
+  - DataBus.lua: inter-player addon communication protocol
+  - Core.lua: defaults, SavedVariables initialization, central event frame, slash commands, and core invite/queue logic
+- data/ — live data acquisition and content databases
+  - ChatScanner.lua, InspectionEngine.lua, RaidComposition.lua
+  - ItemScore.lua and the BiS/gear/spec data files for the character panel and coaching suite
+- modules/ — feature implementations
+  - Matchmaking loop: LFMFormat, FitEngine, Applications (listing format, fit verdicts, Apply protocol)
+  - Queue, Waitlist, Blacklist, Promote, RosterManager, RaidSessionManager, Integrations, Updater
+  - RaidTools and its split files (RaidToolsRoll, RaidToolsUI, RaidToolsEvents) for roll/loot/announcement features — one logical module split across four .toc entries sharing state via AIP.RaidTools; RaidTools.lua must load first
+  - DBMBridge, ThreatCoach, Readiness, GearAdvisor, GearHooks, UpgradePath, SpecAdvisor, PostPull, Rotation, LFGWatch, CharacterCard, TestData
+- ui/ — presentation layer
+  - UIFactory.lua for reusable widgets
+  - CentralGUI.lua as the main window controller (the largest file in the addon)
+  - TreeBrowser.lua, CompositionUI.lua, and the panels under ui/panels/
 
-1. Bump `## Version` in the relevant addon's `.toc` (for AutoInvitePlus, `AutoInvitePlus/AutoInvitePlus.toc`). **For AutoInvitePlus, also bump the `VERSION` constant in `core/Core.lua`** — it's a *separate* source of truth that `AIP.Version` broadcasts to peers for the update checker, and it takes precedence over the `.toc` metadata. The two drift easily (they are currently out of sync: `.toc` 6.2.0 vs `Core.lua` 6.1.2) — keep them equal.
-2. Commit, then `git tag <version>` and push the tag → CI creates the release.
+### Important implementation conventions
 
-Note: the GearScoreLite release asset name is **hardcoded** in `main.yml` (`GearScoreLite-1.84.zip`) — if you ever bump GSL's version, update that `asset_name` too.
+- Keep the single-namespace pattern intact. Do not introduce a separate module system or refactor to a modern package pattern.
+- Prefer guarded calls such as if AIP.Foo and AIP.Foo.Bar then ... when a module may be absent or load later.
+- Reuse shared helpers from AIP.Utils and AIP.UI rather than duplicating logic.
+- For module-local events, prefer AIP.Utils.Events over creating extra frames unless the code genuinely needs a WoW event frame.
+- User-facing output should normally go through AIP.Print; debug output should go through AIP.Debug and be gated behind the debug setting.
+- Names should be normalized with the addon’s name-normalization helper before comparison.
 
-## Where to go next
+## SavedVariables and persistence
 
-- **AutoInvitePlus architecture** — the single-global-namespace model (`AIP.*`), the `core → data → modules → ui` layering, the two event systems, the RaidTools suite, the DataBus inter-player protocol, WotLK/Lua 5.1 constraints, slash commands, and the SavedVariables lifecycle are all documented in detail in **`AutoInvitePlus/CLAUDE.md`**. Read that before making non-trivial changes to the main addon.
-- **Feature/user docs** — root `README.md` and `AutoInvitePlus/README.md`.
+AutoInvitePlus stores its saved state in AutoInvitePlusDB via the SavedVariables entry in the .toc. The defaults table and DB_VERSION live in Core.lua.
+
+When editing persisted settings:
+
+- Add the new key to the defaults table in Core.lua.
+- Only bump DB_VERSION when a structural migration is needed; otherwise keep it stable.
+- Be careful when changing existing table shapes because players may already have older saved data in their WTF folder.
+
+## Event systems
+
+There are two event patterns in the addon, and they should not be conflated:
+
+1. The central dispatcher in Core.lua uses one main event frame and a large OnEvent switch for core addon behavior (ADDON_LOADED, chat messages, roster changes, invite handling, slash commands, etc.).
+2. AIP.Utils.Events is the lightweight pub/sub mechanism for module-local subscriptions. Use it when a module needs to react to events without creating its own frame.
+
+## UI conventions
+
+Panels under ui/panels/ follow a simple pattern:
+
+- AIP.Panels = AIP.Panels or {}
+- AIP.Panels.<Name> = { Create(container), Update() }
+
+CentralGUI lazily creates these panels and calls Update when switching tabs. New tabs should be wired through the GUI tab table and the switch/init logic in CentralGUI.lua.
+
+## DataBus and inter-player features
+
+The addon has a built-in inter-player protocol via DataBus.lua. It is used for sharing listings, character cards, gear readiness, queue state, and version information with other AutoInvitePlus users. When changing these messages, preserve the existing event names and field shapes unless you are intentionally changing the protocol.
+
+## WotLK and Lua 5.1 constraints
+
+This addon is written for a 2010-era client and must respect the platform constraints:
+
+- No C_Timer; use AIP.Utils.DelayedCall for one-shot delayed work.
+- Lua 5.1 syntax only; do not assume newer language features.
+- The code relies on WoW globals such as SendChatMessage, InviteUnit, GetChannelName, GetGuildRosterInfo, and IsRaidLeader.
+- Channel IDs vary by server and should be resolved by name matching rather than hardcoded values.
+- Broadcast code must be mindful of chat throttling and spam protection. Preserve the existing pacing logic when changing chat output.
+
+## Slash commands and testing helpers
+
+Slash commands are registered in Core.lua. Many feature modules also expose subcommands through the /aip dispatcher. Common helpers include:
+
+- /aip testdata and /aip cleartest for browser/queue fixture data
+- /aip testloot and /aip cleartestloot for loot-history fixture data
+- /aip help for command overview
+
+For UI work, these test commands are often enough to avoid needing live chat traffic.
+
+## Release and versioning
+
+Release automation lives in .github/workflows/main.yml. The workflow is triggered by git tag pushes and archives both AutoInvitePlus/ and GearScoreLite/ as release assets.
+
+To cut a release:
+
+1. Bump the version in AutoInvitePlus/AutoInvitePlus.toc.
+2. Bump the VERSION constant in AutoInvitePlus/core/Core.lua so the update checker and peers receive the same version string.
+3. Commit and tag the release, then push the tag so CI publishes the assets.
+
+Note that the GearScoreLite release asset name is currently hardcoded in the workflow and should be updated if that dependency is ever version-bumped.
+
+## Where to start for changes
+
+- AutoInvitePlus/AutoInvitePlus.toc for load order and module registration
+- AutoInvitePlus/core/Core.lua for defaults, DB setup, slash commands, and central event plumbing
+- AutoInvitePlus/core/DataBus.lua for addon-comms protocol changes
+- AutoInvitePlus/modules/ for most feature logic
+- AutoInvitePlus/ui/ and AutoInvitePlus/ui/panels/ for UI changes
+- AutoInvitePlus/CLAUDE.md for the deeper addon-specific architecture notes
+- AutoInvitePlus/WIRING.md for the matchmaking/composition wiring map — read it FIRST before changing LFM, applications, waitlist, or class-needs code (it replaces re-reading the large files), and update it whenever that wiring changes
+- docs/superpowers/specs/ for design notes for larger features
+
+## Practical guidance for edits
+
+- If you introduce a new Lua file, add it to the relevant .toc file immediately.
+- Preserve existing chat and invite safety behavior; this addon is heavily interaction-based and chat-ban avoidance is a real concern.
+- Keep current module boundaries intact; the codebase is deliberately split by responsibility and uses guarded cross-module access.
+- Avoid rewriting vendored code in GearScoreLite/ unless the change is clearly intended as an upstream patch.
+- When changing raid-tools, mechanic announcers, or self-check logic, preserve the existing accuracy guards and channel-selection rules.

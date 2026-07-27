@@ -110,7 +110,7 @@ B.List.casterHot = B.List.healerCrit
 -- Class-aware Sanctified T10 (ilvl 264, 25-Normal) FULL 5-piece sets, keyed by
 -- class then archetype -> { setName, head, shoulders, chest, hands, legs }.
 -- IDs verified on wowhead.com/wotlk AND native 3.3.5a DBs (db.rising-gods.de /
--- cavernoftime) - they agree; the "512xx renumbering" concern is a myth. Priest/Druid pending.
+-- cavernoftime) - they agree; the "512xx renumbering" concern is a myth.
 B.Tier = {
     WARRIOR = {
         strDPS = { "Ymirjar Lord's Battlegear", 51212, 51210, 51214, 51213, 51211 },
@@ -131,6 +131,16 @@ B.Tier = {
         agiDPS    = { "Frost Witch's Battlegear", 51197, 51199, 51195, 51196, 51198 },
         casterDPS = { "Frost Witch's Regalia",    51202, 51204, 51200, 51201, 51203 },
         casterHot = { "Frost Witch's Garb",       51192, 51194, 51190, 51191, 51193 },
+    },
+    PRIEST = {
+        healerCrit = { "Sanctified Crimson Acolyte Raiment", 51178, 51175, 51176, 51179, 51177 },
+        casterDPS  = { "Sanctified Crimson Acolyte Regalia", 51184, 51182, 51180, 51183, 51181 },
+    },
+    DRUID = {
+        agiDPS    = { "Sanctified Lasherweave Battlegear", 51143, 51140, 51141, 51144, 51142 },
+        tank      = { "Sanctified Lasherweave Battlegear", 51143, 51140, 51141, 51144, 51142 },
+        casterDPS = { "Sanctified Lasherweave Regalia",    51149, 51147, 51145, 51148, 51146 },
+        casterHot = { "Sanctified Lasherweave Garb",       51137, 51135, 51139, 51138, 51136 },
     },
     MAGE    = { casterDPS = { "Bloodmage's Regalia", 51158, 51155, 51156, 51159, 51157 } },
     WARLOCK = { casterDPS = { "Dark Coven's Regalia", 51208, 51205, 51206, 51209, 51207 } },

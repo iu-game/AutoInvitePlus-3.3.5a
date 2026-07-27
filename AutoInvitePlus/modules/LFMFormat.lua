@@ -87,6 +87,141 @@ function LF.RoleSpecString(roleSpecs)
     return "[" .. table.concat(parts, " ") .. "]"
 end
 
+-- Short need codes for the "[Need: 2xMag 1xPP]" block. Keyed role -> class so
+-- a class needed as TANK reads differently than the same class as DPS.
+LF.NeedCodes = {
+    TANK   = {WARRIOR = "PW", PALADIN = "PP", DEATHKNIGHT = "BDK", DRUID = "BD"},
+    HEALER = {PRIEST = "HP", PALADIN = "HPal", DRUID = "RD", SHAMAN = "RS"},
+    DPS    = {WARRIOR = "AW", PALADIN = "Ret", DEATHKNIGHT = "DK", DRUID = "Dru",
+              ROGUE = "Rog", SHAMAN = "Sham", MAGE = "Mag", WARLOCK = "Loc",
+              HUNTER = "Hun", PRIEST = "SP"},
+}
+
+function LF.NeedCode(class, role)
+    local m = role and LF.NeedCodes[role:upper()]
+    local code = m and class and m[class:upper()]
+    if code then return code end
+    if class then return class:sub(1, 1) .. class:sub(2, 3):lower() end
+    return "?"
+end
+
+-- classNeeds {{class="MAGE", role="DPS", count=2}, ...} (Comp.GetClassNeeds
+-- list shape) -> "[Need: 2xMag 1xPP]" or "" when empty/all filled.
+-- Capped: a fresh 25-man aggregates 10+ class rows (~120 bytes) which would
+-- starve the note/achievement/specs segments out of the 255-byte budget, so
+-- only the first MAX_NEED_PARTS rows render and the rest collapse to "+N".
+LF.MAX_NEED_PARTS = 5
+
+function LF.ClassNeedString(classNeeds)
+    if not classNeeds or #classNeeds == 0 then return "" end
+    local parts, overflow = {}, 0
+    for _, n in ipairs(classNeeds) do
+        if (n.count or 0) > 0 then
+            if #parts < LF.MAX_NEED_PARTS then
+                parts[#parts + 1] = tostring(n.count) .. "x" .. LF.NeedCode(n.class, n.role)
+            else
+                overflow = overflow + n.count
+            end
+        end
+    end
+    if #parts == 0 then return "" end
+    if overflow > 0 then
+        parts[#parts + 1] = "+" .. overflow
+    end
+    return "[Need: " .. table.concat(parts, " ") .. "]"
+end
+
+-- Reverse map: need code -> {class, role}. Codes are globally unique across
+-- the three role tables (verified), so a bare code fully identifies both.
+-- Keyed lowercase so chat-cased variants ("mag") still resolve.
+LF.NeedCodeInfo = nil
+local function needCodeInfo()
+    if LF.NeedCodeInfo then return LF.NeedCodeInfo end
+    local map = {}
+    for role, classes in pairs(LF.NeedCodes) do
+        for class, code in pairs(classes) do
+            map[code:lower()] = { class = class, role = role }
+        end
+    end
+    LF.NeedCodeInfo = map
+    return map
+end
+
+-- ============================================================================
+-- DATABUS WIRE CODEC
+-- Compact encodings for the LFM DataBus event. The old payload shipped four
+-- {current,needed} dicts plus a nested roleSpecs table: ~300+ serialized
+-- bytes, over the 255-byte addon-message cap, so every detailed LFM
+-- broadcast was silently dropped ("message_too_long"). These strings keep
+-- the same information in a fraction of the space.
+-- ============================================================================
+
+-- classNeeds {{class,role,count},...} -> "2xMag,1xPP" ("" when empty).
+-- Full fidelity (no display cap) - DataBus trims tail entries if oversize.
+function LF.EncodeNeeds(classNeeds)
+    if not classNeeds then return "" end
+    local parts = {}
+    for _, n in ipairs(classNeeds) do
+        if (n.count or 0) > 0 then
+            parts[#parts + 1] = tostring(n.count) .. "x" .. LF.NeedCode(n.class, n.role)
+        end
+    end
+    return table.concat(parts, ",")
+end
+
+-- "2xMag,1xPP" (also accepts the chat form "2xMag 1xPP +3") -> classNeeds
+-- list, or nil when nothing decodes. Unknown codes and the "+N" overflow
+-- marker are skipped - never guess a class.
+function LF.DecodeNeeds(str)
+    if not str or str == "" then return nil end
+    local map = needCodeInfo()
+    local out = {}
+    for count, code in str:gmatch("(%d+)x(%a+)") do
+        local info = map[code:lower()]
+        if info then
+            out[#out + 1] = { class = info.class, role = info.role, count = tonumber(count) }
+        end
+    end
+    if #out == 0 then return nil end
+    return out
+end
+
+-- Role tables -> "1/2,4/6,3/8,4/9" (T,H,M,R current/needed - fixed order)
+function LF.EncodeComp(g)
+    local function pair(r)
+        if type(r) ~= "table" then return "0/0" end
+        return (r.current or 0) .. "/" .. (r.needed or 0)
+    end
+    return pair(g.tanks) .. "," .. pair(g.healers) .. "," .. pair(g.mdps) .. "," .. pair(g.rdps)
+end
+
+-- "1/2,4/6,3/8,4/9" -> tanks, healers, mdps, rdps dicts (nil on mismatch)
+function LF.DecodeComp(str)
+    if not str then return nil end
+    local tc, tn, hc, hn, mc, mn, rc, rn =
+        str:match("^(%d+)/(%d+),(%d+)/(%d+),(%d+)/(%d+),(%d+)/(%d+)$")
+    if not tc then return nil end
+    return { current = tonumber(tc), needed = tonumber(tn) },
+           { current = tonumber(hc), needed = tonumber(hn) },
+           { current = tonumber(mc), needed = tonumber(mn) },
+           { current = tonumber(rc), needed = tonumber(rn) }
+end
+
+-- roleSpecs table -> "T:PW,BDK H:HP M:AW R:Mag" (the chat block minus its
+-- brackets, so Parsers.ParseLookingFor decodes it back with zero new code)
+function LF.EncodeRoleSpecs(roleSpecs)
+    local s = LF.RoleSpecString(roleSpecs)
+    if s == "" then return "" end
+    return (s:gsub("^%[", ""):gsub("%]$", ""))
+end
+
+-- "T:PW,BDK H:HP" -> roleSpecs, lookingForSpecs (nil, nil when empty)
+function LF.DecodeRoleSpecs(str)
+    if not str or str == "" then return nil, nil end
+    if not (AIP.Parsers and AIP.Parsers.ParseLookingFor) then return nil, nil end
+    return AIP.Parsers.ParseLookingFor("[" .. str .. "]")
+end
+
 -- Join non-empty string segments with single spaces
 local function joinParts(parts)
     local out = {}
@@ -107,6 +242,7 @@ end
 --   tanks, healers, mdps, rdps  = {current=n, needed=n} (numbers also accepted as needed)
 --   gsMin, ilvlMin numbers
 --   roleSpecs      {TANK={codes}, ...}
+--   classNeeds     {{class, role, count}, ...} -> "[Need: 2xMag 1xPP]" block
 --   keyword        invite keyword (w/ "kw")
 --   achievementLink  full |Hachievement:...| link string (or "" / nil)
 --   note           free text
@@ -138,6 +274,7 @@ function LF.BuildLFM(cfg)
     local gs = (cfg.gsMin and cfg.gsMin > 0) and (tostring(cfg.gsMin) .. "+") or ""
     local ilvl = (cfg.ilvlMin and cfg.ilvlMin > 0) and ("iLvl:" .. tostring(cfg.ilvlMin) .. "+") or ""
     local specs = LF.RoleSpecString(cfg.roleSpecs)
+    local need = LF.ClassNeedString(cfg.classNeeds)
     local kw = (cfg.keyword and cfg.keyword ~= "") and string.format('w/ "%s"', cfg.keyword) or ""
     local achieve = cfg.achievementLink or ""
     local note = cfg.note or ""
@@ -151,12 +288,16 @@ function LF.BuildLFM(cfg)
     end
 
     -- Assemble, then trim optional segments (lowest value first) until <= 255.
+    -- The need block drops BEFORE the specs block: [T:...] roleSpecs remains the
+    -- older, primary machine-readable signal peers rely on everywhere, so it's
+    -- protected longer under the byte budget. Parsers.ParseClassNeeds does parse
+    -- [Need:] too (wired into ParseChatMessage), it's just the newer/secondary signal.
     local trimmed = {}
-    local segments = { reserved = reserved, note = note, achieve = achieve, specs = specs }
-    local dropOrder = { "reserved", "note", "achieve", "specs" }
+    local segments = { reserved = reserved, note = note, achieve = achieve, specs = specs, need = need }
+    local dropOrder = { "reserved", "note", "achieve", "need", "specs" }
 
     local function assemble()
-        return joinParts({ head, weekly, counts, gs, ilvl, segments.specs, kw, segments.achieve, segments.note, segments.reserved })
+        return joinParts({ head, weekly, counts, segments.need, gs, ilvl, segments.specs, kw, segments.achieve, segments.note, segments.reserved })
     end
 
     local msg = assemble()

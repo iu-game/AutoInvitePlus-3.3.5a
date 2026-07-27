@@ -157,6 +157,43 @@ local function sendAck(applicant, status, position)
     if ev then AIP.DataBus.Broadcast(ev, applicant) end
 end
 
+-- Personalized applicant feedback: waitlist position + the concrete FitEngine
+-- verdict drivers (GS vs minimum, role full / class position covered, ...).
+-- FitEngine is the ONLY judge - this just words its reasons; never add checks
+-- here. Kept under the 255-byte whisper cap.
+local FEEDBACK_MAX_REASONS = 4
+
+function Apply.BuildFeedback(applicant, fit, position, listing)
+    -- Wording must match the APPLYACK status the applicant's own client just
+    -- printed ("application queued #N", from onApplyAck) - saying "waitlist"
+    -- here contradicted that even though it's the same event.
+    local head = "[AIP] " .. ((listing and listing.raid) or (applicant and applicant.raid) or "Raid")
+        .. ": queued #" .. tostring(position or "?")
+    if not (fit and fit.reasons and #fit.reasons > 0) then return head end
+
+    local picked = {}
+    for _, reason in ipairs(fit.reasons) do
+        if #picked >= FEEDBACK_MAX_REASONS then break end
+        table.insert(picked, reason)
+    end
+    local msg = head .. " (" .. table.concat(picked, "; ") .. ")"
+    if #msg > 255 then
+        msg = msg:sub(1, 252) .. "...)"
+        if #msg > 255 then msg = msg:sub(1, 255) end
+    end
+    return msg
+end
+
+-- Whisper-only (never the ChatGate public budget), same as the waitlist sender.
+function Apply.SendFeedbackWhisper(name, applicant, fit, position, listing)
+    if not name then return end
+    if AIP.db and AIP.db.applyFeedbackWhisper == false then return end
+    local msg = Apply.BuildFeedback(applicant, fit, position, listing)
+    if msg and msg ~= "" then
+        pcall(SendChatMessage, msg, "WHISPER", nil, name)
+    end
+end
+
 local function onApply(event)
     if not (event and event.sender and event.data) then return end
     if event.sender == UnitName("player") then return end
@@ -198,19 +235,60 @@ local function onApply(event)
     local favoriteLane = isFavorite and smart and smart.prioritizeFavorites
     local greenLane = AIP.db and AIP.db.autoInviteGreen and fit and fit.verdict == "GREEN"
     if (favoriteLane or greenLane) and AIP.InvitePlayer then
+        -- Don't sendAck here: AIP.InvitePlayer, on success, already calls
+        -- Apply.NotifyInvited (Apply.incoming[event.sender] was set above),
+        -- which sends the "invited" ACK. Sending it again here double-whispers
+        -- the applicant with two identical APPLYACKs.
         if AIP.InvitePlayer(event.sender) then
-            sendAck(event.sender, "invited")
             return
         end
     end
 
-    -- Red applications are queued too (leader decides), but never auto-acted on.
+    local applyNote = "[Apply] " .. (d.raid or "?") .. (d.note and (" - " .. d.note) or "")
+
+    -- Waitlist routing (the composition-tandem default): the applicant holds a
+    -- waitlist slot and gets a personalized whisper verdict (GS vs minimum,
+    -- role full, class position covered). RED applications are held too - the
+    -- leader decides; nothing here auto-declines. applyToWaitlist=false keeps
+    -- the legacy queue routing below.
+    local useWaitlist = not (AIP.db and AIP.db.applyToWaitlist == false)
+        and AIP.AddToWaitlist and AIP.IsOnWaitlist
+    if useWaitlist then
+        -- The waitlist store/UI only understands TANK/HEALER/DPS; peers may
+        -- send the four-way MDPS/RDPS split (Fit.Me role detection)
+        local wlRole = AIP.Utils.FoldRole(d.role)
+        local existed = AIP.IsOnWaitlist(event.sender)
+        if not existed then
+            -- silent: the richer feedback whisper below replaces the generic one
+            AIP.AddToWaitlist(event.sender, wlRole, applyNote, d.class, d.gs, true)
+        end
+        -- Enrich the waitlist entry with structured fields the manual path lacks
+        local onList, entry, position = AIP.IsOnWaitlist(event.sender)
+        if onList and entry then
+            entry.spec = d.spec or entry.spec
+            entry.ilvl = d.ilvl or entry.ilvl
+            entry.weekly = d.weekly or entry.weekly
+            entry.gs = d.gs or entry.gs
+            entry.class = d.class or entry.class
+            entry.isApplication = true
+            sendAck(event.sender, "queued", position)
+            Apply.SendFeedbackWhisper(event.sender, applicant, fit, position, GUI.MyGroup)
+            AIP.Print(string.format("%s |cFFFFD100Application:|r %s (%s %s, GS %s) -> waitlist #%d",
+                (fit and AIP.FitEngine.Chip(fit)) or "",
+                event.sender, d.class or "?", d.role or "?", tostring(d.gs or "?"), position or 0))
+            if AIP.UpdateWaitlistUI then AIP.UpdateWaitlistUI() end
+            if AIP.UpdateCentralGUI then AIP.UpdateCentralGUI() end
+        else
+            sendAck(event.sender, "seen")
+        end
+        return
+    end
+
+    -- Legacy queue routing (applyToWaitlist = false)
     if AIP.AddToQueue then
         local existed = AIP.IsInQueue and AIP.IsInQueue(event.sender)
         if not existed then
-            AIP.AddToQueue(event.sender,
-                "[Apply] " .. (d.raid or "?") .. (d.note and (" - " .. d.note) or ""),
-                d.role, d.gs, d.class)
+            AIP.AddToQueue(event.sender, applyNote, d.role, d.gs, d.class)
         end
         -- Enrich the queue entry with structured fields the whisper path lacks
         local inQueue, entry, position = AIP.IsInQueue(event.sender)
@@ -220,6 +298,7 @@ local function onApply(event)
             entry.weekly = d.weekly or entry.weekly
             entry.isApplication = true
             sendAck(event.sender, "queued", position)
+            Apply.SendFeedbackWhisper(event.sender, applicant, fit, position, GUI.MyGroup)
             AIP.Print(string.format("%s |cFFFFD100Application:|r %s (%s %s, GS %s) -> queue #%d",
                 (fit and AIP.FitEngine.Chip(fit)) or "",
                 event.sender, d.class or "?", d.role or "?", tostring(d.gs or "?"), position or 0))
@@ -251,6 +330,8 @@ local function onApplyAck(event)
         AIP.Print(event.sender .. ": application queued" .. (d.position and (" |cFF00FF00#" .. d.position .. "|r") or "") .. ".")
     elseif d.status == "declined" then
         AIP.Print(event.sender .. ": |cFFFF6666application declined|r.")
+    elseif d.status == "seen" then
+        AIP.Print(event.sender .. ": application seen (no active listing right now).")
     end
     if AIP.UpdateCentralGUI then AIP.UpdateCentralGUI() end
 end

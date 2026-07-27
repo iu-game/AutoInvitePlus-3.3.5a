@@ -430,6 +430,11 @@ function Parsers.ParseAchievement(message)
         if lastBracket:match("^[THMR]:[%a%d]") then
             return nil
         end
+        -- Skip the class-need block [Need: 2xMag 1xPP] and the reserved-loot
+        -- block [Res: item, ...] (both are LFMFormat segments, not achievements)
+        if lastBracket:match("^Need:") or lastBracket:match("^Res:") then
+            return nil
+        end
         -- Skip if it looks like class codes (short comma-separated codes)
         if lastBracket:match("^[A-Z][A-Za-z]*,[A-Z]") then
             return nil
@@ -624,6 +629,20 @@ function Parsers.ParseLookingFor(message)
     end
 
     return roleSpecs, lookingForSpecs
+end
+
+-- Parse the "[Need: 2xMag 1xPP +3]" per-class count block another AIP
+-- leader's LFM carries. Decoding (code -> class/role) is delegated to
+-- LFMFormat's NeedCode reverse map so chat and DataBus stay one codec.
+-- Returns classNeeds {{class, role, count}, ...} or nil. The "+N" overflow
+-- marker is ignored (truthful but classless).
+function Parsers.ParseClassNeeds(message)
+    if not message then return nil end
+    local block = message:match("%[Need:%s*([^%]]+)%]")
+    if not block then return nil end
+    local LF = AIP.LFMFormat
+    if not (LF and LF.DecodeNeeds) then return nil end
+    return LF.DecodeNeeds(block)
 end
 
 -- Class colors for display
@@ -911,6 +930,9 @@ function Parsers.ParseChatMessage(message, author, channel)
 
         -- Parse looking for specs (class/spec preferences)
         info.roleSpecs, info.lookingForSpecs = Parsers.ParseLookingFor(message)
+
+        -- Parse per-class needed counts ([Need: 2xMag 1xPP]) from AIP leaders
+        info.classNeeds = Parsers.ParseClassNeeds(message)
     end
 
     -- Only return if it's a relevant message (has raid or is LFG/LFM)

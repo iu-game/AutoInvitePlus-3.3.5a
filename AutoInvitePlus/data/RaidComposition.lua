@@ -80,6 +80,24 @@ Comp.ClassRoles = {
     },
 }
 
+-- Per-class-spec -> role, used to gate spec-restricted raid buffs (Comp.RaidBuffs[x].specs)
+-- against the actual role being recruited, so e.g. Replenishment (Retribution-only)
+-- doesn't get attributed to a Paladin recommended as HEALER (Holy). "ANY" means the
+-- spec name is shared across roles in this data model (Druid Feral Combat covers both
+-- Bear-tank and Cat-dps) and can't be disambiguated further without a form-aware source.
+Comp.SpecRole = {
+    WARRIOR     = {Arms = "DPS", Fury = "DPS", Protection = "TANK"},
+    PALADIN     = {Holy = "HEALER", Protection = "TANK", Retribution = "DPS"},
+    HUNTER      = {["Beast Mastery"] = "DPS", Marksmanship = "DPS", Survival = "DPS"},
+    ROGUE       = {Assassination = "DPS", Combat = "DPS", Subtlety = "DPS"},
+    PRIEST      = {Discipline = "HEALER", Holy = "HEALER", Shadow = "DPS"},
+    DEATHKNIGHT = {Blood = "TANK", Frost = "DPS", Unholy = "DPS"},
+    SHAMAN      = {Elemental = "DPS", Enhancement = "DPS", Restoration = "HEALER"},
+    MAGE        = {Arcane = "DPS", Fire = "DPS", Frost = "DPS"},
+    WARLOCK     = {Affliction = "DPS", Demonology = "DPS", Destruction = "DPS"},
+    DRUID       = {Balance = "DPS", ["Feral Combat"] = "ANY", Restoration = "HEALER"},
+}
+
 -- Template categories for UI organization
 Comp.TemplateCategories = {
     {id = "WOTLK", name = "WotLK Raids", order = 1},
@@ -87,6 +105,7 @@ Comp.TemplateCategories = {
     {id = "TBC", name = "TBC Raids", order = 3},
     {id = "CLASSIC", name = "Classic Raids", order = 4},
     {id = "WEEKLY", name = "Weekly/Daily", order = 5},
+    {id = "CUSTOMTPL", name = "Custom Templates", order = 6},
 }
 
 -- Raid bosses for loot ban dropdown
@@ -2694,6 +2713,24 @@ function Comp.GetTierInfo(templateKey)
         if cat == "WOTLK_DUNGEON" then key = "HC5"
         elseif cat == "TBC" then key = "TBC"
         elseif cat == "CLASSIC" then key = "CLASSIC"
+        elseif cat == "CUSTOMTPL" then
+            -- Custom templates have no fixed content tier - bucket by the template's
+            -- own saved minGS instead of silently defaulting to a fabricated T10N
+            -- (ICC-tier) range that has nothing to do with what was actually saved.
+            local minGS = t.minGS or 0
+            if minGS <= 0 then
+                return {gs = {0, 0}, ilvl = {0, 0}, label = "Custom (no GS requirement set)"}
+            end
+            local bestKey, bestDist
+            for tierKey, tier in pairs(Comp.ContentTiers) do
+                local lo, hi = tier.gs[1], tier.gs[2]
+                local dist
+                if minGS >= lo and minGS <= hi then dist = 0
+                elseif minGS < lo then dist = lo - minGS
+                else dist = minGS - hi end
+                if bestDist == nil or dist < bestDist then bestDist = dist; bestKey = tierKey end
+            end
+            key = bestKey or "T10N"
         else key = "T10N" end
     end
     return Comp.ContentTiers[key] or Comp.ContentTiers.T10N
@@ -2766,6 +2803,21 @@ end
 function Comp.GetTemplateVariations(templateKey)
     local t = Comp.RaidTemplates[templateKey]
     if not t then return {} end
+
+    -- Custom templates use their SAVED role split verbatim - the generic
+    -- gear-plan below would override the snapshot (e.g. a saved 3-heal zerg
+    -- would come back as a 5-heal "Standard") and defeat the feature.
+    if t.custom then
+        local tier = Comp.GetTierInfo(templateKey)
+        return {{
+            name = "Saved",
+            tanks = t.tanks or 0,
+            healers = t.healers or 0,
+            dps = t.dps or 0,
+            gs = tier.gs, ilvl = tier.ilvl,
+            note = "Custom template - uses the saved role split",
+        }}
+    end
     local size = t.size or ((t.tanks or 0) + (t.healers or 0) + (t.dps or 0))
     local tanks = t.tanks or (size >= 10 and 2 or 1)
     local isHeroic = templateKey:find("HC") ~= nil or templateKey:find("TOGC") ~= nil
@@ -2866,8 +2918,9 @@ function Comp.GetCompositionStatus()
     return status
 end
 
--- Set current raid template (auto-selects the Standard gear variation)
-function Comp.SetTemplate(templateKey)
+-- Set current raid template (auto-selects the Standard gear variation).
+-- quiet suppresses the chat print (used by the LFM popup tandem wiring).
+function Comp.SetTemplate(templateKey, quiet)
     if Comp.RaidTemplates[templateKey] then
         Comp.CurrentRaid.template = templateKey
         local def = Comp.GetDefaultVariationIndex(templateKey)
@@ -2878,10 +2931,241 @@ function Comp.SetTemplate(templateKey)
             name = v.name, gs = v.gs, ilvl = v.ilvl,
         } or nil
         Comp.ScanRaid()
-        AIP.Print("Raid template set to: " .. Comp.RaidTemplates[templateKey].name)
+        if not quiet then
+            AIP.Print("Raid template set to: " .. Comp.RaidTemplates[templateKey].name)
+        end
         return true
     end
     return false
+end
+
+-- ============================================================================
+-- CUSTOM TEMPLATES (player-defined, persisted in AIP.db.customCompTemplates)
+-- Registered into the same Comp.RaidTemplates registry (category CUSTOMTPL)
+-- so every consumer - variations, recommendations, class needs, the LFM
+-- popup binding - works on them unchanged.
+-- ============================================================================
+
+function Comp.CustomKeyForName(name)
+    local slug = tostring(name or ""):upper():gsub("[^%w]", "")
+    if slug == "" then return nil end
+    return "CT_" .. slug:sub(1, 24)
+end
+
+-- Register (or update) a custom template. def = {name, size, tanks, healers,
+-- dps, minGS}. skipSave re-registers from SavedVariables without re-writing.
+function Comp.RegisterCustomTemplate(def, skipSave)
+    if not (def and def.name and def.size and def.size > 0) then return nil end
+    local key = Comp.CustomKeyForName(def.name)
+    if not key then return nil end
+    -- Two differently-named templates can slug to the same key (punctuation/case
+    -- stripped, truncated to 24 chars). Only skipSave (re-registering our own
+    -- SavedVariables on load) may overwrite silently; a fresh user save must not
+    -- clobber an unrelated template sharing the same key.
+    if not skipSave then
+        local existing = Comp.RaidTemplates[key]
+        if existing and existing.custom and existing.name ~= def.name then
+            return nil, "A template named '" .. existing.name .. "' already uses a conflicting key - pick a more distinct name."
+        end
+    end
+    local tanks = def.tanks or 0
+    local healers = def.healers or 0
+    Comp.RaidTemplates[key] = {
+        name = def.name,
+        shortName = def.name,
+        category = "CUSTOMTPL",
+        size = def.size,
+        tanks = tanks,
+        healers = healers,
+        dps = def.dps or math.max(0, def.size - tanks - healers),
+        minGS = def.minGS or 0,
+        custom = true,
+    }
+    if not skipSave and AIP.db then
+        AIP.db.customCompTemplates = AIP.db.customCompTemplates or {}
+        AIP.db.customCompTemplates[key] = {
+            name = def.name, size = def.size, tanks = def.tanks,
+            healers = def.healers, dps = def.dps, minGS = def.minGS,
+        }
+    end
+    return key
+end
+
+function Comp.DeleteCustomTemplate(key)
+    local t = key and Comp.RaidTemplates[key]
+    if not (t and t.custom) then return false end
+    Comp.RaidTemplates[key] = nil
+    if AIP.db and AIP.db.customCompTemplates then
+        AIP.db.customCompTemplates[key] = nil
+    end
+    if Comp.CurrentRaid.template == key then
+        Comp.CurrentRaid.template = nil
+        Comp.CurrentRaid.variation = nil
+    end
+    return true
+end
+
+-- Re-register saved custom templates (Core calls this once the DB is ready)
+function Comp.LoadCustomTemplates()
+    if not (AIP.db and AIP.db.customCompTemplates) then return end
+    for _, def in pairs(AIP.db.customCompTemplates) do
+        Comp.RegisterCustomTemplate(def, true)
+    end
+end
+
+-- Snapshot the CURRENT group's composition (works as member or leader - this
+-- is the "save the comp of a raid I joined" path) as a custom template.
+function Comp.SaveCurrentAsTemplate(name)
+    if not name or name:gsub("%s", "") == "" then
+        return nil, "Give the template a name."
+    end
+    local raid = Comp.ScanRaid()
+    if not raid or #raid.members <= 1 then
+        return nil, "You are not in a group - nothing to snapshot."
+    end
+    local key, err = Comp.RegisterCustomTemplate({
+        name = name,
+        size = #raid.members,
+        tanks = raid.roleCounts.TANK or 0,
+        healers = raid.roleCounts.HEALER or 0,
+        dps = raid.roleCounts.DPS or 0,
+    })
+    return key, err
+end
+
+-- Map an LFM raid key (GUI GetRaidKey shape: "ICC25H", "EoE10N", "Ony25H",
+-- "TOGC25", "FoS5H", "OS25H", "HEROIC5") to a Comp.RaidTemplates key
+-- ("ICC25HC", "EOE10", "ONYXIA25", "TOGC25", "FOS", "OS25_3D", "HEROIC5").
+-- Raids without a separate heroic template (Ulduar/VOA/Naxx hard modes) fall
+-- back to the normal-mode template. Returns nil for CUSTOM/unknown keys.
+function Comp.TemplateKeyForRaid(raidKey)
+    if not raidKey or raidKey == "" then return nil end
+    local key = tostring(raidKey):upper()
+    if key == "CUSTOM" then return nil end
+    if Comp.RaidTemplates[key] then return key end   -- TOGC25, HEROIC5, TOC5 ...
+
+    -- Custom templates match by NAME (the popup's CUSTOM raid key is the
+    -- free-text custom name, e.g. "My Zerg 15")
+    local slug = key:gsub("[^%w]", "")
+    if slug ~= "" then
+        for tkey, t in pairs(Comp.RaidTemplates) do
+            if t.custom and t.name and t.name:upper():gsub("[^%w]", "") == slug then
+                return tkey
+            end
+        end
+    end
+
+    local base, size, diff = key:match("^([%a_]+)(%d+)([HN])$")
+    if not base then return nil end
+    if base == "ONY" then base = "ONYXIA" end
+
+    local candidates = {}
+    if base == "OS" then
+        -- OS templates are split by drakes-up, not H/N lockout
+        table.insert(candidates, "OS" .. size .. (diff == "H" and "_3D" or "_0D"))
+    elseif base == "TOC" and diff == "H" and (size == "10" or size == "25") then
+        table.insert(candidates, "TOGC" .. size)
+    end
+    if diff == "H" then table.insert(candidates, base .. size .. "HC") end
+    table.insert(candidates, base .. size)
+    table.insert(candidates, base)   -- 5-mans: FOS5H -> FOS
+    -- Raid types whose token itself ends in digits double them up through
+    -- GetRaidKey ("ToC5"+"5" -> TOC55H, "AQ40"+"40" -> AQ4040N, "HEROIC5"+"5"
+    -- -> HEROIC55H): try every split of the digit run too.
+    for i = 1, #size - 1 do
+        table.insert(candidates, base .. size:sub(1, i))
+    end
+
+    for _, k in ipairs(candidates) do
+        if Comp.RaidTemplates[k] then return k end
+    end
+    return nil
+end
+
+-- Display-only suggestion of the standard WotLK recruit spec for a role+class
+-- (used by the LFM popup "Need:" line and /aip needs).
+Comp.RoleSpecSuggestion = {
+    TANK   = {WARRIOR = "Prot", PALADIN = "Prot", DEATHKNIGHT = "Blood", DRUID = "Feral Bear"},
+    HEALER = {PRIEST = "Holy/Disc", PALADIN = "Holy", DRUID = "Resto", SHAMAN = "Resto"},
+    DPS    = {WARRIOR = "Arms/Fury", PALADIN = "Ret", DEATHKNIGHT = "Frost/UH",
+              DRUID = "Boomkin/Cat", ROGUE = "Any", SHAMAN = "Enh/Ele",
+              MAGE = "Any", WARLOCK = "Any", HUNTER = "Any", PRIEST = "Shadow"},
+}
+
+function Comp.SuggestedSpec(role, class)
+    local m = Comp.RoleSpecSuggestion[role]
+    return m and m[class] or nil
+end
+
+-- ============================================================================
+-- CLASS NEEDS (the LFM <-> composition tandem)
+-- Aggregates GetRecommendations() slot suggestions into per-class need counts
+-- vs the LIVE group, for the LFM popup, the [Need:] broadcast block and the
+-- FitEngine/waitlist verdicts.
+-- ============================================================================
+-- Returns {ok, list = {{class, role, count, buffs = {..}}}, occupied, total,
+--          gaps, full, templateKey} or {ok = false, message}.
+-- When templateKey differs from the Composition tab's active template, the
+-- computation quiet-swaps the template and RESTORES the previous template +
+-- gear variation afterwards, so browsing the LFM popup (or broadcast regen)
+-- never hijacks the user's Composition-tab selection. The LFM Post handler
+-- does one deliberate Comp.SetTemplate sync instead.
+function Comp.GetClassNeeds(templateKey)
+    local swapped = false
+    local prevTemplate, prevVariation, prevVariationIndex
+    if templateKey and Comp.RaidTemplates[templateKey]
+        and Comp.CurrentRaid.template ~= templateKey then
+        prevTemplate = Comp.CurrentRaid.template
+        prevVariation = Comp.CurrentRaid.variation
+        prevVariationIndex = Comp.CurrentRaid.variationIndex
+        Comp.SetTemplate(templateKey, true)
+        swapped = true
+    end
+    local usedTemplate = Comp.CurrentRaid.template
+
+    local rec = Comp.GetRecommendations()
+
+    if swapped then
+        Comp.CurrentRaid.template = prevTemplate
+        Comp.CurrentRaid.variation = prevVariation
+        Comp.CurrentRaid.variationIndex = prevVariationIndex
+    end
+
+    if not rec.ok then
+        return {ok = false, message = rec.message}
+    end
+
+    local byKey, list = {}, {}
+    for _, s in ipairs(rec.slots) do
+        if s.class then
+            local k = s.class .. ":" .. s.role
+            local row = byKey[k]
+            if not row then
+                row = {class = s.class, role = s.role, count = 0, buffs = {}}
+                byKey[k] = row
+                table.insert(list, row)
+            end
+            row.count = row.count + 1
+            if s.buff then table.insert(row.buffs, s.buff) end
+        end
+    end
+
+    local ROLE_ORDER = {TANK = 1, HEALER = 2, DPS = 3}
+    table.sort(list, function(a, b)
+        local ra, rb = ROLE_ORDER[a.role] or 9, ROLE_ORDER[b.role] or 9
+        if ra ~= rb then return ra < rb end
+        return a.class < b.class
+    end)
+
+    return {
+        ok = true,
+        list = list,
+        occupied = rec.current.size,
+        total = rec.targets.size,
+        gaps = rec.gaps,
+        full = rec.full,
+        templateKey = usedTemplate,
+    }
 end
 
 -- ============================================================================
@@ -2946,11 +3230,20 @@ function Comp.GetRecommendations()
 
     -- Track buffs claimed by a recommended slot so we don't double-count them.
     local claimed = {}
-    local function firstWantedBuffForClass(class)
+    local function specCompatibleWithRole(class, role, specs)
+        if not specs then return true end -- no spec restriction: any spec of the class provides it
+        local specRoles = Comp.SpecRole[class]
+        for _, spec in ipairs(specs) do
+            local r = specRoles and specRoles[spec]
+            if r == "ANY" or r == role then return true end
+        end
+        return false
+    end
+    local function firstWantedBuffForClass(class, role)
         for _, bname in ipairs(wantBuffs) do
             if not claimed[bname] then
                 local info = Comp.RaidBuffs[bname]
-                if info then
+                if info and specCompatibleWithRole(class, role, info.specs) then
                     for _, c in ipairs(info.classes) do
                         if c == class then return bname end
                     end
@@ -2962,21 +3255,28 @@ function Comp.GetRecommendations()
 
     -- Choose the best class for an open role slot: prefer one that also covers a
     -- still-missing buff; otherwise pick the least-represented eligible class so
-    -- the raid stays class-diverse.
+    -- the raid stays class-diverse. simCounts tracks classes already assigned to
+    -- earlier recommended slots - without it every buff-less slot picks the SAME
+    -- least-represented class (e.g. "10x Rogue" on a fresh 25-man).
+    local simCounts = {}
+    for class, c in pairs(raid.classCounts) do simCounts[class] = c end
+
     local function pickRoleClass(role)
         local candidates = Comp.GetClassesForRole(role)
         for _, class in ipairs(candidates) do
-            local bname = firstWantedBuffForClass(class)
+            local bname = firstWantedBuffForClass(class, role)
             if bname then
                 claimed[bname] = true
+                simCounts[class] = (simCounts[class] or 0) + 1
                 return class, bname
             end
         end
         local minCount, minClass
         for _, class in ipairs(candidates) do
-            local c = raid.classCounts[class] or 0
+            local c = simCounts[class] or 0
             if minCount == nil or c < minCount then minCount = c; minClass = class end
         end
+        if minClass then simCounts[minClass] = (simCounts[minClass] or 0) + 1 end
         return minClass, nil
     end
 
@@ -3184,10 +3484,39 @@ end
 
 -- Slash command handler for composition
 function Comp.SlashHandler(msg)
-    msg = (msg or ""):lower():trim()
+    local rawMsg = (msg or ""):trim()
+    msg = rawMsg:lower()
 
     if msg == "" or msg == "status" then
         Comp.PrintSummary()
+    elseif msg:match("^savetpl%s+") or msg == "savetpl" then
+        local name = rawMsg:match("^%S+%s+(.+)$")
+        if not name then
+            AIP.Print("Usage: /aip comp savetpl <name> - saves the CURRENT group's composition as a custom template")
+            return
+        end
+        local key, err = Comp.SaveCurrentAsTemplate(name)
+        if key then
+            local t = Comp.RaidTemplates[key]
+            AIP.Print(string.format("Saved custom template |cFF00FF00%s|r: %d players (%dT/%dH/%dD)",
+                t.name, t.size, t.tanks, t.healers, t.dps))
+        else
+            AIP.Print(err or "Could not save the template.")
+        end
+    elseif msg:match("^deltpl%s+") or msg == "deltpl" then
+        local name = rawMsg:match("^%S+%s+(.+)$")
+        if not name then
+            AIP.Print("Usage: /aip comp deltpl <name> - deletes a custom template (see /aip comp templates)")
+            return
+        end
+        local key = (Comp.RaidTemplates[name:upper()] and name:upper())
+            or Comp.CustomKeyForName(name)
+        if key and Comp.DeleteCustomTemplate(key) then
+            AIP.Print("Deleted custom template: " .. name)
+            if AIP.UpdateCentralGUI then AIP.UpdateCentralGUI() end
+        else
+            AIP.Print("No custom template named '" .. name .. "' (see /aip comp templates).")
+        end
     elseif msg == "scan" then
         Comp.ScanRaid()
         AIP.Print("Raid scanned: " .. #Comp.CurrentRaid.members .. " members")

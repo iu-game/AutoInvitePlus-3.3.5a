@@ -127,6 +127,12 @@ end
 function CS.AddGroup(info)
     if not info or not info.author then return end
 
+    -- Caller-declared own update (GroupTracker Post/regen path) BEFORE the
+    -- self-stamp below: only those carry the precise detail fields. A scan of
+    -- our own chat echo is lossy (capped [Need:], no detailMode/selection)
+    -- and must never overwrite the authoritative record.
+    local authoritative = info.isOwn and true or false
+
     -- Skip self
     if info.author == UnitName("player") then
         info.isOwn = true
@@ -164,9 +170,54 @@ function CS.AddGroup(info)
         existing.achievement = info.achievement or existing.achievement
         existing.inviteKeyword = info.inviteKeyword or existing.inviteKeyword
         existing.triggerKey = info.triggerKey or info.inviteKeyword or existing.triggerKey
-        existing.selectedClasses = info.selectedClasses or existing.selectedClasses
-        existing.roleSpecs = info.roleSpecs or existing.roleSpecs
-        existing.lookingForSpecs = info.lookingForSpecs or existing.lookingForSpecs
+        -- Own listings overwrite the class-detail fields UNCONDITIONALLY: a
+        -- re-post in vague mode sends them as nil and the or-merge would leak
+        -- the previous detailed spec list into "vague" regenerated broadcasts
+        if authoritative or (info.isDataBus and info.detailMode) then
+            -- Full-state snapshots overwrite: the GroupTracker own-post path
+            -- and 6.8+ DataBus peer updates (dm field present). Ensures a
+            -- switch to vague - or needs reaching zero - never leaves stale
+            -- detail behind (a re-post sends those fields as nil).
+            existing.selectedClasses = info.selectedClasses
+            if info.specsTrimmed then
+                -- Snapshot lost its specs to the length ladder: keep the
+                -- fuller chat-learned spec rows instead of flip-flopping
+                existing.roleSpecs = info.roleSpecs or existing.roleSpecs
+                existing.lookingForSpecs = info.lookingForSpecs or existing.lookingForSpecs
+                -- The trimmed need keeps its LEADING (tank->healer->dps)
+                -- rows: refresh counts for those, keep the tail breadth
+                if info.classNeeds and existing.classNeeds
+                    and #existing.classNeeds > #info.classNeeds then
+                    local fresh = {}
+                    for _, row in ipairs(info.classNeeds) do
+                        fresh[row.class .. "/" .. (row.role or "")] = row.count
+                    end
+                    local merged = {}
+                    for _, row in ipairs(existing.classNeeds) do
+                        local k = row.class .. "/" .. (row.role or "")
+                        merged[#merged + 1] = {class = row.class, role = row.role,
+                            count = fresh[k] or row.count, buffs = row.buffs}
+                    end
+                    existing.classNeeds = merged
+                else
+                    existing.classNeeds = info.classNeeds
+                end
+            else
+                existing.roleSpecs = info.roleSpecs
+                existing.lookingForSpecs = info.lookingForSpecs
+                existing.classNeeds = info.classNeeds
+            end
+            existing.detailMode = info.detailMode
+        elseif not existing.isOwn then
+            -- Peer chat scan: additive merge (chat segments can be trimmed)
+            existing.selectedClasses = info.selectedClasses or existing.selectedClasses
+            existing.roleSpecs = info.roleSpecs or existing.roleSpecs
+            existing.lookingForSpecs = info.lookingForSpecs or existing.lookingForSpecs
+            existing.classNeeds = info.classNeeds or existing.classNeeds
+            existing.detailMode = info.detailMode or existing.detailMode
+        end
+        -- (own chat ECHO: keep the authoritative detail fields untouched)
+        existing.templateKey = info.templateKey or existing.templateKey
         existing.note = info.note or existing.note
         existing.ilvl = info.ilvl or existing.ilvl
         existing.filledCurrent = info.filledCurrent or existing.filledCurrent
@@ -210,6 +261,9 @@ function CS.AddGroup(info)
             selectedClasses = info.selectedClasses,
             roleSpecs = info.roleSpecs,
             lookingForSpecs = info.lookingForSpecs,
+            classNeeds = info.classNeeds,
+            detailMode = info.detailMode,
+            templateKey = info.templateKey,
             note = info.note,
             ilvl = info.ilvl,
             filledCurrent = info.filledCurrent,
@@ -674,10 +728,19 @@ function CS.GetGroupsByRaid(filters)
             info.age = now - info.time
             info.leader = leader
 
-            -- Find category
+            -- Find category. Exact match against the category's own id OR one
+            -- of its children's ids - a string-prefix guess (e.g. "TOC") would
+            -- wrongly also match "TOGC10"/"TOGC25" (3rd char differs: C vs G),
+            -- dropping ToGC listings out of every category bucket entirely.
             local placed = false
             for catId, catData in pairs(results) do
-                if info.raid == catId or (info.raid and info.raid:find("^" .. catId)) then
+                local isMatch = (info.raid == catId)
+                if not isMatch and info.raid then
+                    for _, child in ipairs(catData.category.children) do
+                        if child.id == info.raid then isMatch = true break end
+                    end
+                end
+                if isMatch then
                     -- Find specific child
                     for childId, childData in pairs(catData.children) do
                         if info.raid == childId then
@@ -734,9 +797,15 @@ function CS.GetCountsByRaid()
         if counts[info.raid] then
             counts[info.raid] = counts[info.raid] + 1
         end
-        -- Also count parent
+        -- Also count parent: exact match against a child id, not a string
+        -- prefix guess ("TOC" would wrongly also match "TOGC10"/"TOGC25" and
+        -- silently drop ToGC listings from the parent rollup).
         for _, cat in ipairs(hierarchy) do
-            if info.raid and info.raid:find("^" .. cat.id) then
+            local isChild = false
+            for _, child in ipairs(cat.children) do
+                if info.raid == child.id then isChild = true break end
+            end
+            if isChild then
                 counts[cat.id] = counts[cat.id] + 1
                 break
             end
@@ -923,6 +992,29 @@ local function OnDataBusLFM(event)
 
     local data = event.data
 
+    -- Compact wire fields (6.8+ senders): comp/specs/need/dm strings replace
+    -- the fat legacy tables when the payload would blow the 255-byte cap.
+    -- Explicit dicts still win when present (old senders / small payloads).
+    local LF = AIP.LFMFormat
+    local tanks, healers, mdps, rdps = data.tanks, data.healers, data.mdps, data.rdps
+    if not (tanks or healers or mdps or rdps) and data.comp and LF and LF.DecodeComp then
+        tanks, healers, mdps, rdps = LF.DecodeComp(data.comp)
+    end
+    local roleSpecs, lookingForSpecs = data.roleSpecs, nil
+    if not roleSpecs and data.specs and LF and LF.DecodeRoleSpecs then
+        roleSpecs, lookingForSpecs = LF.DecodeRoleSpecs(data.specs)
+    end
+    local classNeeds = data.need and LF and LF.DecodeNeeds and LF.DecodeNeeds(data.need) or nil
+    local detailMode = (data.dm == "V" and "vague") or (data.dm == "D" and "detailed") or nil
+
+    -- Detailed senders always emit specs alongside need (classNeeds is built
+    -- FROM the spec selection); a detailed event carrying need but no specs
+    -- means the oversize ladder shed the specs field for length. Flag it so
+    -- the merge doesn't wipe the richer specs learned from the leader's chat
+    -- LFM (chat trims need before specs - the two transports complement).
+    local specsTrimmed = (detailMode == "detailed") and not data.specs
+        and not data.roleSpecs and data.need and true or false
+
     -- Create group info from DataBus event
     -- Note: tanks/healers/mdps/rdps must be at top level for tree view display
     local info = {
@@ -930,17 +1022,17 @@ local function OnDataBusLFM(event)
         raid = data.raid,
         raidCategory = data.raidCategory,
         -- Role composition at top level (required for tree view)
-        tanks = data.tanks,
-        healers = data.healers,
-        mdps = data.mdps,
-        rdps = data.rdps,
+        tanks = tanks,
+        healers = healers,
+        mdps = mdps,
+        rdps = rdps,
         dps = data.dps,  -- Backwards compatibility (will be converted to mdps/rdps if needed)
         -- Also store in composition for backwards compatibility
         composition = {
-            tanks = data.tanks,
-            healers = data.healers,
-            mdps = data.mdps,
-            rdps = data.rdps,
+            tanks = tanks,
+            healers = healers,
+            mdps = mdps,
+            rdps = rdps,
             dps = data.dps,
         },
         gs = data.gsMin,
@@ -956,7 +1048,11 @@ local function OnDataBusLFM(event)
         inviteKeyword = data.triggerKey,
         -- These are broadcast by GUI.MaybeDataBusBroadcast but were never read here,
         -- so peer listings always showed "Looking for: -" and no weekly tag.
-        roleSpecs = data.roleSpecs,
+        roleSpecs = roleSpecs,
+        lookingForSpecs = lookingForSpecs,
+        classNeeds = classNeeds,
+        detailMode = detailMode,
+        specsTrimmed = specsTrimmed,
         weekly = data.weekly,
         version = event.version,
     }

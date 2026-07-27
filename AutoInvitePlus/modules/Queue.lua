@@ -383,10 +383,25 @@ function AIP.MoveToWaitlist(index, role, note)
     local entry = AIP.db.queue[index]
     if not entry then return false end
 
-    -- Add to waitlist (AddToWaitlist handles the whisper notification internally)
+    -- Add to waitlist (AddToWaitlist handles the whisper notification internally).
+    -- Fold to TANK/HEALER/DPS first: the queue can carry the four-way MDPS/RDPS
+    -- split, but the waitlist store/UI/filters only understand three roles.
     if AIP.AddToWaitlist then
-        local success = AIP.AddToWaitlist(entry.name, role or "DPS", note, entry.class, entry.gs)
+        local success = AIP.AddToWaitlist(entry.name, AIP.Utils.FoldRole(role or entry.role), note, entry.class, entry.gs)
         if success then
+            -- Carry the structured application fields over so the waitlist
+            -- keeps the truthful-decline ACK wiring (isApplication) and data
+            if AIP.IsOnWaitlist then
+                local onList, wlEntry = AIP.IsOnWaitlist(entry.name)
+                if onList and wlEntry then
+                    wlEntry.spec = entry.spec
+                    wlEntry.ilvl = entry.ilvl
+                    wlEntry.weekly = entry.weekly
+                    wlEntry.isApplication = entry.isApplication
+                    wlEntry.isBlacklisted = entry.isBlacklisted
+                    wlEntry.blacklistReason = entry.blacklistReason
+                end
+            end
             -- Remove from queue
             AIP.RemoveFromQueueByIndex(index)
             return true
@@ -589,20 +604,13 @@ local function GetAvailableRaidSlots()
     return 4  -- Solo, can invite 4 to party
 end
 
--- Check if we are group leader
-local function IsGroupLeader()
-    if GetNumRaidMembers() > 0 then
-        return IsRaidLeader()
-    elseif GetNumPartyMembers() > 0 then
-        return IsPartyLeader()
-    end
-    return true  -- Solo = leader
-end
-
 autoProcessTimer:SetScript("OnUpdate", function(self, elapsed)
-    -- Skip if auto-process disabled or not leader
+    -- Skip if auto-process disabled or not leader. Uses the shared
+    -- AIP.Utils.IsGroupLeader (leader OR officer/assist) - the same rule
+    -- Core.CanInvite gates actual invites on - so a raid officer for whom
+    -- invites work doesn't silently lose queue auto-processing.
     if not AIP.db or not AIP.db.queueAutoProcess then return end
-    if not IsGroupLeader() then return end
+    if not AIP.Utils.IsGroupLeader() then return end
     if not AIP.db.queue or #AIP.db.queue == 0 then return end
 
     autoProcessElapsed = autoProcessElapsed + elapsed

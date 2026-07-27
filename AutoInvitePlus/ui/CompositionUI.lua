@@ -235,6 +235,10 @@ function AIP.InitCompositionUI()
                     AIP.Composition.SetTemplate(key)
                     UIDropDownMenu_SetText(dropdown, data.name)
                     AIP.UpdateCompositionUI()
+                    -- Tandem binding: re-point the LFM popup too
+                    if AIP.CentralGUI and AIP.CentralGUI.SyncPopupToTemplate then
+                        AIP.CentralGUI.SyncPopupToTemplate(key)
+                    end
                 end
                 UIDropDownMenu_AddButton(info)
             end

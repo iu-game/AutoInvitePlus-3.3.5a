@@ -21,9 +21,10 @@
 -- re-checked at drain time (a queued LFM must never fire after the user
 -- already joined a group).
 --
--- Whispers are NOT gated (Utils.WhisperQueue handles those), and the DataBus
--- AIPSync channel is NOT gated (it has its own limiter; a public blackout
--- must not freeze peer discovery).
+-- Whispers are NOT gated (sent via raw SendChatMessage - no pacing layer
+-- currently sits in front of them), and the DataBus AIPSync channel is NOT
+-- gated (it has its own limiter; a public blackout must not freeze peer
+-- discovery).
 
 local AIP = AutoInvitePlus
 AIP.ChatGate = AIP.ChatGate or {}

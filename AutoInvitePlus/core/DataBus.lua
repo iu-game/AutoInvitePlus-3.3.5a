@@ -46,6 +46,16 @@ DB.EventTypes = {
             "note",         -- string: custom message/requirements
             "triggerKey",   -- string: whisper keyword for invite
             "achievements", -- string: achievement links (optional)
+            -- Compact wire fields (6.8+). The four role dicts above serialize
+            -- to ~140 bytes; with a roleSpecs table the payload blew the
+            -- 255-byte cap and the whole event was silently dropped. New
+            -- senders ALSO send these compact forms (LFMFormat codec) and the
+            -- oversize trim in BroadcastLFM drops the fat legacy dicts first:
+            "comp",         -- string: "1/2,4/6,3/8,4/9" (T,H,M,R current/needed)
+            "specs",        -- string: "T:PW,BDK H:HP M:AW R:Mag" (looking-for codes)
+            "need",         -- string: "2xMag,1xPP" per-class needed counts
+            "dm",           -- string: "D" detailed / "V" vague listing mode
+            "weekly",       -- string: weekly raid quest token (optional)
         },
     },
 
@@ -460,6 +470,19 @@ end
 -- BROADCASTING
 -- ============================================================================
 
+-- The real per-message budget. maxMessageLength (255) is the CLIENT chat
+-- limit, but both transports add overhead on top of the serialized payload:
+-- SendAddonMessage counts prefix + tab + body against 255 ("AIP" + 1 = 4,
+-- and oversized addon messages are a 3.3.5a disconnect vector), and the
+-- channel fallback prepends chatPrefix ("!A:" = 3). Anything trimmed only
+-- to <=255 landed in a dead 252-255 window: passed the check, then was
+-- silently dropped (channel) or worse (addon path).
+function DB.EffectiveLimit()
+    local addonOverhead = #DB.Config.prefix + 1
+    local channelOverhead = #DB.Config.chatPrefix
+    return DB.Config.maxMessageLength - math.max(addonOverhead, channelOverhead)
+end
+
 -- Create an event with proper structure
 function DB.CreateEvent(eventType, data)
     if not DB.EventTypes[eventType] then
@@ -485,7 +508,7 @@ function DB.Broadcast(event, target)
     if target then
         local message = DB.Serialize(event)
         if not message then return false, "serialize_failed" end
-        if #message > DB.Config.maxMessageLength then
+        if #message > DB.EffectiveLimit() then
             AIP.Debug("DataBus: Message too long (" .. #message .. " chars)")
             return false, "message_too_long"
         end
@@ -500,17 +523,22 @@ function DB.Broadcast(event, target)
     if now - lastTime < DB.Config.rateLimitInterval then
         return false, "rate_limited"
     end
-    DB.State.lastBroadcast[event.type] = now
 
     -- Serialize
     local message = DB.Serialize(event)
     if not message then return false, "serialize_failed" end
 
-    -- Check message length
-    if #message > DB.Config.maxMessageLength then
+    -- Check message length (transport-aware: see EffectiveLimit)
+    if #message > DB.EffectiveLimit() then
         AIP.Debug("DataBus: Message too long (" .. #message .. " chars)")
         return false, "message_too_long"
     end
+
+    -- Only consume the rate-limit slot once we know the broadcast will actually
+    -- go out - stamping it before the length check let one oversized broadcast
+    -- silently block every subsequent (short, valid) broadcast of the same type
+    -- for the rest of the rate-limit window.
+    DB.State.lastBroadcast[event.type] = now
 
     -- Send via appropriate channels
     local sent = false
@@ -553,6 +581,27 @@ function DB.BroadcastLFM(lfmData)
 
     -- Add defaults
     event.data.triggerKey = event.data.triggerKey or (AIP.db and AIP.db.triggers) or "inv"
+
+    -- Oversize guard: DB.Broadcast silently drops anything over the 255-byte
+    -- cap, which used to kill EVERY detailed listing. Shed weight in value
+    -- order until it fits - the compact comp/specs/need strings carry the
+    -- same information the shed fields duplicated.
+    local function tooLong()
+        local s = DB.Serialize(event)
+        return (not s) or #s > DB.EffectiveLimit()
+    end
+    if tooLong() and event.data.comp then
+        -- 1) legacy role dicts (~140 bytes) - fully mirrored by data.comp
+        event.data.tanks, event.data.healers, event.data.mdps, event.data.rdps = nil, nil, nil, nil
+    end
+    while tooLong() and event.data.need and event.data.need:find(",") do
+        -- 2) trim need tail entries one at a time (keep the leading ones -
+        --    the sender orders them T -> H -> D already)
+        event.data.need = event.data.need:gsub(",[^,]*$", "")
+    end
+    if tooLong() then event.data.note = nil end
+    if tooLong() then event.data.specs = nil end
+    if tooLong() then event.data.need = nil end
 
     return DB.Broadcast(event)
 end
@@ -808,14 +857,15 @@ function DB.SendChannelMessage(message)
     end
     DB.State.lastChannelBroadcast = now
 
-    -- Prefix with our marker so we can identify addon messages
-    local fullMessage = DB.Config.chatPrefix .. message
-
-    -- Check length
-    if #fullMessage > DB.Config.maxMessageLength then
+    -- Check length BEFORE prefixing (transport-aware: see EffectiveLimit, which
+    -- already reserves room for the "!A:" prefix - never a raw maxMessageLength).
+    if #message > DB.EffectiveLimit() then
         AIP.Debug("DataBus: Channel message too long")
         return false, "message_too_long"
     end
+
+    -- Prefix with our marker so we can identify addon messages
+    local fullMessage = DB.Config.chatPrefix .. message
 
     -- Send via chat channel
     SendChatMessage(fullMessage, "CHANNEL", nil, DB.State.channelId)
@@ -875,11 +925,17 @@ local function OnChannelMessage(message, sender, _, _, _, _, _, _, channelName)
     end
 end
 
--- Chat filter to hide our addon messages from chat frames
+-- Chat filter to hide our addon messages from chat frames.
+-- Must only hide messages on OUR DataBus channel, mirroring OnChannelMessage's
+-- guard - otherwise any ordinary player chat that happens to start with the
+-- prefix text on an unrelated channel (Trade/General/LFG/...) gets swallowed.
 local function ChatFilter(self, event, message, sender, ...)
     if message and DB.Config.chatPrefix then
         if message:find("^" .. DB.Config.chatPrefix:gsub("([^%w])", "%%%1")) then
-            return true  -- Hide this message
+            local _, _, _, _, _, _, channelName = ...
+            if channelName and DB.Config.channelName and channelName:lower():find(DB.Config.channelName:lower()) then
+                return true  -- Hide this message
+            end
         end
     end
     return false

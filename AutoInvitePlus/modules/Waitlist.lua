@@ -109,8 +109,9 @@ function AIP.IsOnWaitlist(name)
     return false, nil, nil
 end
 
--- Add player to waitlist
-function AIP.AddToWaitlist(name, role, note, class, gs)
+-- Add player to waitlist. silent skips the generic responseWaitlist whisper
+-- (callers like Applications send their own richer verdict whisper instead).
+function AIP.AddToWaitlist(name, role, note, class, gs, silent)
     if not EnsureWaitlistExists() then return false end
     if not name or name:trim() == "" then
         AIP.Print("Please specify a player name")
@@ -125,11 +126,18 @@ function AIP.AddToWaitlist(name, role, note, class, gs)
         return false
     end
 
-    -- Capitalize name properly
-    local properName = name:sub(1,1):upper() .. name:sub(2):lower()
+    -- Capitalize name properly (shared normalizer: trim + Propercase)
+    local properName = (AIP.Utils and AIP.Utils.NormalizeName and AIP.Utils.NormalizeName(name)) or name
 
     -- Determine priority (lower = higher priority)
     local priority = #AIP.db.waitlist + 1
+
+    -- Check blacklist (self-checked, mirroring AIP.AddToQueue) so a flagged
+    -- player moved/added to the waitlist doesn't look identical to anyone else.
+    local isBlacklisted, blacklistEntry = false, nil
+    if AIP.IsBlacklisted then
+        isBlacklisted, blacklistEntry = AIP.IsBlacklisted(name)
+    end
 
     table.insert(AIP.db.waitlist, {
         name = properName,
@@ -139,12 +147,16 @@ function AIP.AddToWaitlist(name, role, note, class, gs)
         note = note or "",
         class = class,
         gs = gs,
+        isBlacklisted = isBlacklisted,
+        blacklistReason = blacklistEntry and blacklistEntry.reason or nil,
     })
 
-    AIP.Print("Added " .. properName .. " to waitlist (position #" .. priority .. ")")
+    if not silent then
+        AIP.Print("Added " .. properName .. " to waitlist (position #" .. priority .. ")")
+    end
 
     -- Send automatic notification whisper
-    local template = AIP.db.responseWaitlist
+    local template = (not silent) and AIP.db.responseWaitlist or nil
     if template and template ~= "" then
         AIP.Debug("AddToWaitlist: Sending waitlist notification to " .. properName)
         local sent = SendWaitlistMessage(properName, template, priority)
@@ -229,10 +241,16 @@ function AIP.RemoveFromWaitlist(name)
         if entry.name:lower() == lowerName then
             local removedName = entry.name
             table.remove(AIP.db.waitlist, i)
+            AIP.Utils.RenumberPriorities(AIP.db.waitlist)
 
-            -- Update priorities
-            for j, e in ipairs(AIP.db.waitlist) do
-                e.priority = j
+            -- Truthful decline ACK for protocol applicants the leader removes.
+            -- Invited players were already ACKed by InvitePlayer (which clears
+            -- the pending application state), and a player who joined through
+            -- an out-of-band /invite is skipped via the in-group check - never
+            -- whisper "declined" to someone standing in the raid.
+            if entry.isApplication and AIP.Apply and AIP.Apply.NotifyDeclined
+                and not UnitInRaid(removedName) and not UnitInParty(removedName) then
+                AIP.Apply.NotifyDeclined(removedName)
             end
 
             AIP.Print("Removed " .. removedName .. " from waitlist")
@@ -261,11 +279,7 @@ function AIP.MoveWaitlistUp(name)
 
     -- Swap with previous entry
     AIP.db.waitlist[index], AIP.db.waitlist[index - 1] = AIP.db.waitlist[index - 1], AIP.db.waitlist[index]
-
-    -- Update priorities
-    for i, e in ipairs(AIP.db.waitlist) do
-        e.priority = i
-    end
+    AIP.Utils.RenumberPriorities(AIP.db.waitlist)
 
     -- Notify both players of their new positions
     NotifyPositionChange(entry.name, index - 1)
@@ -292,11 +306,7 @@ function AIP.MoveWaitlistDown(name)
 
     -- Swap with next entry
     AIP.db.waitlist[index], AIP.db.waitlist[index + 1] = AIP.db.waitlist[index + 1], AIP.db.waitlist[index]
-
-    -- Update priorities
-    for i, e in ipairs(AIP.db.waitlist) do
-        e.priority = i
-    end
+    AIP.Utils.RenumberPriorities(AIP.db.waitlist)
 
     -- Notify both players of their new positions
     NotifyPositionChange(entry.name, index + 1)
@@ -314,6 +324,16 @@ end
 -- Clear entire waitlist
 function AIP.ClearWaitlist()
     if not EnsureWaitlistExists() then return end
+    -- Truthful decline ACKs for pending protocol applicants (addon messages
+    -- only - cheap; in-group players are skipped, same rule as single removal)
+    if AIP.Apply and AIP.Apply.NotifyDeclined then
+        for _, entry in ipairs(AIP.db.waitlist) do
+            if entry.isApplication and entry.name
+                and not UnitInRaid(entry.name) and not UnitInParty(entry.name) then
+                AIP.Apply.NotifyDeclined(entry.name)
+            end
+        end
+    end
     AIP.db.waitlist = {}
     AIP.Print("Waitlist cleared")
 
@@ -418,11 +438,15 @@ local function CreateWaitlistUI()
     local frame = CreateFrame("Frame", "AIPWaitlistFrame", UIParent)
     frame:SetSize(500, 400)
     frame:SetPoint("CENTER")
-    frame:SetMovable(true)
-    frame:EnableMouse(true)
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    if AIP.UI and AIP.UI.MakeDraggable then
+        AIP.UI.MakeDraggable(frame)
+    else
+        frame:SetMovable(true)
+        frame:EnableMouse(true)
+        frame:RegisterForDrag("LeftButton")
+        frame:SetScript("OnDragStart", frame.StartMoving)
+        frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    end
     frame:SetFrameStrata("DIALOG")
     frame:Hide()
 
@@ -750,6 +774,25 @@ function AIP.UpdateWaitlistUI()
             btn.roleText:SetTextColor(color[1], color[2], color[3])
 
             btn.noteText:SetText((entry.note or ""):sub(1, 20))
+
+            -- Blacklist indicator (mirrors AIP.UpdateQueueUI's row treatment)
+            if entry.isBlacklisted then
+                btn.nameText:SetTextColor(1, 0.5, 0.5)
+                btn:SetScript("OnEnter", function(self)
+                    GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+                    GameTooltip:AddLine("Blacklisted", 1, 0.3, 0.3)
+                    if entry.blacklistReason then
+                        GameTooltip:AddLine(entry.blacklistReason, 1, 1, 1)
+                    end
+                    GameTooltip:Show()
+                end)
+                btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            else
+                btn.nameText:SetTextColor(1, 1, 1)
+                btn:SetScript("OnEnter", nil)
+                btn:SetScript("OnLeave", nil)
+            end
+
             btn:Show()
         else
             btn:Hide()

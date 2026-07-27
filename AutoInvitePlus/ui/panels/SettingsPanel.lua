@@ -38,7 +38,7 @@ SP.Tooltips = {
     guildOnly = "Only accept invites from players in your guild.\n\n|cFF00FF00Enable when:|r You're running a guild-only event and want to filter out non-guildies automatically.\n\nPlayers not in your guild who whisper the trigger will be ignored.",
 
     useQueue = "When enabled, players who whisper you with trigger keywords will be added to the QUEUE for manual review instead of being auto-invited.\n\nThis works independently - you don't need to enable 'Enable Auto-Invite'.\n\nThe queue panel will automatically open when someone joins.\n\n|cFF00FF00Enable when:|r You want to review players before inviting (check GS, class, etc.).",
-    autoQueueLFG = "When enabled, players broadcasting LFG (Looking for Group) that match your active LFM listing will be automatically added to your queue.\n\n|cFFFFFF00Strict Matching:|r\n- Requires EXACT raid match (ICC25H LFG only matches ICC25H LFM)\n- Checks GearScore and iLvl requirements\n- Verifies role needs (won't queue healers if you have enough)\n- Respects class/spec preferences if set\n\n|cFFFF0000Disabled by default|r - LFG players will appear in the LFG browser tab for you to manually review and invite.",
+    autoQueueLFG = "When enabled, players broadcasting LFG (Looking for Group) that match your active LFM listing will be automatically added to your queue.\n\n|cFFFFFF00Matching:|r\n- Requires EXACT raid match (ICC25H LFG only matches ICC25H LFM)\n- Verifies role needs (won't queue healers if you have enough)\n- Only a hard fail (role full, GS below minimum, blacklisted, wrong raid) is excluded - an unknown GearScore or an off-list class/spec is scored lower but still queued, not filtered out\n\n|cFFFF0000Disabled by default|r - LFG players will appear in the LFG browser tab for you to manually review and invite.",
 
     blacklistMode = "Controls how blacklisted players are handled:\n\n|cFFFFFFFFFlag Only:|r Shows blacklisted players in queue with a warning indicator. You can still manually invite them.\n\n|cFFFF4444Auto-Reject:|r Automatically rejects blacklisted players and sends them the rejection whisper.\n\n|cFF00FF00Tip:|r Use 'Flag Only' if you want to give players a second chance.",
 
@@ -51,7 +51,7 @@ SP.Tooltips = {
 
     roleMatching = "Only invite players whose role AND class match your needs.\n\n|cFFFFFFFFHow it works:|r\n1. Checks if role slots are available (Tank/Healer/DPS)\n2. If you have 'Looking For' specs defined in your LFM, only those classes will be accepted\n\n|cFF00FFFFExample:|r If your LFM specifies 'Looking for: Paladin, Druid healers', a Shaman healer will be rejected.\n\n|cFF00FF00Enable when:|r You're recruiting specific classes/specs and want automatic filtering.\n\n|cFFFFFF00Note:|r Define your Looking For specs in the LFM popup to enable class filtering.",
 
-    prioritySkipQueue = "Favorites and/or Guild members will bypass the queue and be invited immediately.\n\n- |cFFFFFFFFPrioritize Favorites:|r Players on your Favorites list skip queue\n- |cFFFFFFFFPrioritize Guild:|r Guild members skip queue\n\n|cFF00FF00Enable when:|r You want trusted players to get in faster.",
+    prioritySkipQueue = "Favorites and/or Guild members will bypass the queue and be invited immediately.\n\n- |cFFFFFFFFPrioritize Favorites:|r Players on your Favorites list skip queue\n- |cFFFFFFFFPrioritize Guild:|r Guild members skip queue\n\n|cFFFF0000Note:|r This also bypasses the fit check (role-full/GS-minimum) - a favorite applying to a full role or below your GS minimum is still invited immediately.\n\n|cFF00FF00Enable when:|r You want trusted players to get in faster.",
 
     -- Section 3: Queue Improvements
     queueSettings = "Configure how the invite queue behaves.\n\nThe queue holds players waiting to be invited, allowing you to review and accept/reject them manually.\n\n|cFF00FF00Tip:|r Combine with Smart Conditions for powerful filtering.",
@@ -874,9 +874,12 @@ function SP.Create(parent)
         "Hide blacklisted players' listings from the browser", function(self)
         local checked = self:GetChecked() == 1 or self:GetChecked() == true
         if AIP.db then AIP.db.hideBlacklistedListings = checked end
+        -- LFM and LFG share ONE physical browser container (see
+        -- GUI.RefreshBrowserTab) - the "lfg" call rebuilds the same container
+        -- with the LFG player tree, clobbering the LFM group tree the "lfm"
+        -- call just built one line above.
         if AIP.CentralGUI and AIP.CentralGUI.RefreshBrowserTab then
             AIP.CentralGUI.RefreshBrowserTab("lfm")
-            AIP.CentralGUI.RefreshBrowserTab("lfg")
         end
     end)
     frame.checks.hideBlacklistedListings = hideBlCheck
@@ -915,9 +918,9 @@ function SP.Create(parent)
         -- there is no ClearCache. Clear both stores and refresh the browser.
         if AIP.GroupTracker and AIP.GroupTracker.ClearAll then AIP.GroupTracker.ClearAll() end
         if AIP.LFMBrowser and AIP.LFMBrowser.ClearAll then AIP.LFMBrowser.ClearAll() end
+        -- LFM and LFG share ONE physical browser container - see the note above.
         if AIP.CentralGUI and AIP.CentralGUI.RefreshBrowserTab then
             AIP.CentralGUI.RefreshBrowserTab("lfm")
-            AIP.CentralGUI.RefreshBrowserTab("lfg")
         end
     end)
     y = y - 26
@@ -1187,16 +1190,19 @@ function SP.Create(parent)
         if AIP.LFGWatch and AIP.LFGWatch.UpdateWidget then AIP.LFGWatch.UpdateWidget() end
     end)
     rdfCheck:SetChecked(AIP.db and AIP.db.lfgWatch)
+    frame.checks.lfgWatch = rdfCheck
     y = y - 26
     local rdfShareCheck = CreateCheckbox(content, 15, y, "lfgShare", "Share my queue status with addon peers (DataBus)", function(self)
         AIP.db.lfgShare = (self:GetChecked() == 1 or self:GetChecked() == true)
     end)
     rdfShareCheck:SetChecked(AIP.db and AIP.db.lfgShare)
+    frame.checks.lfgShare = rdfShareCheck
     y = y - 26
     local rdfRequeueCheck = CreateCheckbox(content, 15, y, "lfgAutoRequeue", "Auto leave + re-queue if no group in 2 min (resets queue position)", function(self)
         AIP.db.lfgAutoRequeue = (self:GetChecked() == 1 or self:GetChecked() == true)
     end)
     rdfRequeueCheck:SetChecked(AIP.db and AIP.db.lfgAutoRequeue)
+    frame.checks.lfgAutoRequeue = rdfRequeueCheck
     y = y - 34
 
     -- ========================================================================
@@ -1225,10 +1231,13 @@ function SP.Create(parent)
                 -- Clear the entire saved variables
                 AutoInvitePlusDB = nil
                 AIP.db = nil
-                -- Clear any cached UI state
+                -- Clear any cached UI state. Wipe in place - the GroupTracker/
+                -- LFMBrowser aliases point at these same table objects and
+                -- reassigning would orphan them (masked here only by the
+                -- ReloadUI() a few lines below).
                 if AIP.ChatScanner then
-                    AIP.ChatScanner.Groups = {}
-                    AIP.ChatScanner.Players = {}
+                    if AIP.ChatScanner.ClearGroups then AIP.ChatScanner.ClearGroups() end
+                    if AIP.ChatScanner.ClearPlayers then AIP.ChatScanner.ClearPlayers() end
                 end
                 if AIP.CentralGUI then
                     AIP.CentralGUI.LfgEnrollments = {}
@@ -1758,7 +1767,13 @@ function SP.PopulateTestData()
     -- LFM BROWSER TAB - LFM Groups
     -- ========================================================================
     if AIP.GroupTracker then
-        AIP.GroupTracker.Groups = {}  -- Clear first
+        -- Wipe in place: GroupTracker.Groups is an alias for the same table
+        -- object as CS.Groups - reassigning here would orphan the alias, so
+        -- AddGroup below (which writes into CS.Groups) would populate a
+        -- different table than the one just "cleared".
+        if AIP.ChatScanner and AIP.ChatScanner.ClearGroups then
+            AIP.ChatScanner.ClearGroups()
+        end
         if AIP.GroupTracker.AddGroup then
             -- ICC 25 Heroic
             AIP.GroupTracker.AddGroup({
@@ -1877,7 +1892,7 @@ function SP.PopulateTestData()
     -- LFM BROWSER TAB - LFG Players
     -- ========================================================================
     if AIP.ChatScanner and AIP.ChatScanner.Players then
-        AIP.ChatScanner.Players = {}  -- Clear first
+        if AIP.ChatScanner.ClearPlayers then AIP.ChatScanner.ClearPlayers() end
         AIP.ChatScanner.Players["Arcanemage"] = {
             name = "Arcanemage",
             class = "MAGE",
@@ -2042,15 +2057,15 @@ function SP.ClearTestData()
     -- ========================================================================
     -- LFM BROWSER TAB - LFM Groups
     -- ========================================================================
-    if AIP.GroupTracker then
-        AIP.GroupTracker.Groups = {}
+    if AIP.GroupTracker and AIP.ChatScanner and AIP.ChatScanner.ClearGroups then
+        AIP.ChatScanner.ClearGroups()  -- wipe in place - see PopulateTestData's note
     end
 
     -- ========================================================================
     -- LFM BROWSER TAB - LFG Players
     -- ========================================================================
-    if AIP.ChatScanner then
-        AIP.ChatScanner.Players = {}
+    if AIP.ChatScanner and AIP.ChatScanner.ClearPlayers then
+        AIP.ChatScanner.ClearPlayers()
     end
 
     -- ========================================================================

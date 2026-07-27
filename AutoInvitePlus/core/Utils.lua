@@ -139,6 +139,23 @@ function Utils.NormalizeName(name)
     return name:sub(1, 1):upper() .. name:sub(2):lower()
 end
 
+-- Re-stamp 1-based priorities after any list mutation (queue/waitlist entries
+-- carry a .priority field that must always mirror the array index)
+function Utils.RenumberPriorities(list)
+    if not list then return end
+    for i, entry in ipairs(list) do
+        entry.priority = i
+    end
+end
+
+-- Fold the four-way role split (and peer aliases) down to the three-way
+-- TANK/HEALER/DPS the queue/waitlist stores and their UIs understand
+function Utils.FoldRole(role)
+    local upper = role and role:upper() or "DPS"
+    if upper == "TANK" or upper == "HEALER" then return upper end
+    return "DPS"
+end
+
 -- Format time in seconds to human readable
 function Utils.FormatTime(seconds)
     if not seconds or seconds < 0 then return "-" end

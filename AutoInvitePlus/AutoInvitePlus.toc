@@ -31,6 +31,7 @@ data\Consumables.lua
 data\GlyphData.lua
 data\PvPData.lua
 data\WeeklyQuests.lua
+data\LootDB.lua
 
 # ============================================
 # Modules (feature implementations)
@@ -76,3 +77,5 @@ ui\panels\LootHistoryPanel.lua
 ui\panels\SettingsPanel.lua
 ui\panels\CharacterPanel.lua
 ui\CentralGUI.lua
+ui\CentralGUIBrowser.lua
+ui\CentralGUIPopups.lua

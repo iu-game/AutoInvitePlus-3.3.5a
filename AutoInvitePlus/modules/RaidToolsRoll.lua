@@ -118,8 +118,18 @@ function RT.AnnounceWinners(n)
     local itemText = RT.rollItemLink or tostring(RT.rollItem or "loot")
     RT.Send("=== Roll results for " .. itemText .. " ===", "RAID_WARNING")
     local count = math.min(n, #sorted)
+    -- Stagger the per-rank lines so we don't trip the chat throttle (same
+    -- pattern as RT.AnnounceReserved) - an unstaggered burst of N RAID_WARNING
+    -- sends in one frame risks lines being dropped or a chat-ban trigger.
+    local delay = 0
     for i = 1, count do
-        RT.Send(i .. ". " .. sorted[i].name .. " - " .. sorted[i].value, "RAID_WARNING")
+        local line = i .. ". " .. sorted[i].name .. " - " .. sorted[i].value
+        if AIP.Utils and AIP.Utils.DelayedCall then
+            delay = delay + 0.4
+            AIP.Utils.DelayedCall(delay, function() RT.Send(line, "RAID_WARNING") end)
+        else
+            RT.Send(line, "RAID_WARNING")
+        end
     end
 end
 

@@ -31,7 +31,10 @@ local PROGRESSION = {
 
 -- Endgame slot -> where the strongest upgrades typically drop (raid-level, no
 -- item IDs so nothing here can be wrong/stale). Guidance, not a loot table.
-local SOURCE_HINTS = {
+-- Exposed on UP (not just local) - CharacterPanel.lua's buildSlotDetail()
+-- reads UP.SOURCE_HINTS as its fallback hint for slots with no curated
+-- GearUpgrades chain; a local-only table left that fallback always nil.
+UP.SOURCE_HINTS = {
     Trinket   = "ICC bosses, VoA (Toravon/Koralon), ToC25",
     ["Main Hand"] = "ICC wings (Saurfang, Sindragosa, Lich King), RS",
     Ranged    = "ICC + ToC25",
@@ -109,7 +112,7 @@ function UP.Report()
     AIP.Print("  |cFFFFFF00Weakest slots (upgrade first):|r")
     for _, r in ipairs(UP.WeakestSlots(4)) do
         local name = SLOT_NAME[r.slot] or ("#" .. r.slot)
-        local hint = SOURCE_HINTS[name]
+        local hint = UP.SOURCE_HINTS[name]
         if not r.link then
             AIP.Print("   |cFFFF6060" .. name .. ": EMPTY|r" .. (hint and ("  -> " .. hint) or ""))
         else
