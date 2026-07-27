@@ -5629,7 +5629,14 @@ function GUI.CreateAddGroupPopup()
     makeModeButton("compact", -84)
     makeModeButton("minimal", -148)
     popup.detailMode = (AIP.db and AIP.db.lfmDetailMode) or "detailed"
-    if popup.detailMode == "vague" then popup.detailMode = "compact" end -- legacy SavedVariables value
+    if popup.detailMode == "vague" then
+        -- Legacy SavedVariables value from before the 3-way toggle existed -
+        -- persist the normalized value back to AIP.db too, not just the
+        -- popup's in-memory copy, so any other code that reads
+        -- AIP.db.lfmDetailMode directly doesn't see the stale "vague" string.
+        popup.detailMode = "compact"
+        if AIP.db then AIP.db.lfmDetailMode = "compact" end
+    end
 
     popup.classChecks = {}
     popup.classGridWidgets = { classGridLabel }   -- shown/hidden as a group per mode
@@ -5844,6 +5851,20 @@ function GUI.CreateAddGroupPopup()
     -- (Requirements, Achievement, Note, Keyword, Broadcast, Reserved Items)
     -- get looked up per mode; Composition and the Class grid keep the single
     -- fixed position set at creation above (each is visible in only one mode).
+    -- Every mode shares the same fixed cascade below `needs` (needs->note -26,
+    -- note->keyword -28, keyword->broadcast -26, broadcast->reservedLabel -26,
+    -- reservedLabel->reservedFrame -18) - only `req`, `achieve` (composition
+    -- present or not) and `needs` (class grid present or not) actually vary
+    -- per mode. CONTENT_BOTTOM[mode] = ROW_Y[mode].reservedFrame - 34 (the
+    -- reserved-items frame's own height) in every case - keep that identity
+    -- if you ever change reservedFrame's height.
+    --
+    -- detailed's `needs` (-254) assumes the class grid is exactly 3 DPS rows
+    -- (GUI.ClassSpecs.DPS currently has 13 entries, wrapped 5/5/3 -> Tanks
+    -- -124, Heals -150, DPS rows -176/-202/-228, grid bottom ~-248). If
+    -- GUI.ClassSpecs.DPS ever grows past 15 entries (a 4th wrapped row),
+    -- lower detailed.needs (and everything below it, and CONTENT_BOTTOM.detailed)
+    -- by 26 per extra row, or the grid will overlap the Need summary line.
     local ROW_Y = {
         minimal  = { req = -26, achieve = -72,  needs = -106, note = -132, keyword = -160, broadcast = -186, reservedLabel = -212, reservedFrame = -230 },
         compact  = { req = -74, achieve = -120, needs = -154, note = -180, keyword = -208, broadcast = -234, reservedLabel = -260, reservedFrame = -278 },
@@ -5851,7 +5872,13 @@ function GUI.CreateAddGroupPopup()
     }
     local CONTENT_BOTTOM = { minimal = -264, compact = -312, detailed = -412 }
     local HEADER_HEIGHT = 96   -- detail frame's fixed TOPLEFT offset from the popup
-    local FOOTER_RESERVE = 158 -- popup space below detail's content the footer (preview box + buttons) needs
+    -- Vertical room the footer (customizeBtn @134, previewLabel @116,
+    -- previewFrame @68, scheduleText @50, createBtn/cancelBtn @16 - all
+    -- BOTTOMLEFT-anchored offsets from the popup's own bottom edge, set
+    -- where the footer widgets are created below) needs below detail's
+    -- content in every mode - a single reserve because those offsets never
+    -- change per mode, only how much content sits above them does.
+    local FOOTER_RESERVE = 158
 
     local function ReflowDetailRows(mode)
         local y = ROW_Y[mode] or ROW_Y.detailed
@@ -6215,6 +6242,11 @@ function GUI.CreateAddGroupPopup()
             for _, tile in pairs(popup.presetTiles) do tile:Hide() end
             if popup.collapsedNeedsText then popup.collapsedNeedsText:Hide() end
             detail:Show()
+            -- expandedHeightForMode is always set by the ApplyDetailMode()
+            -- call in the construction sequence before this can ever run
+            -- (the popup starts collapsed, so this is the earliest SetExpanded(true)
+            -- can fire) - the static EXPANDED_HEIGHT fallback is an unreachable
+            -- safety net, kept only in case that construction order ever changes.
             popup:SetHeight(popup.expandedHeightForMode or EXPANDED_HEIGHT)
             customizeText:SetText("|cFF66AAFF[-] Hide details|r")
         else
