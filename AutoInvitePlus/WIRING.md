@@ -86,10 +86,15 @@ the function names.
    16px numeric): >0 auto-checks the box, unchecking zeroes it.
    `CollectRoleSpecs()` returns a 4th value `classNeeds` aggregated from the
    boxes (per class+role, MDPS/RDPS folded to DPS, sorted T/H/D) and
-   `selectedClasses` entries carry `count`. `BuildConfig()` passes it straight
-   to `LF.BuildLFM(cfg)` -> `[Need: 2xMag 1xPP]` (codes:
-   `LF.NeedCodes[role][class]`, `LF.ClassNeedString`, capped at
-   `LF.MAX_NEED_PARTS = 5` rows + "+N").
+   `selectedClasses` entries carry `count`. `SyncCompositionFromClassGrid()`
+   keeps the Tanks/Healers/MDPS/RDPS composition inputs summed from the SAME
+   checked boxes whenever the grid changes or the mode switches to Detailed,
+   so the composition totals and the class grid can never disagree.
+   `BuildConfig()` passes classNeeds straight to `LF.BuildLFM(cfg)` ->
+   `[Need: 2xMag 1xPP]` (codes: `LF.NeedCodes[role][class]`,
+   `LF.ClassNeedString` — shows every row by default; only collapses tail
+   entries into "+N" if the message doesn't fit under 255 bytes even after
+   dropping reserved/note/achieve — see the overflow ladder below).
    Segment order: head, WQ, `[x/y][T:..]` counts, **need**, gs, ilvl, specs,
    keyword, achieve, note, res.
    Overflow drop order: reserved -> note -> achieve -> **need** -> specs
@@ -194,26 +199,55 @@ via `AIP.MoveToWaitlist` (field carry). Never re-add raw `InviteUnit` +
 7. New persisted settings go into `defaults` in Core.lua; DB_VERSION only bumps
    on structural migrations.
 
-## Vague vs detailed listings (composition detail mode)
+## Minimal / Compact / Detailed listings (composition detail mode)
 
-- `AIP.db.lfmDetailMode` ("detailed" default | "vague"), toggled by the
-  "Detailed" checkbox in the AddGroupPopup class-grid header
-  (`popup.detailModeCheck`; `SetClassGridEnabled` dims/deactivates the grid in
-  vague mode). The choice persists and rides the listing as
-  `MyGroup.detailMode` / GroupTracker `detailMode`.
-- Vague: `BuildConfig` nils roleSpecs/selectedClasses/classNeeds -> the
-  message carries ONLY `[x/y] [T:x/y ...]`; FitEngine skips all class/spec
-  scoring (its checks are nil-guarded); `RegenerateBroadcastMessage` never
-  re-injects class detail (vague guard clears classNeeds AND
-  roleSpecs/selectedClasses on the record + MyGroup).
+- `AIP.db.lfmDetailMode` ∈ `"minimal" | "compact" | "detailed"` ("compact"
+  default), toggled by the 3-way mode row at the top of the AddGroupPopup
+  detail frame (`popup.modeButtons[mode]`, built by `makeModeButton`;
+  `ApplyDetailMode(mode)` shows/hides the Composition row and Class grid per
+  mode and calls `ReflowDetailRows(mode)`). The choice persists and rides the
+  listing as `MyGroup.detailMode` / GroupTracker `detailMode`. Legacy saved
+  values normalize on load: `"vague"` -> `"compact"` (both in memory and
+  written back to `AIP.db.lfmDetailMode`).
+  - **Minimal**: only the Note field is shown/editable; Composition row and
+    Class grid are both hidden. `classHint` reads "(note only)".
+  - **Compact**: the Composition row (Tanks/Healers/MDPS/RDPS counters) is
+    shown; the Class grid is hidden. `classHint` reads "(role counts only)".
+  - **Detailed**: the Class grid is shown (per-class/spec checkboxes + count
+    boxes); the Composition row is hidden — `SyncCompositionFromClassGrid()`
+    keeps the (hidden) composition totals summed from the checked boxes so
+    the numbers underneath stay correct even though the row isn't visible.
+    `classHint` reads "(box = count)".
+  - All other fields (Requirements, Achievement, Note, Invite Keyword,
+    Broadcast checkbox, Reserved Items) are always visible in all 3 modes.
+    `ReflowDetailRows(mode)` repositions every row below the mode-specific
+    section per mode (`ROW_Y`/`CONTENT_BOTTOM` tables) and resizes the popup
+    (`popup.expandedHeightForMode`) so hiding a section reclaims its space
+    instead of leaving dead space — there is no per-mode fixed layout, only
+    this one dynamic reflow.
+- Minimal/Compact: `BuildConfig` nils roleSpecs/selectedClasses/classNeeds ->
+  the message carries ONLY `[x/y] [T:x/y ...]` (Minimal's note-only intent
+  and Compact's role-counts-only intent are both satisfied by the SAME
+  stripped payload — they differ only in what the popup UI itself shows/
+  lets the leader edit, not in what gets broadcast); FitEngine skips all
+  class/spec scoring (its checks are nil-guarded); `RegenerateBroadcastMessage`
+  never re-injects class detail for either mode (the guard checks
+  `detailMode ~= "detailed"`, not a single "vague" value, and clears
+  classNeeds AND roleSpecs/selectedClasses on the record + MyGroup).
+- Detailed: `RegenerateBroadcastMessage` derives the aggregate `[x/y]` role
+  totals (Tanks/Healers/MDPS/RDPS `.needed`) from the SAME live-decremented
+  `classNeeds` list that drives `[Need:]`, instead of the frozen posted
+  value — so the header count and the per-class breakdown shrink together as
+  recruits join and can never disagree. DPS splits back across mdps/rdps
+  proportionally to their current posted ratio.
 - `CS.AddGroup` merge rules (three-way, in this order):
   1. **Authoritative overwrite** — caller passed `isOwn=true` (GroupTracker
      Post path) OR the update is a DataBus event carrying `detailMode`
      (6.8+ full-state snapshot): the five class-detail fields
      (selectedClasses/roleSpecs/lookingForSpecs/classNeeds/detailMode) are
-     REPLACED, so a vague re-post / needs-hit-zero clears stale detail.
-     Exception: `info.specsTrimmed` (detailed DataBus event whose specs were
-     shed by the length ladder) keeps the fuller chat-learned
+     REPLACED, so a Minimal/Compact re-post / needs-hit-zero clears stale
+     detail. Exception: `info.specsTrimmed` (detailed DataBus event whose
+     specs were shed by the length ladder) keeps the fuller chat-learned
      roleSpecs/lookingForSpecs and count-merges classNeeds instead of wiping.
   2. **Peer chat scan** — or-merge (chat segments can be trimmed).
   3. **Own chat ECHO** (author == player but caller did NOT set isOwn) —
@@ -227,7 +261,11 @@ via `AIP.MoveToWaitlist` (field carry). Never re-add raw `InviteUnit` +
   silently dropped. Senders now ALSO emit compact strings via the LFMFormat
   codec: `comp` "1/2,4/6,3/8,4/9" (T,H,M,R cur/needed), `specs`
   "T:PW,BDK H:HP ..." (RoleSpecString minus brackets), `need` "2xMag,1xPP"
-  (uncapped), `dm` "D"/"V", plus note/weekly; empty optionals are omitted.
+  (uncapped), `dm` "D" detailed / "C" compact / "M" minimal, plus note/weekly;
+  empty optionals are omitted. `specs`/`need` are only ever encoded when
+  `detailMode == "detailed"` (`GUI.MaybeDataBusBroadcast`) — Minimal and
+  Compact broadcasts never carry class detail on the wire, matching what
+  they show in chat.
 - Codec lives in modules/LFMFormat.lua: `EncodeNeeds/DecodeNeeds` (via the
   `LF.NeedCodeInfo` reverse map — NeedCodes are globally unique across
   roles), `EncodeComp/DecodeComp`, `EncodeRoleSpecs/DecodeRoleSpecs`
@@ -256,7 +294,7 @@ via `AIP.MoveToWaitlist` (field carry). Never re-add raw `InviteUnit` +
   classes present only in classNeeds (pure-ranged -> Ranged row, others ->
   Melee; skipped when the class already has DPS spec codes on either row);
   a row with no class detail falls back to the truthful role count
-  ("N more"/"full"/"-") — that's what a vague/compact listing shows.
+  ("N more"/"full"/"-") — that's what a Minimal/Compact listing shows.
 
 ## Template binding (LFM popup <-> Composition)
 
