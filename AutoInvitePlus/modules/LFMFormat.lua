@@ -107,17 +107,17 @@ end
 
 -- classNeeds {{class="MAGE", role="DPS", count=2}, ...} (Comp.GetClassNeeds
 -- list shape) -> "[Need: 2xMag 1xPP]" or "" when empty/all filled.
--- Capped: a fresh 25-man aggregates 10+ class rows (~120 bytes) which would
--- starve the note/achievement/specs segments out of the 255-byte budget, so
--- only the first MAX_NEED_PARTS rows render and the rest collapse to "+N".
-LF.MAX_NEED_PARTS = 5
-
-function LF.ClassNeedString(classNeeds)
+-- maxParts: nil = show every row (default - detailed listings should show
+-- the entire counter set); a number caps display, collapsing the rest to
+-- "+N" - used by BuildLFM's overflow ladder to shrink gracefully under
+-- real byte pressure instead of dropping the whole block at once.
+function LF.ClassNeedString(classNeeds, maxParts)
     if not classNeeds or #classNeeds == 0 then return "" end
+    if maxParts and maxParts <= 0 then return "" end
     local parts, overflow = {}, 0
     for _, n in ipairs(classNeeds) do
         if (n.count or 0) > 0 then
-            if #parts < LF.MAX_NEED_PARTS then
+            if not maxParts or #parts < maxParts then
                 parts[#parts + 1] = tostring(n.count) .. "x" .. LF.NeedCode(n.class, n.role)
             else
                 overflow = overflow + n.count
@@ -274,7 +274,7 @@ function LF.BuildLFM(cfg)
     local gs = (cfg.gsMin and cfg.gsMin > 0) and (tostring(cfg.gsMin) .. "+") or ""
     local ilvl = (cfg.ilvlMin and cfg.ilvlMin > 0) and ("iLvl:" .. tostring(cfg.ilvlMin) .. "+") or ""
     local specs = LF.RoleSpecString(cfg.roleSpecs)
-    local need = LF.ClassNeedString(cfg.classNeeds)
+    local need = LF.ClassNeedString(cfg.classNeeds)  -- full fidelity by default; shrunk below only if it doesn't fit
     local kw = (cfg.keyword and cfg.keyword ~= "") and string.format('w/ "%s"', cfg.keyword) or ""
     local achieve = cfg.achievementLink or ""
     local note = cfg.note or ""
@@ -300,10 +300,27 @@ function LF.BuildLFM(cfg)
         return joinParts({ head, weekly, counts, segments.need, gs, ilvl, segments.specs, kw, segments.achieve, segments.note, segments.reserved })
     end
 
+    local needRowCount = 0
+    for _, n in ipairs(cfg.classNeeds or {}) do
+        if (n.count or 0) > 0 then needRowCount = needRowCount + 1 end
+    end
+
     local msg = assemble()
     for _, name in ipairs(dropOrder) do
         if #msg <= LF.MAX_LEN then break end
-        if segments[name] ~= "" then
+        if name == "need" and segments.need ~= "" then
+            -- Graceful degrade: shrink one entry at a time (mirrors what the
+            -- DataBus wire codec already does for the `need` field) instead
+            -- of dropping the whole [Need:] block in one step.
+            local n = needRowCount - 1
+            while n >= 0 do
+                segments.need = LF.ClassNeedString(cfg.classNeeds, n)
+                msg = assemble()
+                if #msg <= LF.MAX_LEN or n == 0 then break end
+                n = n - 1
+            end
+            trimmed[#trimmed + 1] = "need"
+        elseif segments[name] ~= "" then
             segments[name] = ""
             trimmed[#trimmed + 1] = name
             msg = assemble()

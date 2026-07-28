@@ -6167,7 +6167,9 @@ function GUI.CreateAddGroupPopup()
             head = head .. " |cFF888888(" .. (meta.occupied or 0) .. "/" .. (meta.total or 0) .. ")|r"
         end
         local LFm = AIP.LFMFormat
-        local maxParts = (LFm and LFm.MAX_NEED_PARTS) or 5  -- match the broadcast cap
+        -- UI-only compactness cap for this one-line summary; unrelated to the
+        -- broadcast text, which is uncapped (see LF.ClassNeedString).
+        local maxParts = 5
         local parts, extra = {}, 0
         for _, row in ipairs(classNeeds or {}) do
             if (row.count or 0) > 0 then
