@@ -319,7 +319,10 @@ function LF.BuildLFM(cfg)
                 if #msg <= LF.MAX_LEN or n == 0 then break end
                 n = n - 1
             end
-            trimmed[#trimmed + 1] = "need"
+            -- Distinguish "shrunk but still present" from "fully removed" -
+            -- the common case after this graceful shrink is the former, and
+            -- callers otherwise report it as an outright drop.
+            trimmed[#trimmed + 1] = (segments.need ~= "") and "need (shortened)" or "need"
         elseif segments[name] ~= "" then
             segments[name] = ""
             trimmed[#trimmed + 1] = name

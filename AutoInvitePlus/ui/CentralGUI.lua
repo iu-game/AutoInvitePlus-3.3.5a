@@ -4660,24 +4660,59 @@ function GUI.RegenerateBroadcastMessage()
         -- Detailed listings: the aggregate [x/y] role totals are derived
         -- from the SAME live-decremented list, not the frozen posted value,
         -- so the header count and the [Need:] breakdown can never disagree
-        -- (and both shrink together as recruits join).
-        local liveNeeded = {TANK = 0, HEALER = 0, DPS = 0}
+        -- (and both shrink together as recruits join). `needed` here means
+        -- "total target for the role", same as everywhere else in this
+        -- function - it must be current + remaining, NOT remaining alone,
+        -- or it double-counts joiners against `current` and can even go
+        -- negative as the group fills (e.g. 1 filled would read [1/2]
+        -- instead of the correct [1/3] for a 3-tank target with 2 left).
+        local liveRemaining = {TANK = 0, HEALER = 0, DPS = 0}
         for _, row in ipairs(remaining) do
-            liveNeeded[row.role] = (liveNeeded[row.role] or 0) + (row.count or 0)
+            liveRemaining[row.role] = (liveRemaining[row.role] or 0) + (row.count or 0)
         end
-        if ownGroup.tanks then ownGroup.tanks.needed = liveNeeded.TANK end
-        if ownGroup.healers then ownGroup.healers.needed = liveNeeded.HEALER end
+        local newTanksNeeded = currentTanks + liveRemaining.TANK
+        local newHealersNeeded = currentHealers + liveRemaining.HEALER
         -- classNeeds folds MDPS/RDPS into "DPS" (see CollectRoleSpecs) - split
-        -- the live DPS total back across mdps/rdps proportionally to their
-        -- CURRENT posted needed split so neither role silently zeroes out.
-        local mdpsNeeded, rdpsNeeded = ownGroup.mdps and ownGroup.mdps.needed or 0, ownGroup.rdps and ownGroup.rdps.needed or 0
-        local dpsSplitTotal = mdpsNeeded + rdpsNeeded
+        -- the live DPS remainder back across mdps/rdps proportionally to the
+        -- POSTED split (MyGroup.dpsSplitBase, stamped once at Post time and
+        -- never mutated). Reading ownGroup.mdps/rdps.needed here instead
+        -- would read back THIS function's own previous output, ratcheting
+        -- the ratio toward whichever role happened to empty out first.
+        local splitBase = GUI.MyGroup and GUI.MyGroup.dpsSplitBase
+        local postedMdps = (splitBase and splitBase.mdps)
+            or (ownGroup.mdps and ownGroup.mdps.needed) or 0
+        local postedRdps = (splitBase and splitBase.rdps)
+            or (ownGroup.rdps and ownGroup.rdps.needed) or 0
+        local dpsSplitTotal = postedMdps + postedRdps
+        local newMdpsNeeded, newRdpsNeeded = currentMdps, currentRdps
         if dpsSplitTotal > 0 then
-            local mdpsShare = math.floor(liveNeeded.DPS * mdpsNeeded / dpsSplitTotal + 0.5)
-            if ownGroup.mdps then ownGroup.mdps.needed = mdpsShare end
-            if ownGroup.rdps then ownGroup.rdps.needed = liveNeeded.DPS - mdpsShare end
+            local mdpsRemainingShare = math.floor(liveRemaining.DPS * postedMdps / dpsSplitTotal + 0.5)
+            newMdpsNeeded = currentMdps + mdpsRemainingShare
+            newRdpsNeeded = currentRdps + (liveRemaining.DPS - mdpsRemainingShare)
+        end
+        if ownGroup.tanks then ownGroup.tanks.needed = newTanksNeeded end
+        if ownGroup.healers then ownGroup.healers.needed = newHealersNeeded end
+        if ownGroup.mdps then ownGroup.mdps.needed = newMdpsNeeded end
+        if ownGroup.rdps then ownGroup.rdps.needed = newRdpsNeeded end
+        -- Mirror into GUI.MyGroup too - it's a separate table (see the
+        -- .current sync above) and DataBus broadcasts read straight from
+        -- it, so leaving it stale would make the chat message and the
+        -- DataBus payload disagree on the same listing.
+        if GUI.MyGroup then
+            if GUI.MyGroup.tanks then GUI.MyGroup.tanks.needed = newTanksNeeded end
+            if GUI.MyGroup.healers then GUI.MyGroup.healers.needed = newHealersNeeded end
+            if GUI.MyGroup.mdps then GUI.MyGroup.mdps.needed = newMdpsNeeded end
+            if GUI.MyGroup.rdps then GUI.MyGroup.rdps.needed = newRdpsNeeded end
         end
     else
+        -- Legacy/no-baseline fallback (posted before classNeedsBase existed,
+        -- or a Detailed listing whose count boxes were all left at 0 so
+        -- BuildConfig never set classNeeds): recomputes [Need:] fresh from
+        -- the template's recommendation engine each call. Deliberately does
+        -- NOT touch tanks/healers/mdps/rdps.needed - there is no posted
+        -- baseline to derive current+remaining from here, so the frozen
+        -- posted totals from BuildLFM's original values are left as-is
+        -- rather than guessed at.
         local templateKey = ownGroup.templateKey or (GUI.MyGroup and GUI.MyGroup.templateKey)
         if Comp and Comp.GetClassNeeds and templateKey then
             local needs = Comp.GetClassNeeds(templateKey)
@@ -6368,6 +6403,14 @@ function GUI.CreateAddGroupPopup()
         if cfg.ilvl then popup.ilvlInput:SetText(tostring(cfg.ilvl)) end
         if cfg.keyword then popup.keywordInput:SetText(cfg.keyword) end
         if cfg.note then popup.noteInput:SetText(cfg.note) end
+        -- The composition overrides above are stale/wrong in Detailed mode -
+        -- BuildConfig takes [x/y] from these inputs but classNeeds from the
+        -- class grid, so without this resync a "Last"/preset tile applied
+        -- while Detailed is active could post totals that disagree with the
+        -- grid's own [Need:] breakdown. No-ops outside Detailed.
+        if popup.detailMode == "detailed" and popup.SyncCompositionFromClassGrid then
+            popup.SyncCompositionFromClassGrid()
+        end
         RefreshPreview()
     end
     popup.ApplyPreset = ApplyPreset
@@ -6526,6 +6569,11 @@ function GUI.CreateAddGroupPopup()
             for class, n in pairs((raid and raid.classCounts) or {}) do snap[class] = n end
             GUI.MyGroup.classCountsAtPost = snap
         end
+        -- Stable ratio for splitting the live DPS remainder back across
+        -- mdps/rdps (RegenerateBroadcastMessage) - captured once here and
+        -- never mutated, so repeated regenerations don't read back their
+        -- own previous output as the split source.
+        GUI.MyGroup.dpsSplitBase = {mdps = cfg.mdps.needed, rdps = cfg.rdps.needed}
 
         -- Remember this config for the Quick Post "Last" tile
         if AIP.db then

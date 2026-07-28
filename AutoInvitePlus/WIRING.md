@@ -201,7 +201,7 @@ via `AIP.MoveToWaitlist` (field carry). Never re-add raw `InviteUnit` +
 
 ## Minimal / Compact / Detailed listings (composition detail mode)
 
-- `AIP.db.lfmDetailMode` ∈ `"minimal" | "compact" | "detailed"` ("compact"
+- `AIP.db.lfmDetailMode` ∈ `"minimal" | "compact" | "detailed"` ("detailed"
   default), toggled by the 3-way mode row at the top of the AddGroupPopup
   detail frame (`popup.modeButtons[mode]`, built by `makeModeButton`;
   `ApplyDetailMode(mode)` shows/hides the Composition row and Class grid per
@@ -217,7 +217,11 @@ via `AIP.MoveToWaitlist` (field carry). Never re-add raw `InviteUnit` +
     boxes); the Composition row is hidden — `SyncCompositionFromClassGrid()`
     keeps the (hidden) composition totals summed from the checked boxes so
     the numbers underneath stay correct even though the row isn't visible.
-    `classHint` reads "(box = count)".
+    `classHint` reads "(box = count)". `ApplyDetailMode` calls this sync on
+    EVERY switch into Detailed, so a manual Compact-mode composition edit is
+    intentionally overwritten by the grid's numbers on a Compact -> Detailed
+    -> Compact round trip — the grid is the single source of truth whenever
+    Detailed is (or has been) active during that popup session.
   - All other fields (Requirements, Achievement, Note, Invite Keyword,
     Broadcast checkbox, Reserved Items) are always visible in all 3 modes.
     `ReflowDetailRows(mode)` repositions every row below the mode-specific

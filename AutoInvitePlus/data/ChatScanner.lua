@@ -171,13 +171,14 @@ function CS.AddGroup(info)
         existing.inviteKeyword = info.inviteKeyword or existing.inviteKeyword
         existing.triggerKey = info.triggerKey or info.inviteKeyword or existing.triggerKey
         -- Own listings overwrite the class-detail fields UNCONDITIONALLY: a
-        -- re-post in vague mode sends them as nil and the or-merge would leak
-        -- the previous detailed spec list into "vague" regenerated broadcasts
+        -- re-post in Minimal/Compact mode sends them as nil and the or-merge
+        -- would leak the previous detailed spec list into the regenerated
+        -- Minimal/Compact broadcast
         if authoritative or (info.isDataBus and info.detailMode) then
             -- Full-state snapshots overwrite: the GroupTracker own-post path
             -- and 6.8+ DataBus peer updates (dm field present). Ensures a
-            -- switch to vague - or needs reaching zero - never leaves stale
-            -- detail behind (a re-post sends those fields as nil).
+            -- switch to Minimal/Compact - or needs reaching zero - never
+            -- leaves stale detail behind (a re-post sends those fields as nil).
             existing.selectedClasses = info.selectedClasses
             if info.specsTrimmed then
                 -- Snapshot lost its specs to the length ladder: keep the
