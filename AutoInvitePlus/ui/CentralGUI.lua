@@ -5678,6 +5678,7 @@ function GUI.CreateAddGroupPopup()
                     end
                 end
             end
+            if popup.SyncCompositionFromClassGrid then popup.SyncCompositionFromClassGrid() end
             if RefreshPreview then RefreshPreview() end
         end)
         return btn
@@ -5714,6 +5715,7 @@ function GUI.CreateAddGroupPopup()
             if isUser then
                 local n = tonumber(self:GetText()) or 0
                 if n > 0 and not check:GetChecked() then check:SetChecked(true) end
+                if popup.SyncCompositionFromClassGrid then popup.SyncCompositionFromClassGrid() end
                 if RefreshPreview then RefreshPreview() end
             end
         end)
@@ -5734,6 +5736,7 @@ function GUI.CreateAddGroupPopup()
                     self.countInput:SetText("0")
                 end
             end
+            if popup.SyncCompositionFromClassGrid then popup.SyncCompositionFromClassGrid() end
             if RefreshPreview then RefreshPreview() end
         end)
         popup.classChecks[roleKey][spec.class .. spec.spec] = check
@@ -5934,6 +5937,13 @@ function GUI.CreateAddGroupPopup()
         else
             classHint:SetText("|cFF888888(box = count)|r")
         end
+        -- Switching into Detailed must re-derive the composition totals from
+        -- the class grid immediately - otherwise the broadcast preview shows
+        -- whatever totals were last typed/synced in another mode until the
+        -- user happens to touch a checkbox or count field.
+        if showClassGrid and popup.SyncCompositionFromClassGrid then
+            popup.SyncCompositionFromClassGrid()
+        end
         ReflowDetailRows(mode)
     end
     popup.ApplyDetailMode = ApplyDetailMode
@@ -6043,13 +6053,47 @@ function GUI.CreateAddGroupPopup()
         return roleSpecs, lookingForSpecs, selectedClasses, classNeeds
     end
 
-    -- Build the LFM config table off the current popup state.
-    -- Vague mode strips every class-level detail: the message and the listing
+    -- While Detailed mode is active, the class grid's checked per-spec counts
+    -- are authoritative: mirror their sums into the (hidden) composition-row
+    -- inputs so BuildConfig's [x/y] segment can never disagree with the
+    -- [Need:] block, and so switching back to Compact shows correct numbers.
+    -- No-ops outside Detailed mode - Compact-mode manual edits are untouched.
+    local function SyncCompositionFromClassGrid()
+        if popup.detailMode ~= "detailed" then return end
+        local tankSum, healSum, mdpsSum, rdpsSum = 0, 0, 0, 0
+        for _, check in pairs(popup.classChecks.TANK or {}) do
+            if check:GetChecked() and check.countInput then
+                tankSum = tankSum + (tonumber(check.countInput:GetText()) or 0)
+            end
+        end
+        for _, check in pairs(popup.classChecks.HEALER or {}) do
+            if check:GetChecked() and check.countInput then
+                healSum = healSum + (tonumber(check.countInput:GetText()) or 0)
+            end
+        end
+        for _, check in pairs(popup.classChecks.DPS or {}) do
+            if check:GetChecked() and check.countInput and check.specData then
+                local n = tonumber(check.countInput:GetText()) or 0
+                if check.specData.melee then mdpsSum = mdpsSum + n else rdpsSum = rdpsSum + n end
+            end
+        end
+        popup.tankInput:SetText(tostring(tankSum))
+        popup.healInput:SetText(tostring(healSum))
+        popup.mdpsInput:SetText(tostring(mdpsSum))
+        popup.rdpsInput:SetText(tostring(rdpsSum))
+    end
+    popup.SyncCompositionFromClassGrid = SyncCompositionFromClassGrid
+
+    -- Build the LFM config table off the current popup state. Minimal and
+    -- Compact strip every class-level detail: the message and the listing
     -- carry only the [x/y] + [T:x/y ...] role counts (FitEngine then skips
     -- spec/class scoring - all its class checks are nil-guarded).
     local function BuildConfig()
         local roleSpecs, lookingForSpecs, selectedClasses, classNeeds = CollectRoleSpecs()
-        if popup.detailMode == "vague" then
+        if popup.detailMode ~= "detailed" then
+            -- Minimal and Compact both broadcast role counts only - neither
+            -- shows the class grid, so neither should carry stale class
+            -- detail from whatever was last checked while Detailed was active.
             roleSpecs, lookingForSpecs, selectedClasses, classNeeds = nil, {}, nil, nil
         end
         local achieveLink = ""
@@ -6082,10 +6126,16 @@ function GUI.CreateAddGroupPopup()
     -- count boxes (cfg.classNeeds); mirrored into the collapsed hint. Driven
     -- from RefreshPreview so every count/checkbox edit refreshes it.
     local function RenderNeedsSummary(classNeeds)
-        if popup.detailMode == "vague" then
-            local vagueTxt = "|cFF888888Vague listing: role counts only - any class can apply.|r"
-            needsText:SetText(vagueTxt)
-            if popup.collapsedNeedsText then popup.collapsedNeedsText:SetText(vagueTxt) end
+        if popup.detailMode == "minimal" then
+            local minimalTxt = "|cFF888888Minimal listing: only the note is broadcast.|r"
+            needsText:SetText(minimalTxt)
+            if popup.collapsedNeedsText then popup.collapsedNeedsText:SetText(minimalTxt) end
+            return
+        end
+        if popup.detailMode == "compact" then
+            local compactTxt = "|cFF888888Compact listing: role counts only - any class can apply.|r"
+            needsText:SetText(compactTxt)
+            if popup.collapsedNeedsText then popup.collapsedNeedsText:SetText(compactTxt) end
             return
         end
         local meta = popup.classNeedsMeta
@@ -6230,6 +6280,13 @@ function GUI.CreateAddGroupPopup()
         UpdateLockoutWarning()
         UpdateWeeklyStrip()
         UpdateClassNeeds(true)
+        -- UpdateClassNeeds(true) just ran ApplyRecommendedSpecs, which set the
+        -- per-spec count boxes from the template's recommendation - sync the
+        -- (hidden while Detailed is active) composition-row mirror to match
+        -- immediately, not just after the next manual class-grid edit.
+        if popup.detailMode == "detailed" and popup.SyncCompositionFromClassGrid then
+            popup.SyncCompositionFromClassGrid()
+        end
         RefreshPreview()
     end
     popup.ApplyTemplateDefaults = ApplyTemplateDefaults
