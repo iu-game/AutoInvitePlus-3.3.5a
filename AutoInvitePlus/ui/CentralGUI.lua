@@ -4590,12 +4590,6 @@ function GUI.RegenerateBroadcastMessage()
     -- Get current composition (tanks, healers, mdps, rdps)
     local currentTanks, currentHealers, currentMdps, currentRdps = GUI.GetCurrentGroupComposition()
 
-    -- Get needed counts from the original group data
-    local neededTanks = ownGroup.tanks and ownGroup.tanks.needed or 2
-    local neededHealers = ownGroup.healers and ownGroup.healers.needed or 6
-    local neededMdps = ownGroup.mdps and ownGroup.mdps.needed or 8
-    local neededRdps = ownGroup.rdps and ownGroup.rdps.needed or 9
-
     -- Update the scanner record's current counts
     if ownGroup.tanks then ownGroup.tanks.current = currentTanks end
     if ownGroup.healers then ownGroup.healers.current = currentHealers end
@@ -4624,13 +4618,14 @@ function GUI.RegenerateBroadcastMessage()
     -- Falls back to the template recommendation engine for listings posted
     -- before the count boxes existed.
     local Comp = AIP.Composition
-    local vague = (ownGroup.detailMode == "vague")
-        or (GUI.MyGroup and GUI.MyGroup.detailMode == "vague")
+    local mode = ownGroup.detailMode or (GUI.MyGroup and GUI.MyGroup.detailMode)
+    local notDetailed = (mode ~= "detailed")
     local base = GUI.MyGroup and GUI.MyGroup.classNeedsBase
     local snap = GUI.MyGroup and GUI.MyGroup.classCountsAtPost
-    if vague then
-        -- Vague listing: never inject class-level detail on regeneration
-        -- (belt-and-braces: also clear any stale detailed fields on the record)
+    if notDetailed then
+        -- Minimal/Compact listing: never inject class-level detail on
+        -- regeneration (belt-and-braces: also clear any stale detailed
+        -- fields on the record).
         ownGroup.classNeeds = nil
         ownGroup.roleSpecs = nil
         ownGroup.selectedClasses = nil
@@ -4656,6 +4651,27 @@ function GUI.RegenerateBroadcastMessage()
         end
         ownGroup.classNeeds = remaining
         if GUI.MyGroup then GUI.MyGroup.classNeeds = remaining end
+
+        -- Detailed listings: the aggregate [x/y] role totals are derived
+        -- from the SAME live-decremented list, not the frozen posted value,
+        -- so the header count and the [Need:] breakdown can never disagree
+        -- (and both shrink together as recruits join).
+        local liveNeeded = {TANK = 0, HEALER = 0, DPS = 0}
+        for _, row in ipairs(remaining) do
+            liveNeeded[row.role] = (liveNeeded[row.role] or 0) + (row.count or 0)
+        end
+        if ownGroup.tanks then ownGroup.tanks.needed = liveNeeded.TANK end
+        if ownGroup.healers then ownGroup.healers.needed = liveNeeded.HEALER end
+        -- classNeeds folds MDPS/RDPS into "DPS" (see CollectRoleSpecs) - split
+        -- the live DPS total back across mdps/rdps proportionally to their
+        -- CURRENT posted needed split so neither role silently zeroes out.
+        local mdpsNeeded, rdpsNeeded = ownGroup.mdps and ownGroup.mdps.needed or 0, ownGroup.rdps and ownGroup.rdps.needed or 0
+        local dpsSplitTotal = mdpsNeeded + rdpsNeeded
+        if dpsSplitTotal > 0 then
+            local mdpsShare = math.floor(liveNeeded.DPS * mdpsNeeded / dpsSplitTotal + 0.5)
+            if ownGroup.mdps then ownGroup.mdps.needed = mdpsShare end
+            if ownGroup.rdps then ownGroup.rdps.needed = liveNeeded.DPS - mdpsShare end
+        end
     else
         local templateKey = ownGroup.templateKey or (GUI.MyGroup and GUI.MyGroup.templateKey)
         if Comp and Comp.GetClassNeeds and templateKey then
@@ -4668,6 +4684,13 @@ function GUI.RegenerateBroadcastMessage()
             end
         end
     end
+
+    -- Get needed counts AFTER the block above, which mutates
+    -- ownGroup.tanks/healers/mdps/rdps.needed in place for Detailed listings.
+    local neededTanks = ownGroup.tanks and ownGroup.tanks.needed or 2
+    local neededHealers = ownGroup.healers and ownGroup.healers.needed or 6
+    local neededMdps = ownGroup.mdps and ownGroup.mdps.needed or 8
+    local neededRdps = ownGroup.rdps and ownGroup.rdps.needed or 9
 
     local msg = AIP.LFMFormat.BuildLFM({
         raidKey = ownGroup.raid or "?",
