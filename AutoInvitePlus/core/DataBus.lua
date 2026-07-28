@@ -54,7 +54,7 @@ DB.EventTypes = {
             "comp",         -- string: "1/2,4/6,3/8,4/9" (T,H,M,R current/needed)
             "specs",        -- string: "T:PW,BDK H:HP M:AW R:Mag" (looking-for codes)
             "need",         -- string: "2xMag,1xPP" per-class needed counts
-            "dm",           -- string: "D" detailed / "V" vague listing mode
+            "dm",           -- string: "D" detailed / "C" compact / "M" minimal listing mode
             "weekly",       -- string: weekly raid quest token (optional)
         },
     },

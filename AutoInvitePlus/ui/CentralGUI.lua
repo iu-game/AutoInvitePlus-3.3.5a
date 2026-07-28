@@ -4209,9 +4209,14 @@ function GUI.MaybeDataBusBroadcast(dryRun)
         -- optionals are omitted entirely (every serialized field costs cap).
         local MyG = GUI.MyGroup
         local LF = AIP.LFMFormat
-        local vague = (MyG.detailMode == "vague")
-        local specsStr = (not vague) and LF and LF.EncodeRoleSpecs(MyG.roleSpecs) or ""
-        local needStr = (not vague) and LF and LF.EncodeNeeds(MyG.classNeeds) or ""
+        local detailed = (MyG.detailMode == "detailed")
+        local specsStr = detailed and LF and LF.EncodeRoleSpecs(MyG.roleSpecs) or ""
+        local needStr = detailed and LF and LF.EncodeNeeds(MyG.classNeeds) or ""
+        local dmCode
+        if MyG.detailMode == "detailed" then dmCode = "D"
+        elseif MyG.detailMode == "minimal" then dmCode = "M"
+        elseif MyG.detailMode then dmCode = "C"
+        end
         AIP.DataBus.BroadcastLFM({
             raid = MyG.raid,
             comp = LF and LF.EncodeComp(MyG) or nil,
@@ -4224,7 +4229,7 @@ function GUI.MaybeDataBusBroadcast(dryRun)
             triggerKey = MyG.inviteKeyword,
             specs = specsStr ~= "" and specsStr or nil,
             need = needStr ~= "" and needStr or nil,
-            dm = MyG.detailMode and (vague and "V" or "D") or nil,
+            dm = dmCode,
             note = (MyG.note and MyG.note ~= "") and MyG.note or nil,
             weekly = (MyG.weekly and MyG.weekly ~= "") and MyG.weekly or nil,
         })

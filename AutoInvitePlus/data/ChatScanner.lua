@@ -1005,7 +1005,8 @@ local function OnDataBusLFM(event)
         roleSpecs, lookingForSpecs = LF.DecodeRoleSpecs(data.specs)
     end
     local classNeeds = data.need and LF and LF.DecodeNeeds and LF.DecodeNeeds(data.need) or nil
-    local detailMode = (data.dm == "V" and "vague") or (data.dm == "D" and "detailed") or nil
+    local detailMode = (data.dm == "D" and "detailed") or (data.dm == "C" and "compact")
+        or (data.dm == "M" and "minimal") or nil
 
     -- Detailed senders always emit specs alongside need (classNeeds is built
     -- FROM the spec selection); a detailed event carrying need but no specs
