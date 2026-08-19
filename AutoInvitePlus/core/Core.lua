@@ -4,7 +4,7 @@
 -- Refactored with DRY principle and OOP patterns
 
 local ADDON_NAME = "AutoInvitePlus"
-local VERSION = "6.4.0"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
+local VERSION = "6.4.1"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
 local DB_VERSION = 5  -- Increment when saved variables structure changes (5.5: raid sessions, 5.4: mdps/rdps split, 4: loot history retention)
 
 -- Create main addon namespace (may already exist from Utils.lua)
@@ -276,16 +276,21 @@ local function MarkChannelSpammed(channelKey)
 end
 
 -- Utility functions
+-- AddMessage is wrapped in pcall: other addons' chat-frame hooks (e.g. Prat's
+-- Timestamps module) can be mid-teardown during events like PLAYER_LOGOUT and
+-- error inside their own hook, which would otherwise surface on our call site.
 local function Print(msg)
-    DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00[AutoInvite+]|r " .. tostring(msg))
+    if DEFAULT_CHAT_FRAME then
+        pcall(DEFAULT_CHAT_FRAME.AddMessage, DEFAULT_CHAT_FRAME, "|cFF00FF00[AutoInvite+]|r " .. tostring(msg))
+    end
     if AIP.Log then AIP.Log("[PRINT] " .. tostring(msg)) end
 end
 
 local function Debug(msg)
     -- Always log to file; only echo to chat when debug mode is enabled.
     if AIP.Log then AIP.Log("[DEBUG] " .. tostring(msg)) end
-    if AIP.db and AIP.db.debug then
-        DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00[AIP Debug]|r " .. tostring(msg))
+    if AIP.db and AIP.db.debug and DEFAULT_CHAT_FRAME then
+        pcall(DEFAULT_CHAT_FRAME.AddMessage, DEFAULT_CHAT_FRAME, "|cFFFFFF00[AIP Debug]|r " .. tostring(msg))
     end
 end
 
