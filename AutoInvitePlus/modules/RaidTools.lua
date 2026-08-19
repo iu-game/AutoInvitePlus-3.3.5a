@@ -809,11 +809,19 @@ function RT.OnMechanicCombatLog(...)
     local sub = select(2, ...)
 
     -- Bloodlust/Heroism (a friendly buff) -> duration + lockout timers.
+    -- Some NPCs/bosses share these spell names, so only trust an actual
+    -- player caster in our own party/raid, never a boss/NPC cast.
     if sub == "SPELL_AURA_APPLIED" then
         local sName = select(10, ...)
         if sName and RT.LustSpells[sName] then
-            RT.StartTimer("lust", sName, 40, 0.2, 0.9, 0.3, nil, "Interface\\Icons\\Spell_Nature_BloodLust")
-            RT.StartTimer("sated", "Sated (lockout)", 600, 1, 0.3, 0.3, nil, "Interface\\Icons\\Spell_Nature_BloodLust")
+            local srcFlags = select(5, ...)
+            local isRaidPlayer = srcFlags and bit and bit.band
+                and bit.band(srcFlags, 0x00000400) ~= 0   -- COMBATLOG_OBJECT_TYPE_PLAYER
+                and bit.band(srcFlags, 0x00000007) ~= 0   -- MINE | PARTY | RAID affiliation
+            if isRaidPlayer then
+                RT.StartTimer("lust", sName, 40, 0.2, 0.9, 0.3, nil, "Interface\\Icons\\Spell_Nature_BloodLust")
+                RT.StartTimer("sated", "Sated (lockout)", 600, 1, 0.3, 0.3, nil, "Interface\\Icons\\Spell_Nature_BloodLust")
+            end
             return
         end
     end

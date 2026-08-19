@@ -1488,8 +1488,10 @@ function SP.StartAutoSpam()
     AIP.Print("Auto-spam started (interval: " .. interval .. "s)")
 end
 
--- Stop auto-spam
-function SP.StopAutoSpam()
+-- Stop auto-spam. Pass silent=true when called during PLAYER_LOGOUT teardown,
+-- where other addons' chat-frame hooks (e.g. Prat Timestamps) may already have
+-- torn down their state and error on any AddMessage call, including ours.
+function SP.StopAutoSpam(silent)
     SP.AutoSpamActive = false
     if SP.AutoSpamTimer then
         SP.AutoSpamTimer:SetScript("OnUpdate", nil)
@@ -1500,7 +1502,9 @@ function SP.StopAutoSpam()
     if SP.Frame and SP.Frame.autoStatus then
         SP.Frame.autoStatus:SetText("|cFFFF0000Stopped|r")
     end
-    AIP.Print("Auto-spam stopped")
+    if not silent then
+        AIP.Print("Auto-spam stopped")
+    end
 end
 
 -- Update auto-spam status
@@ -2124,5 +2128,5 @@ end
 local cleanupFrame = CreateFrame("Frame")
 cleanupFrame:RegisterEvent("PLAYER_LOGOUT")
 cleanupFrame:SetScript("OnEvent", function()
-    SP.StopAutoSpam()
+    SP.StopAutoSpam(true)  -- silent: chat-frame hooks may already be torn down
 end)

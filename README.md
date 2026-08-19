@@ -1,4 +1,4 @@
-# AutoInvite Plus v6.4.0
+# AutoInvite Plus v6.4.1
 
 A comprehensive raid organization suite for World of Warcraft 3.3.5a (WotLK) with an LFM/LFG browser, auto-invite system, raid management & assist tools, loot tracking, and a full character-optimization / coaching suite (gear, spec, rotation, PvE **and** PvP).
 
@@ -315,6 +315,10 @@ Customize automatic whisper responses:
 ---
 
 ## Changelog
+
+### v6.4.1
+- **Fixed**: the Bloodlust/Heroism/Time Warp/Ancient Hysteria timer now only starts for a real player cast in your own party/raid, so a boss/NPC ability sharing one of those spell names (e.g. Ancient Hysteria) no longer falsely announces a lust ([#3](https://github.com/iu-game/AutoInvitePlus-3.3.5a/issues/3))
+- **Fixed**: `PLAYER_LOGOUT` no longer prints "Auto-spam stopped" to chat, which could throw a Lua error through other addons' chat-frame hooks (e.g. Prat's Timestamps module) mid-teardown; `AIP.Print`/`AIP.Debug` also now guard their `AddMessage` call so a hook error in any addon can't surface at AIP's call site ([#2](https://github.com/iu-game/AutoInvitePlus-3.3.5a/issues/2))
 
 ### v6.4.0
 - **Data-accuracy audit**: validated the character-optimization data against WotLK 3.3.5a sources — fixed the Balance-druid hit cap, Dislodged Foreign Object normal/heroic IDs, a mis-credited trinket boss, an ArP conversion note, and corrected a false "tier-ID renumbering" assumption. Verified clean: all glyph/gem/enchant/consumable IDs, ~120 BiS/upgrade IDs, the dispel matrix, proc names, and talent-string sums
