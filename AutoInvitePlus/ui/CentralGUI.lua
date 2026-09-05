@@ -928,7 +928,15 @@ function GUI.CreateFrame()
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
         return b
     end
-    local qTools = titleBtn("Tools", 46, minBtn, -8,
+    -- Simplified View toggle - lives in the title bar (not the tab bar) because
+    -- simplified mode hides the tab bar itself; this button must stay reachable
+    -- to turn it back off. Label/highlight state is set by ApplySimplifiedView.
+    local simpleBtn = titleBtn("Simple", 50, minBtn, -8,
+        function() GUI.ToggleSimplifiedView() end,
+        "Simplified View: show only the LFM/LFG tree")
+    frame.simpleBtn = simpleBtn
+
+    local qTools = titleBtn("Tools", 46, simpleBtn, -3,
         function() if AIP.RaidTools and AIP.RaidTools.ToggleRollWindow then AIP.RaidTools.ToggleRollWindow() end end,
         "Raid Tools (roll window)")
     local qBreak = titleBtn("Break", 44, qTools, -3,
@@ -1164,6 +1172,12 @@ function GUI.CreateFrame()
         end
         -- Recompute elastic Queue/LFG/Waitlist row counts on window resize.
         GUI.RefreshQueueLayout()
+        -- The tree panel's width is set explicitly (not anchored to the
+        -- container's right edge) so it can revert to 340px when simplified
+        -- view turns off - keep it following the container while it's on.
+        if AIP.db and AIP.db.simplifiedView then
+            GUI.ResizeSimplifiedTree()
+        end
     end)
 
     frame:SetMinResize(GUI.Config.minWidth, GUI.Config.minHeight)
@@ -1172,7 +1186,91 @@ function GUI.CreateFrame()
     GUI.InitializeTabs(frame)
 
     GUI.Frame = frame
+
+    -- Restore simplified view from the saved setting.
+    GUI.ApplySimplifiedView(AIP.db and AIP.db.simplifiedView or false)
+
     return frame
+end
+
+-- Widen the LFM tab's tree panel to fill its container (simplified view) or
+-- restore its normal 340px column width. Split out from ApplySimplifiedView
+-- so the window-resize handler can keep it in sync without redoing the rest
+-- of the show/hide work on every resize tick.
+function GUI.ResizeSimplifiedTree()
+    local lfmContainer = GUI.Frame and GUI.Frame.tabContents and GUI.Frame.tabContents["lfm"]
+    if not lfmContainer or not lfmContainer.treePanel then return end
+
+    local width = lfmContainer:GetWidth()
+    if not width or width < 100 then width = 700 end  -- fallback before first layout pass
+    lfmContainer.treePanel:SetWidth(width)
+end
+
+-- Simplified View: show only the LFM/LFG tree, hiding the tab bar and the
+-- Group Details / Queue-LFG-Waitlist panels. The tree panel keeps its own
+-- header/search/filter/refresh controls - those are controls FOR the tree,
+-- not separate content.
+function GUI.ApplySimplifiedView(enabled)
+    if not GUI.Frame then return end
+    local frame = GUI.Frame
+
+    if enabled then
+        GUI.SelectTab("lfm")
+    end
+
+    if frame.tabBar then
+        if enabled then frame.tabBar:Hide() else frame.tabBar:Show() end
+    end
+
+    if frame.content then
+        frame.content:ClearAllPoints()
+        frame.content:SetPoint("TOPLEFT", 10, enabled and -45 or -75)
+        frame.content:SetPoint("BOTTOMRIGHT", -10, 40)
+    end
+
+    local lfmContainer = frame.tabContents and frame.tabContents["lfm"]
+    if lfmContainer then
+        if lfmContainer.detailsPanel then
+            if enabled then lfmContainer.detailsPanel:Hide() else lfmContainer.detailsPanel:Show() end
+        end
+        if lfmContainer.queuePanel then
+            if enabled then lfmContainer.queuePanel:Hide() else lfmContainer.queuePanel:Show() end
+        end
+        if lfmContainer.treePanel then
+            if enabled then
+                GUI.ResizeSimplifiedTree()
+            else
+                lfmContainer.treePanel:SetWidth(340)
+            end
+        end
+    end
+
+    if frame.simpleBtn then
+        frame.simpleBtn:SetText(enabled and "Full View" or "Simple")
+        local fs = frame.simpleBtn:GetFontString()
+        if fs then
+            if enabled then
+                fs:SetTextColor(1, 0.82, 0)  -- gold, matches the active-tab highlight
+            else
+                fs:SetTextColor(1, 1, 1)
+            end
+        end
+    end
+
+    -- Recompute elastic Queue/LFG/Waitlist row counts and tree sizing after
+    -- the layout settles.
+    if AIP.Utils and AIP.Utils.DelayedCall then
+        AIP.Utils.DelayedCall(0.05, GUI.RefreshQueueLayout)
+    else
+        GUI.RefreshQueueLayout()
+    end
+end
+
+-- Toggle Simplified View on/off and persist the choice.
+function GUI.ToggleSimplifiedView()
+    if not AIP.db then return end
+    AIP.db.simplifiedView = not AIP.db.simplifiedView
+    GUI.ApplySimplifiedView(AIP.db.simplifiedView)
 end
 
 -- Toggle minimize state

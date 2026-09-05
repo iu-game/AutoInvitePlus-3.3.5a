@@ -159,6 +159,7 @@ local defaults = {
     guiUnfocusedOpacity = 0.6,  -- Opacity when window is not focused
     guiUnfocusedEnabled = false, -- Enable unfocused opacity reduction
     minimapAngle = 220,         -- Minimap button angle
+    simplifiedView = false,     -- Hide the tab bar + Group Details/Queue panels, tree only
 
     -- LFM/LFG Browser settings
     treeStaleTimeout = 180,     -- Hide tree entries older than this (seconds). Default: 3 min

@@ -52,6 +52,16 @@ Parsers.RaidPatterns = {
     {pattern = "icc%s*10", raid = "ICC10N", category = "ICC"},
     {pattern = "icc", raid = "ICC", category = "ICC"},
     {pattern = "icecrown", raid = "ICC", category = "ICC"},
+    -- Boss-name shorthand (verified against Comp.RaidBosses in
+    -- data/RaidComposition.lua) - people often name the current/target
+    -- encounter instead of the instance acronym ("need heal for putricide").
+    -- "The Lich King" is ALSO a Halls of Reflection encounter, but that
+    -- dungeon has no boss-name alias of its own, so mapping it to ICC here
+    -- is unambiguous.
+    {pattern = "%f[%w]sindragosa%f[%W]", raid = "ICC", category = "ICC"},
+    {pattern = "%f[%w]putricide%f[%W]", raid = "ICC", category = "ICC"},
+    {pattern = "%f[%w]saurfang%f[%W]", raid = "ICC", category = "ICC"},
+    {pattern = "lich%s*king", raid = "ICC", category = "ICC"},
 
     -- RS (Ruby Sanctum)
     {pattern = "rs%s*25%s*h", raid = "RS25H", category = "RS"},
@@ -72,6 +82,14 @@ Parsers.RaidPatterns = {
     {pattern = "toc%s*10", raid = "TOC10", category = "TOC"},
     {pattern = "trial%s*of%s*the?%s*crusader", raid = "TOC", category = "TOC"},
     {pattern = "trial%s*of%s*the?%s*grand%s*crusader", raid = "TOGC", category = "TOC"},
+    -- Boss-name shorthand (verified against Comp.RaidBosses).
+    {pattern = "jaraxxus", raid = "TOC", category = "TOC"},
+    {pattern = "anub'?arak", raid = "TOC", category = "TOC"},
+    -- Bare shorthand with no size number - what people actually type in chat
+    -- ("lfm togc need heal"). Listed last in this block so the sized/full-name
+    -- patterns above still win when present.
+    {pattern = "%f[%w]togc%f[%W]", raid = "TOGC", category = "TOC"},
+    {pattern = "%f[%w]toc%f[%W]", raid = "TOC", category = "TOC"},
 
     -- Ulduar
     {pattern = "uld%s*25", raid = "ULDUAR25", category = "ULDUAR"},
@@ -79,11 +97,19 @@ Parsers.RaidPatterns = {
     {pattern = "ulduar%s*25", raid = "ULDUAR25", category = "ULDUAR"},
     {pattern = "ulduar%s*10", raid = "ULDUAR10", category = "ULDUAR"},
     {pattern = "ulduar", raid = "ULDUAR", category = "ULDUAR"},
+    -- Boss-name shorthand (verified against Comp.RaidBosses).
+    {pattern = "yogg%-?saron", raid = "ULDUAR", category = "ULDUAR"},
+    {pattern = "%f[%w]yogg%f[%W]", raid = "ULDUAR", category = "ULDUAR"},
+    {pattern = "algalon", raid = "ULDUAR", category = "ULDUAR"},
 
     -- Naxx
     {pattern = "naxx%s*25", raid = "NAXX25", category = "NAXX"},
     {pattern = "naxx%s*10", raid = "NAXX10", category = "NAXX"},
     {pattern = "naxxramas", raid = "NAXX", category = "NAXX"},
+    {pattern = "%f[%w]naxx%f[%W]", raid = "NAXX", category = "NAXX"},
+    -- Boss-name shorthand (verified against Comp.RaidBosses).
+    {pattern = "kel'?thuzad", raid = "NAXX", category = "NAXX"},
+    {pattern = "sapphiron", raid = "NAXX", category = "NAXX"},
 
     -- VOA
     {pattern = "voa%s*25", raid = "VOA25", category = "VOA"},
@@ -99,6 +125,7 @@ Parsers.RaidPatterns = {
     {pattern = "ony%s*25", raid = "ONYXIA25", category = "ONYXIA"},
     {pattern = "ony%s*10", raid = "ONYXIA10", category = "ONYXIA"},
     {pattern = "onyxia", raid = "ONYXIA", category = "ONYXIA"},
+    {pattern = "%f[%w]ony%f[%W]", raid = "ONYXIA", category = "ONYXIA"},
 
     -- OS (Obsidian Sanctum)
     {pattern = "os%s*3d", raid = "OS3D", category = "OS"},
@@ -116,9 +143,49 @@ Parsers.RaidPatterns = {
     {pattern = "eoe%s*10", raid = "EOE10", category = "EOE"},
     {pattern = "malygos", raid = "EOE", category = "EOE"},
     {pattern = "eye%s*of%s*eternity", raid = "EOE", category = "EOE"},
+    {pattern = "%f[%w]eoe%f[%W]", raid = "EOE", category = "EOE"},
 
     -- Weekly
     {pattern = "weekly", raid = "WEEKLY", category = "WEEKLY"},
+
+    -- =====================
+    -- WOTLK HEROIC 5-MAN DUNGEONS (grouped under the "HC" category so they
+    -- stop falling into "Other" - see Parsers.RaidHierarchy "HC" entry).
+    -- Short abbreviations are frontier-anchored (%f[%w]...%f[%W]) so they only
+    -- match a standalone token, never a substring of an unrelated word.
+    -- =====================
+    -- ICC 5-mans (most commonly run at endgame)
+    {pattern = "forge%s*of%s*souls", raid = "HCFOS", category = "HC"},
+    {pattern = "%f[%w]fos%f[%W]", raid = "HCFOS", category = "HC"},
+    {pattern = "pit%s*of%s*saron", raid = "HCPOS", category = "HC"},
+    {pattern = "%f[%w]pos%f[%W]", raid = "HCPOS", category = "HC"},
+    {pattern = "halls%s*of%s*reflection", raid = "HCHOR", category = "HC"},
+    {pattern = "%f[%w]hor%f[%W]", raid = "HCHOR", category = "HC"},
+    {pattern = "trial%s*of%s*the?%s*champion", raid = "HCTOC5", category = "HC"},
+    {pattern = "%f[%w]tot?c5%f[%W]", raid = "HCTOC5", category = "HC"},
+
+    -- Northrend heroics
+    {pattern = "halls%s*of%s*lightning", raid = "HCHOL", category = "HC"},
+    {pattern = "%f[%w]hol%f[%W]", raid = "HCHOL", category = "HC"},
+    {pattern = "halls%s*of%s*stone", raid = "HCHOS", category = "HC"},
+    {pattern = "%f[%w]hos%f[%W]", raid = "HCHOS", category = "HC"},
+    {pattern = "gundrak", raid = "HCGD", category = "HC"},
+    {pattern = "%f[%w]gd%f[%W]", raid = "HCGD", category = "HC"},
+    {pattern = "drak[-'%s]?tharon", raid = "HCDTK", category = "HC"},
+    {pattern = "%f[%w]dtk%f[%W]", raid = "HCDTK", category = "HC"},
+    {pattern = "violet%s*hold", raid = "HCVH", category = "HC"},
+    {pattern = "%f[%w]vh%f[%W]", raid = "HCVH", category = "HC"},
+    {pattern = "azjol[-'%s]?nerub", raid = "HCAN", category = "HC"},
+    {pattern = "ahn'?kahet", raid = "HCOK", category = "HC"},
+    {pattern = "old%s*kingdom", raid = "HCOK", category = "HC"},
+    -- "uk" deliberately NOT matched bare - collides with "UK" as in the region,
+    -- which shows up in recruitment text ("EU/UK players welcome"). Full name only.
+    {pattern = "utgarde%s*keep", raid = "HCUK", category = "HC"},
+    {pattern = "utgarde%s*pinnacle", raid = "HCUP", category = "HC"},
+    {pattern = "the%s*nexus", raid = "HCNEXUS", category = "HC"},
+    {pattern = "%f[%w]nexus%f[%W]", raid = "HCNEXUS", category = "HC"},
+    {pattern = "oculus", raid = "HCOCULUS", category = "HC"},
+    {pattern = "culling%s*of%s*stratholme", raid = "HCCOS", category = "HC"},
 }
 
 -- ============================================================================
@@ -528,6 +595,77 @@ function Parsers.IsStrongLFM(message)
     return false
 end
 
+-- Weighted signals for guild-recruitment scoring (see Parsers.IsGuildRecruitment
+-- below). Each signal contributes its weight once if its (plain-text) phrase
+-- appears anywhere in the message; scores are summed and compared against
+-- Parsers.GuildRecruitmentThreshold. A single strong/unambiguous phrase is
+-- enough on its own (weight >= threshold); weaker hints only tip the message
+-- over the line in combination (e.g. "recruit" + "guild", or "recruit" + a
+-- "<Tag>"). This catches phrasing combos a plain or-chain would need one
+-- entry per variant for.
+--
+-- Weight-tuning invariant - preserve this when adding signals: the purely
+-- structural "weak" entries (guild/members/discord/</www./.com) must sum to
+-- strictly below the 55 threshold even if ALL of them match at once. A real
+-- raid LFM commonly shows a "<GuildTag>", mentions "guild"/"members"/
+-- "discord" in passing, and occasionally plugs a website - none of that
+-- alone means a promotion. It must NOT get flagged without an actual
+-- recruitment word ("recruit", or a strong/medium phrase) also present.
+Parsers.GuildRecruitmentThreshold = 55
+
+Parsers.GuildRecruitmentSignals = {
+    -- Strong, unambiguous phrases - each alone crosses the threshold.
+    {pattern = "now recruiting", weight = 60},
+    {pattern = "guild recruiting", weight = 60},
+    {pattern = "guild is recruiting", weight = 60},
+    {pattern = "recruiting guild", weight = 60},
+    {pattern = "join our guild", weight = 60},
+    {pattern = "is recruiting", weight = 60},
+    {pattern = "now hiring", weight = 60},
+    {pattern = "is hiring", weight = 60},
+    {pattern = "accepting applications", weight = 60},
+    {pattern = "taking applications", weight = 60},
+    {pattern = "apply within", weight = 60},
+    {pattern = "apply now", weight = 60},
+    {pattern = "applications open", weight = 60},
+    {pattern = "applications are open", weight = 60},
+    {pattern = "guild recruitment", weight = 60},
+    {pattern = "recruitment thread", weight = 60},
+    {pattern = "looking for new members", weight = 60},
+    {pattern = "seeking new recruits", weight = 60},
+    {pattern = "seeking active members", weight = 60},
+    {pattern = "new recruits welcome", weight = 60},
+
+    -- Medium signals - guild-ad phrasing a pug leader wouldn't typically use;
+    -- still needs +15 (or a second medium hit) to cross the threshold alone.
+    {pattern = "looking for members", weight = 40},
+    {pattern = "seeking members", weight = 40},
+    {pattern = "seeking raiders", weight = 40},
+    {pattern = "join our ranks", weight = 40},
+    {pattern = "casual guild", weight = 35},
+    {pattern = "raiding guild", weight = 35},
+    {pattern = "social guild", weight = 35},
+    {pattern = "apply at", weight = 45},
+    {pattern = "enjin", weight = 45},        -- common free guild-website host
+    {pattern = "guildportal", weight = 45},
+    {pattern = "guildlaunch", weight = 45},
+    {pattern = "raid times", weight = 35},   -- standing-roster schedule, not a one-off pug
+    {pattern = "raid schedule", weight = 35},
+    {pattern = "raid days", weight = 35},
+
+    -- Weak signals - only meaningful stacked together (see the tuning
+    -- invariant above the table).
+    {pattern = "recruit", weight = 40},  -- recruit/recruits/recruiting/recruitment
+    {pattern = "guild", weight = 15},
+    {pattern = "members", weight = 8},
+    {pattern = "discord", weight = 5},
+    {pattern = "<", weight = 15},        -- a <GuildName> tag
+    {pattern = "www.", weight = 5},
+    {pattern = ".com", weight = 5},
+    -- Sum of the six above = 53, strictly below the 55 threshold - see the
+    -- tuning invariant comment above this table.
+}
+
 -- Check if a message is a guild recruitment / promotion (not a real raid LFM).
 -- These advertise a guild rather than a specific group, e.g.
 --   "PvE Guild <Untergotten Memories> is recruiting active new members!"
@@ -535,22 +673,40 @@ function Parsers.IsGuildRecruitment(message)
     if not message then return false end
     local msg = message:lower()
 
-    -- Strong, explicit phrases
-    if msg:find("now recruiting", 1, true) or msg:find("guild recruiting", 1, true)
-       or msg:find("join our guild", 1, true) or msg:find("guild is recruiting", 1, true)
-       or msg:find("is recruiting", 1, true) then
-        return true
+    -- A real raid/dungeon listing (explicit slot counts) is never a guild ad,
+    -- even if it happens to mention "recruit" in passing ("not recruiting
+    -- outside the guild, need 2 more"). Bail out before scoring so the weak
+    -- signals below can't misfire on it.
+    if msg:match("%[%d+/%d+%]") or msg:match("%[t:%d") then
+        return false
     end
 
-    -- "recruit" anywhere, when it's clearly about a guild (the word "guild" or a
-    -- <GuildName> tag appears). Covers recruiting / recruitment / recruits.
-    if msg:find("recruit", 1, true) then
-        if msg:find("guild", 1, true) or msg:find("<", 1, true) then
-            return true
+    -- Negation guard: "not recruiting" / "no longer recruiting" / "isn't
+    -- recruiting" mean the OPPOSITE of what the bare "recruit" substring
+    -- implies - a raid PUG leader explicitly clarifying this isn't a guild
+    -- ad. Suppress just the "recruit" signal when negated immediately before
+    -- it, rather than skip scoring entirely (other real signals still count).
+    local negatedRecruit = msg:find("not%s+recruit") or msg:find("no longer%s+recruit")
+        or msg:find("isn'?t%s+recruit") or msg:find("aren'?t%s+recruit")
+        or msg:find("not%s+currently%s+recruit") or msg:find("no%s+recruit")
+
+    local score = 0
+    for _, signal in ipairs(Parsers.GuildRecruitmentSignals) do
+        if not (negatedRecruit and signal.pattern == "recruit") and msg:find(signal.pattern, 1, true) then
+            score = score + signal.weight
         end
     end
 
-    return false
+    -- A functioning raid/dungeon LFM almost always names what it's running.
+    -- A message that doesn't match ANY known raid/dungeon pattern is more
+    -- likely a guild ad than an oddly-worded run listing, so nudge the score
+    -- up - enough for two weak signals together to clear the threshold, but
+    -- not so much that a single incidental hit (e.g. a lone "<") does.
+    if not Parsers.DetectRaid(message) then
+        score = score + 20
+    end
+
+    return score >= Parsers.GuildRecruitmentThreshold
 end
 
 -- ============================================================================
@@ -1033,6 +1189,37 @@ Parsers.RaidHierarchy = {
         children = {
             {id = "EOE10", name = "EoE 10", size = 10, heroic = false},
             {id = "EOE25", name = "EoE 25", size = 25, heroic = false},
+        },
+    },
+    {
+        id = "HC",
+        name = "Heroic Dungeons",
+        shortName = "Heroics",
+        children = {
+            {id = "HCFOS", name = "Forge of Souls", size = 5, heroic = true},
+            {id = "HCPOS", name = "Pit of Saron", size = 5, heroic = true},
+            {id = "HCHOR", name = "Halls of Reflection", size = 5, heroic = true},
+            {id = "HCTOC5", name = "Trial of the Champion", size = 5, heroic = true},
+            {id = "HCHOL", name = "Halls of Lightning", size = 5, heroic = true},
+            {id = "HCHOS", name = "Halls of Stone", size = 5, heroic = true},
+            {id = "HCGD", name = "Gundrak", size = 5, heroic = true},
+            {id = "HCDTK", name = "Drak'Tharon Keep", size = 5, heroic = true},
+            {id = "HCVH", name = "The Violet Hold", size = 5, heroic = true},
+            {id = "HCAN", name = "Azjol-Nerub", size = 5, heroic = true},
+            {id = "HCOK", name = "Ahn'kahet: The Old Kingdom", size = 5, heroic = true},
+            {id = "HCUK", name = "Utgarde Keep", size = 5, heroic = true},
+            {id = "HCUP", name = "Utgarde Pinnacle", size = 5, heroic = true},
+            {id = "HCNEXUS", name = "The Nexus", size = 5, heroic = true},
+            {id = "HCOCULUS", name = "The Oculus", size = 5, heroic = true},
+            {id = "HCCOS", name = "The Culling of Stratholme", size = 5, heroic = true},
+        },
+    },
+    {
+        id = "WEEKLY",
+        name = "Weekly Raid Quest",
+        shortName = "Weekly",
+        children = {
+            {id = "WEEKLY", name = "Weekly Raid Quest", heroic = false},
         },
     },
 }

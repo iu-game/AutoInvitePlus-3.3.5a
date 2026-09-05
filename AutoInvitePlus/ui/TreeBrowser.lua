@@ -515,6 +515,30 @@ function TB.IsLockedToInstance(raidStr)
     return false
 end
 
+-- Heroic-dungeon raid ids ("HCFOS", "HCUP", ...) are internal shorthand, not
+-- readable on their own - show the friendly name from RaidHierarchy instead.
+-- Established raid codes (ICC25H, VOA10, ...) are left as-is; they're already
+-- familiar shorthand and changing them would be an unrelated cosmetic churn.
+local function DisplayRaidLabel(raidId)
+    if raidId and raidId:sub(1, 2) == "HC" and AIP.Parsers and AIP.Parsers.GetRaidName then
+        return AIP.Parsers.GetRaidName(raidId)
+    end
+    return raidId
+end
+
+-- Does this group carry real role/slot composition data (e.g. "[T:0/2 H:1/6]")?
+-- A message advertising a specific run almost always has this; a guild
+-- promotion never does. Used to keep a "<Guild> recruiting for ICC, PST"-style
+-- raid LFM out of the Guild Recruitment bucket even though its text also trips
+-- Parsers.IsGuildRecruitment's "recruit" + "<tag>" heuristic.
+local function GroupHasComposition(group)
+    local function hasCounts(role)
+        return role and ((role.needed and role.needed > 0) or (role.current and role.current > 0))
+    end
+    return hasCounts(group.tanks) or hasCounts(group.healers)
+        or hasCounts(group.mdps) or hasCounts(group.rdps) or hasCounts(group.dps)
+end
+
 -- Build tree structure for LFM groups
 -- preserveState: if true, don't auto-expand new categories
 function TB.BuildLFMTree(preserveState)
@@ -563,22 +587,28 @@ function TB.BuildLFMTree(preserveState)
 
         -- Guild recruitment / promotion messages get their own category instead
         -- of polluting the raid lists (they only mention a raid in passing).
+        -- Skip the reclassification if the group has real slot/role counts -
+        -- that means it's advertising a specific run, not the guild itself.
         if AIP.Parsers and AIP.Parsers.IsGuildRecruitment
-           and AIP.Parsers.IsGuildRecruitment(group.message or group.note or "") then
+           and AIP.Parsers.IsGuildRecruitment(group.message or group.note or "")
+           and not GroupHasComposition(group) then
             table.insert(recruitmentGroups, group)
             matched = true
         end
 
-        -- Otherwise try to match to a raid category
-        if not matched then
-            for _, cat in ipairs(AIP.GroupTracker.RaidHierarchy) do
-                -- Check if raid starts with category id or equals it
-                if raid == cat.id or raid:find("^" .. cat.id) then
-                    groupsByCategory[cat.id] = groupsByCategory[cat.id] or {}
-                    table.insert(groupsByCategory[cat.id], group)
-                    matched = true
-                    break
-                end
+        -- Otherwise try to match to a raid category. Use Parsers.GetRaidCategory
+        -- (exact raid-id lookup against RaidHierarchy, falling back to a prefix
+        -- match only for ids it doesn't recognize) rather than a bare prefix
+        -- check here - a plain "raid:find('^' .. cat.id)" mis-buckets any raid
+        -- whose id doesn't literally start with its category id as a substring
+        -- (e.g. "TOGC10" does NOT start with "TOC", so ToGC groups fell into
+        -- the unmatched/"Other" bucket instead of "Trial of Crusader").
+        if not matched and AIP.Parsers and AIP.Parsers.GetRaidCategory then
+            local catId = AIP.Parsers.GetRaidCategory(raid)
+            if catId then
+                groupsByCategory[catId] = groupsByCategory[catId] or {}
+                table.insert(groupsByCategory[catId], group)
+                matched = true
             end
         end
 
@@ -628,7 +658,7 @@ function TB.BuildLFMTree(preserveState)
 
                 -- Build a leaf node (composition line, colours, decor) for one listing.
                 local function makeLeaf(group)
-                    local displayName = group.leader .. " - " .. (group.raid or "?")
+                    local displayName = group.leader .. " - " .. (DisplayRaidLabel(group.raid) or "?")
 
                     -- Build composition text for second line
                     local compText = ""
@@ -808,7 +838,7 @@ function TB.BuildLFMTree(preserveState)
             end
 
             for _, group in ipairs(filteredUnmatched) do
-                local displayName = group.leader .. " - " .. (group.raid or "Unknown")
+                local displayName = group.leader .. " - " .. (DisplayRaidLabel(group.raid) or "Unknown")
 
                 -- Build composition text for second line
                 local compText = ""
@@ -934,24 +964,25 @@ function TB.BuildLFGTree(preserveState)
 
         if player.raids and #player.raids > 0 then
             for _, raidId in ipairs(player.raids) do
-                -- Try to match to a category
-                for _, cat in ipairs(AIP.GroupTracker.RaidHierarchy) do
-                    if raidId:upper() == cat.id or raidId:upper():find("^" .. cat.id) then
-                        playersByCategory[cat.id] = playersByCategory[cat.id] or {}
-                        -- Avoid duplicates
-                        local found = false
-                        for _, p in ipairs(playersByCategory[cat.id]) do
-                            if p.name == player.name then
-                                found = true
-                                break
-                            end
+                -- Match to a category via Parsers.GetRaidCategory - see the
+                -- comment on the LFM-tree version of this lookup above for why
+                -- a bare prefix check mis-buckets ids like "TOGC10".
+                local catId = AIP.Parsers and AIP.Parsers.GetRaidCategory
+                    and AIP.Parsers.GetRaidCategory(raidId:upper())
+                if catId then
+                    playersByCategory[catId] = playersByCategory[catId] or {}
+                    -- Avoid duplicates
+                    local found = false
+                    for _, p in ipairs(playersByCategory[catId]) do
+                        if p.name == player.name then
+                            found = true
+                            break
                         end
-                        if not found then
-                            table.insert(playersByCategory[cat.id], player)
-                        end
-                        matched = true
-                        break
                     end
+                    if not found then
+                        table.insert(playersByCategory[catId], player)
+                    end
+                    matched = true
                 end
                 -- Only place each player in ONE category: otherwise the same
                 -- node id "lfg_player_<name>" appears in multiple categories and
