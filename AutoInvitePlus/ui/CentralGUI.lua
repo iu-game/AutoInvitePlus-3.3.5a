@@ -5187,12 +5187,31 @@ GUI.RaidSizeInfo = {
     EoE = {sizes = {"10", "25"}, defaultSize = "25", hasHeroic = false},
     OS = {sizes = {"10", "25"}, defaultSize = "25", hasHeroic = true},
     Ony = {sizes = {"10", "25"}, defaultSize = "25", hasHeroic = false},
-    -- WotLK Dungeons (5-man only)
-    FoS = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
-    PoS = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
-    HoR = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
-    ToC5 = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
-    HEROIC = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    -- WotLK Dungeons (5-man only). Keys match Parsers.RaidHierarchy's "HC"
+    -- category ids exactly (HCFOS, HCPOS, ...) so a listing posted from this
+    -- popup and shared over DataBus resolves to the same category on a peer's
+    -- TreeBrowser as one detected from plain chat text - see GetRaidKey below,
+    -- which returns these ids verbatim instead of appending a size/heroic
+    -- suffix. Previously only FoS/PoS/HoR/ToC5 existed here (a different,
+    -- unaligned naming scheme - "FoS5H" etc.), so 12 of the 16 WotLK heroics
+    -- weren't postable from the quick-menu at all.
+    HCFOS = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    HCPOS = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    HCHOR = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    HCTOC5 = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    HCHOL = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    HCHOS = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    HCGD = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    HCDTK = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    HCVH = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    HCAN = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    HCOK = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    HCUK = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    HCUP = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    HCNEXUS = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    HCOCULUS = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    HCCOS = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},
+    HEROIC = {sizes = {"5"}, defaultSize = "5", hasHeroic = true},  -- generic/unlisted heroic
     -- TBC Raids
     SWP = {sizes = {"25"}, defaultSize = "25", hasHeroic = false},
     BT = {sizes = {"25"}, defaultSize = "25", hasHeroic = false},
@@ -5229,7 +5248,10 @@ GUI.RaidSizeInfo = {
 -- Raid categories for dropdown organization (with submenu support)
 GUI.RaidCategories = {
     {id = "WOTLK_RAID", header = "WotLK Raids", items = {"ICC", "RS", "TOC", "VOA", "ULDUAR", "NAXX", "EoE", "OS", "Ony"}},
-    {id = "WOTLK_DUNG", header = "WotLK Dungeons", items = {"FoS", "PoS", "HoR", "ToC5", "HEROIC"}},
+    {id = "WOTLK_DUNG", header = "WotLK Dungeons", items = {
+        "HCFOS", "HCPOS", "HCHOR", "HCTOC5", "HCHOL", "HCHOS", "HCGD", "HCDTK",
+        "HCVH", "HCAN", "HCOK", "HCUK", "HCUP", "HCNEXUS", "HCOCULUS", "HCCOS", "HEROIC",
+    }},
     {id = "TBC_RAID", header = "TBC Raids", items = {"SWP", "BT", "HYJAL", "TK", "SSC", "GRUUL", "MAG", "KARA", "ZA"}},
     {id = "TBC_DUNG", header = "TBC Dungeons", items = {"MGT", "SH", "SLABS", "ARCA", "MECH", "BOT"}},
     {id = "CLASSIC_RAID", header = "Classic Raids", items = {"MC", "BWL", "AQ40", "AQ20", "ZG"}},
@@ -5414,6 +5436,14 @@ function GUI.CreateAddGroupPopup()
             end
             return "Custom"
         end
+        -- HC-prefixed dungeon ids (HCFOS, HCHOL, ...) already match
+        -- Parsers.RaidHierarchy exactly - return as-is rather than appending
+        -- a size/heroic suffix (Parsers treats all WotLK 5-mans as heroic
+        -- regardless of a stated difficulty, so there's no separate "normal"
+        -- id to distinguish anyway).
+        if raidType:sub(1, 2) == "HC" then
+            return raidType
+        end
         local size = popup.raidSize or "25"
         local heroic = popup.heroicCheck:GetChecked() and "H" or "N"
         if raidType == "TOC" and heroic == "H" then
@@ -5502,10 +5532,16 @@ function GUI.CreateAddGroupPopup()
         local raidType = popup.raidType or "ICC"
         local prefix = popup.weeklyToken and "|cFF33CCFF[W]|r " or ""
         local isLocked = AIP.TreeBrowser and AIP.TreeBrowser.IsLockedToInstance and AIP.TreeBrowser.IsLockedToInstance(raidType)
+        -- HC-prefixed dungeon ids are internal shorthand - show the friendly
+        -- name from Parsers.RaidHierarchy instead of the raw id.
+        local label = raidType
+        if raidType:sub(1, 2) == "HC" and AIP.Parsers and AIP.Parsers.GetRaidName then
+            label = AIP.Parsers.GetRaidName(raidType)
+        end
         if isLocked then
-            UIDropDownMenu_SetText(raidTypeDropdown, prefix .. "|cFFFF6666" .. raidType .. "|r")
+            UIDropDownMenu_SetText(raidTypeDropdown, prefix .. "|cFFFF6666" .. label .. "|r")
         else
-            UIDropDownMenu_SetText(raidTypeDropdown, prefix .. raidType)
+            UIDropDownMenu_SetText(raidTypeDropdown, prefix .. label)
         end
     end
     popup.UpdateRaidDropdownText = UpdateRaidDropdownText
@@ -5576,10 +5612,17 @@ function GUI.CreateAddGroupPopup()
                     for _, rt in ipairs(cat.items) do
                         local info = UIDropDownMenu_CreateInfo()
                         local isLocked = AIP.TreeBrowser and AIP.TreeBrowser.IsLockedToInstance and AIP.TreeBrowser.IsLockedToInstance(rt)
+                        -- HC-prefixed dungeon ids are internal shorthand (see
+                        -- GetRaidKey below) - show the friendly name from
+                        -- Parsers.RaidHierarchy instead of the raw id.
+                        local label = rt
+                        if rt:sub(1, 2) == "HC" and AIP.Parsers and AIP.Parsers.GetRaidName then
+                            label = AIP.Parsers.GetRaidName(rt)
+                        end
                         if isLocked then
-                            info.text = "|cFFFF6666" .. rt .. "|r"
+                            info.text = "|cFFFF6666" .. label .. "|r"
                         else
-                            info.text = rt
+                            info.text = label
                         end
                         info.value = rt
                         info.func = function()
@@ -7221,6 +7264,12 @@ function GUI.CreateEnrollPopup()
             end
             return "Custom"
         end
+        -- HC-prefixed dungeon ids (HCFOS, HCHOL, ...) already match
+        -- Parsers.RaidHierarchy exactly - return as-is (see the Add-Group
+        -- popup's GetRaidKey for the full explanation).
+        if raidType:sub(1, 2) == "HC" then
+            return raidType
+        end
         local size = popup.raidSize or "25"
         local heroic = popup.heroicCheck:GetChecked() and "H" or "N"
         if raidType == "TOC" and heroic == "H" then
@@ -7340,10 +7389,16 @@ function GUI.CreateEnrollPopup()
         local raidType = popup.raidType or "ICC"
         local prefix = popup.weeklyToken and "|cFF33CCFF[W]|r " or ""
         local isLocked = AIP.TreeBrowser and AIP.TreeBrowser.IsLockedToInstance and AIP.TreeBrowser.IsLockedToInstance(raidType)
+        -- HC-prefixed dungeon ids are internal shorthand - show the friendly
+        -- name from Parsers.RaidHierarchy instead of the raw id.
+        local label = raidType
+        if raidType:sub(1, 2) == "HC" and AIP.Parsers and AIP.Parsers.GetRaidName then
+            label = AIP.Parsers.GetRaidName(raidType)
+        end
         if isLocked then
-            UIDropDownMenu_SetText(raidTypeDropdown, prefix .. "|cFFFF6666" .. raidType .. "|r")
+            UIDropDownMenu_SetText(raidTypeDropdown, prefix .. "|cFFFF6666" .. label .. "|r")
         else
-            UIDropDownMenu_SetText(raidTypeDropdown, prefix .. raidType)
+            UIDropDownMenu_SetText(raidTypeDropdown, prefix .. label)
         end
     end
     popup.UpdateRaidDropdownText = UpdateRaidDropdownText
@@ -7413,10 +7468,16 @@ function GUI.CreateEnrollPopup()
                         local info = UIDropDownMenu_CreateInfo()
                         -- Show lockout indicator (red text, no label)
                         local isLocked = AIP.TreeBrowser and AIP.TreeBrowser.IsLockedToInstance and AIP.TreeBrowser.IsLockedToInstance(rt)
+                        -- HC-prefixed dungeon ids are internal shorthand (see
+                        -- GetRaidKey below) - show the friendly name instead.
+                        local label = rt
+                        if rt:sub(1, 2) == "HC" and AIP.Parsers and AIP.Parsers.GetRaidName then
+                            label = AIP.Parsers.GetRaidName(rt)
+                        end
                         if isLocked then
-                            info.text = "|cFFFF6666" .. rt .. "|r"
+                            info.text = "|cFFFF6666" .. label .. "|r"
                         else
-                            info.text = rt
+                            info.text = label
                         end
                         info.value = rt
                         info.func = function()

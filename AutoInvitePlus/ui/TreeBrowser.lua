@@ -273,6 +273,29 @@ TB.InstanceMapping = {
     -- Trial of the Champion
     ["TOC5"] = {"Trial of the Champion"},
     ["TOTC5"] = {"Trial of the Champion"},
+    -- "HC"-prefixed aliases matching Parsers.RaidHierarchy's ids exactly
+    -- (HCFOS, HCHOL, ...) - these are now what the LFM popup's raid dropdown
+    -- and DataBus-shared dungeon listings actually carry (see CentralGUI.lua
+    -- GetRaidKey), so they need a direct-mapping entry here too: without one,
+    -- IsLockedToInstance falls back to its fuzzier substring-match path,
+    -- which risks a false match (e.g. "HCFOS" also contains "OS", Obsidian
+    -- Sanctum's key) instead of a clean exact hit.
+    ["HCHOL"] = {"Halls of Lightning"},
+    ["HCHOS"] = {"Halls of Stone"},
+    ["HCGD"] = {"Gundrak"},
+    ["HCDTK"] = {"Drak'Tharon Keep"},
+    ["HCVH"] = {"The Violet Hold"},
+    ["HCAN"] = {"Azjol-Nerub"},
+    ["HCOK"] = {"Ahn'kahet: The Old Kingdom"},
+    ["HCUK"] = {"Utgarde Keep"},
+    ["HCUP"] = {"Utgarde Pinnacle"},
+    ["HCNEXUS"] = {"The Nexus"},
+    ["HCOCULUS"] = {"The Oculus"},
+    ["HCCOS"] = {"The Culling of Stratholme"},
+    ["HCFOS"] = {"The Forge of Souls"},
+    ["HCPOS"] = {"Pit of Saron"},
+    ["HCHOR"] = {"Halls of Reflection"},
+    ["HCTOC5"] = {"Trial of the Champion"},
     ["TRIALOFTHECHAMPION"] = {"Trial of the Champion"},
 
     -- =====================
