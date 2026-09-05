@@ -1135,6 +1135,14 @@ Parsers.RaidHierarchy = {
             {id = "TOGC10", name = "TOGC 10 (Heroic)", size = 10, heroic = true},
             {id = "TOC25", name = "TOC 25", size = 25, heroic = false},
             {id = "TOGC25", name = "TOGC 25 (Heroic)", size = 25, heroic = true},
+            -- Bare "TOGC" (no size number - see Parsers.RaidPatterns) has no
+            -- child entry of its own by default. Unlike bare "TOC" (which
+            -- resolves via the category id itself, "TOC" == this category's
+            -- id), "TOGC" matches neither the category id nor the prefix
+            -- fallback ("TOGC" does not start with "TOC" - G comes before C),
+            -- so without this entry it falls into "Other". Confirmed live via
+            -- the WoW test harness (a real "Burakdruid - TOGC" listing).
+            {id = "TOGC", name = "TOGC (Heroic)", heroic = true},
         },
     },
     {
