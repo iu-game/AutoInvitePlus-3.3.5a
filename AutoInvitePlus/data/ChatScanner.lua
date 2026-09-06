@@ -1046,6 +1046,10 @@ local function OnDataBusLFM(event)
         time = event.timestamp,
         isLFM = true,
         isDataBus = true,           -- Mark as coming from DataBus
+        -- Always real, explicit composition - built from the sender's own
+        -- Composition fields in the Add-Group popup, never the chat-parser's
+        -- "assume 1 DPS" fallback guess (see Parsers.ParseChatMessage).
+        hasExplicitComposition = true,
         triggerKey = data.triggerKey,
         inviteKeyword = data.triggerKey,
         -- These are broadcast by GUI.MaybeDataBusBroadcast but were never read here,

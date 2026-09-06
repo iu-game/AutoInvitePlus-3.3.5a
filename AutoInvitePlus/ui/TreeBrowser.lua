@@ -554,12 +554,17 @@ end
 -- promotion never does. Used to keep a "<Guild> recruiting for ICC, PST"-style
 -- raid LFM out of the Guild Recruitment bucket even though its text also trips
 -- Parsers.IsGuildRecruitment's "recruit" + "<tag>" heuristic.
+--
+-- Checks group.hasExplicitComposition rather than the raw tanks/healers/
+-- mdps/rdps counts: Parsers.ParseChatMessage fabricates an "assume 1 DPS
+-- needed" guess for ANY LFM-classified message that lacks real "[T:x/y...]"
+-- brackets, so a guild-recruitment ad that merely tripped IsStrongLFM via
+-- the word "recruiting" would otherwise always look like it "has
+-- composition" too - defeating this guard for exactly the messages it
+-- exists to catch. hasExplicitComposition is only ever true when the
+-- composition came from a real bracket parse or a peer's DataBus payload.
 local function GroupHasComposition(group)
-    local function hasCounts(role)
-        return role and ((role.needed and role.needed > 0) or (role.current and role.current > 0))
-    end
-    return hasCounts(group.tanks) or hasCounts(group.healers)
-        or hasCounts(group.mdps) or hasCounts(group.rdps) or hasCounts(group.dps)
+    return group.hasExplicitComposition == true
 end
 
 -- Build tree structure for LFM groups
@@ -761,32 +766,30 @@ function TB.BuildLFMTree(preserveState)
                 local displayOrder = {}
                 for _, k in ipairs({ "25", "10", "any" }) do if byKey[k] then displayOrder[#displayOrder + 1] = k end end
 
-                if #displayOrder <= 1 then
-                    -- Only one size present -> keep the category flat (no redundant level).
-                    for _, group in ipairs(filteredGroups) do
-                        table.insert(catNode.children, makeLeaf(group))
+                -- Always show the size sub-grouping, even when only one size is
+                -- currently present - a lone "Unspecified size (1)" node is more
+                -- informative than a bare, unlabeled flat listing, and the
+                -- sub-node reappearing/disappearing as other sizes come and go
+                -- would otherwise reshuffle the tree structure under the player.
+                for _, key in ipairs(displayOrder) do
+                    local list = byKey[key]
+                    local sizeNode = {
+                        id = "lfm_" .. category.id .. "_" .. key,
+                        type = "category",
+                        text = sizeLabel[key] .. " (" .. #list .. ")",
+                        count = #list,
+                        icon = TB.Icons.raid,
+                        children = {},
+                        data = category,
+                    }
+                    if not preserveState and not TB.KnownCategories[sizeNode.id] then
+                        TB.TreeData.expandedNodes[sizeNode.id] = true
+                        TB.KnownCategories[sizeNode.id] = true
                     end
-                else
-                    for _, key in ipairs(displayOrder) do
-                        local list = byKey[key]
-                        local sizeNode = {
-                            id = "lfm_" .. category.id .. "_" .. key,
-                            type = "category",
-                            text = sizeLabel[key] .. " (" .. #list .. ")",
-                            count = #list,
-                            icon = TB.Icons.raid,
-                            children = {},
-                            data = category,
-                        }
-                        if not preserveState and not TB.KnownCategories[sizeNode.id] then
-                            TB.TreeData.expandedNodes[sizeNode.id] = true
-                            TB.KnownCategories[sizeNode.id] = true
-                        end
-                        for _, group in ipairs(list) do
-                            table.insert(sizeNode.children, makeLeaf(group))
-                        end
-                        table.insert(catNode.children, sizeNode)
+                    for _, group in ipairs(list) do
+                        table.insert(sizeNode.children, makeLeaf(group))
                     end
+                    table.insert(catNode.children, sizeNode)
                 end
 
                 table.insert(tree, catNode)

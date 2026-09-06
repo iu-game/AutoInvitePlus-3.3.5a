@@ -50,6 +50,13 @@ Parsers.RaidPatterns = {
     {pattern = "icc%s*10%s*normal", raid = "ICC10N", category = "ICC"},
     {pattern = "icc%s*25", raid = "ICC25N", category = "ICC"},
     {pattern = "icc%s*10", raid = "ICC10N", category = "ICC"},
+    -- ICC reputation/trash farming (Ashen Verdict) - not sized like a real
+    -- raid run, so it gets its own child id rather than ICC10/ICC25. Must
+    -- come before the bare "icc" catch-all below or every ICC rep message
+    -- would just match that instead.
+    {pattern = "ashen%s*verdict", raid = "ICCREP", category = "ICC"},
+    {pattern = "icc.-rep", raid = "ICCREP", category = "ICC"},
+    {pattern = "rep.-icc", raid = "ICCREP", category = "ICC"},
     {pattern = "icc", raid = "ICC", category = "ICC"},
     {pattern = "icecrown", raid = "ICC", category = "ICC"},
     -- Boss-name shorthand (verified against Comp.RaidBosses in
@@ -101,6 +108,9 @@ Parsers.RaidPatterns = {
     {pattern = "yogg%-?saron", raid = "ULDUAR", category = "ULDUAR"},
     {pattern = "%f[%w]yogg%f[%W]", raid = "ULDUAR", category = "ULDUAR"},
     {pattern = "algalon", raid = "ULDUAR", category = "ULDUAR"},
+    -- Found live in real LFM chat during testing ("LFM XT-002 Deconstructor
+    -- hardmode") - a common hard-mode farm target, wasn't covered before.
+    {pattern = "%f[%w]xt%-?002%f[%W]", raid = "ULDUAR", category = "ULDUAR"},
 
     -- Naxx
     {pattern = "naxx%s*25", raid = "NAXX25", category = "NAXX"},
@@ -1039,6 +1049,15 @@ function Parsers.ParseChatMessage(message, author, channel)
     if info.isLFM then
         -- First try AIP-specific format: [T:0/2 H:0/6 M:0/8 R:0/9]
         local aipComp = Parsers.ParseAIPComposition(message)
+        -- Only explicit bracket-parsed composition ("[T:0/2 H:0/6 ...]") means
+        -- this is a real run listing. The "else" branch below fabricates an
+        -- "assume 1 DPS needed" guess for ANY LFM-classified message that
+        -- lacks brackets - including a guild-recruitment ad that only tripped
+        -- IsStrongLFM via the word "recruiting". Callers that need to
+        -- distinguish "real composition" from "we made this number up" (e.g.
+        -- TreeBrowser's guild-recruitment guard) should check this flag
+        -- instead of the tanks/healers/mdps/rdps counts themselves.
+        info.hasExplicitComposition = (aipComp ~= nil)
 
         if aipComp then
             -- Use parsed AIP format (includes current counts)
@@ -1113,6 +1132,7 @@ Parsers.RaidHierarchy = {
             {id = "ICC10H", name = "ICC 10 Heroic", size = 10, heroic = true},
             {id = "ICC25N", name = "ICC 25 Normal", size = 25, heroic = false},
             {id = "ICC25H", name = "ICC 25 Heroic", size = 25, heroic = true},
+            {id = "ICCREP", name = "ICC Reputation Farm", heroic = false},
         },
     },
     {
