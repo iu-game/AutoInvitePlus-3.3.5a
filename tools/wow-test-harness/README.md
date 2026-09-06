@@ -77,6 +77,12 @@ Crop-Screenshot -inPath "C:\temp\aip-check.png" -outPath "C:\temp\aip-check-zoom
 | `Screenshot-Wow -outPath <path>` | Saves a PNG of the full WoW window |
 | `Crop-Screenshot -inPath -outPath -x -y -width -height [-scale]` | Crops + upscales a region of a saved screenshot for legibility |
 | `Click-Wow -x <int> -y <int>` | Left-clicks at window-relative pixel coordinates |
+| `RightClick-Wow -x <int> -y <int>` | Right-clicks (context menus, e.g. item links) |
+| `DoubleClick-Wow -x <int> -y <int>` | Double-clicks (e.g. equip-from-bag) |
+| `Scroll-Wow -x -y [-notches <int>]` | Mouse-wheel scroll at a point; positive scrolls up, negative scrolls down (default 3 notches) |
+| `Drag-Wow -x1 -y1 -x2 -y2 [-steps <int>]` | Left-click-drag between two points (scrollbar thumbs, sliders) - moves through intermediate points, not a single jump, since WoW's slider widgets track motion deltas |
+| `Type-WowText -text <string> [-Submit]` | Types into whatever already has keyboard focus (e.g. an addon EditBox you just clicked) - unlike `Send-WowChat`, does NOT open chat first. `-Submit` presses Enter afterward |
+| `Run-WowLua -code <string>` | Sends `/run <code>` - the highest-value tool for data-accuracy checks: query the client's own state (`GetItemInfo`, `GetSpellInfo`, dump an addon's Lua tables) instead of guessing from a screenshot. **Verify once per session it's not blocked server-side**: `Run-WowLua 'print("HARNESS_LUA_OK")'` then screenshot chat. Chat lines truncate long output - print in small chunks, not one big table dump |
 | `Send-WowChat -text <string>` | Opens chat, types the given text (slash command or message), submits it |
 
 ## Gotchas

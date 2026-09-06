@@ -50,6 +50,9 @@ public class Win32Automation {
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, UIntPtr dwExtraInfo);
+    // Same entry point, signed dwData - lets a wheel scroll pass a negative
+    // delta (scroll down) without the uint-wraparound dance in PowerShell.
+    [DllImport("user32.dll", EntryPoint = "mouse_event")] public static extern void mouse_event_signed(uint dwFlags, int dx, int dy, int dwData, UIntPtr dwExtraInfo);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
@@ -108,6 +111,98 @@ function Click-Wow {
     Start-Sleep -Milliseconds 60
     [Win32Automation]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) | Out-Null  # left up
     Start-Sleep -Milliseconds 200
+}
+
+function RightClick-Wow {
+    param([int]$x, [int]$y)
+    Focus-Wow
+    $rect = Get-WowRect
+    [Win32Automation]::SetCursorPos($rect.Left + $x, $rect.Top + $y) | Out-Null
+    Start-Sleep -Milliseconds 100
+    [Win32Automation]::mouse_event(0x0008, 0, 0, 0, [UIntPtr]::Zero) | Out-Null  # right down
+    Start-Sleep -Milliseconds 60
+    [Win32Automation]::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero) | Out-Null  # right up
+    Start-Sleep -Milliseconds 200
+}
+
+function DoubleClick-Wow {
+    param([int]$x, [int]$y)
+    Click-Wow -x $x -y $y
+    Start-Sleep -Milliseconds 40
+    Click-Wow -x $x -y $y
+}
+
+# Scrolls the mouse wheel at a client-relative point. notches > 0 scrolls up
+# (content moves down / view moves toward the top); notches < 0 scrolls down.
+# One notch = one wheel click (WHEEL_DELTA = 120), matching a physical mouse.
+function Scroll-Wow {
+    param([int]$x, [int]$y, [int]$notches = 3)
+    Focus-Wow
+    $rect = Get-WowRect
+    [Win32Automation]::SetCursorPos($rect.Left + $x, $rect.Top + $y) | Out-Null
+    Start-Sleep -Milliseconds 100
+    [Win32Automation]::mouse_event_signed(0x0800, 0, 0, ($notches * 120), [UIntPtr]::Zero) | Out-Null  # MOUSEEVENTF_WHEEL
+    Start-Sleep -Milliseconds 200
+}
+
+# Left-click-drag from (x1,y1) to (x2,y2), e.g. for a scrollbar thumb or a
+# slider. Moves through a few intermediate points, not a single jump -
+# WoW's slider/scrollbar widgets track OnMouseMove deltas while dragging, so
+# a single teleport-then-release can be missed entirely.
+function Drag-Wow {
+    param([int]$x1, [int]$y1, [int]$x2, [int]$y2, [int]$steps = 8)
+    Focus-Wow
+    $rect = Get-WowRect
+    $startX = $rect.Left + $x1; $startY = $rect.Top + $y1
+    $endX = $rect.Left + $x2; $endY = $rect.Top + $y2
+    [Win32Automation]::SetCursorPos($startX, $startY) | Out-Null
+    Start-Sleep -Milliseconds 100
+    [Win32Automation]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero) | Out-Null  # left down
+    Start-Sleep -Milliseconds 80
+    for ($i = 1; $i -le $steps; $i++) {
+        $ix = $startX + [int](($endX - $startX) * $i / $steps)
+        $iy = $startY + [int](($endY - $startY) * $i / $steps)
+        [Win32Automation]::SetCursorPos($ix, $iy) | Out-Null
+        Start-Sleep -Milliseconds 40
+    }
+    [Win32Automation]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) | Out-Null  # left up
+    Start-Sleep -Milliseconds 200
+}
+
+# Types text into whatever UI element currently has keyboard focus (e.g. an
+# addon EditBox you just Click-Wow'd into) - unlike Send-WowChat, this does
+# NOT open the chat box first or press Enter to submit. Pass -Submit to press
+# Enter afterward (most WoW EditBoxes call their OnEnterPressed handler).
+function Type-WowText {
+    param([string]$text, [switch]$Submit)
+    Focus-Wow
+    $escaped = $text -replace '([\{\}\+\^%~\(\)\[\]])', '{$1}'
+    [System.Windows.Forms.SendKeys]::SendWait($escaped)
+    Start-Sleep -Milliseconds 150
+    if ($Submit) {
+        [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+        Start-Sleep -Milliseconds 200
+    }
+}
+
+# Runs arbitrary Lua via the client's /run command - the single highest-value
+# addition here for DATA-ACCURACY testing: instead of eyeballing screenshots
+# or guessing, you can query the client's own state directly (GetItemInfo,
+# GetSpellInfo, dump an addon's Lua tables, etc.) and get ground truth back
+# via chat/print. Requires /run to actually be enabled server-side - some
+# servers restrict it to GMs. Verify once per session with:
+#   Run-WowLua 'print("HARNESS_LUA_OK")'
+#   Screenshot-Wow ... # or Read-WowChatLog if that text doesn't appear in
+# chat, /run is blocked here and this function is a no-op for your purposes.
+# Long results should be chunked (chat lines truncate) - print in small
+# pieces rather than one huge table dump.
+function Run-WowLua {
+    param([string]$code)
+    $full = "/run $code"
+    if ($full.Length -gt 255) {
+        throw "Run-WowLua: command is $($full.Length) chars (limit 255 - WoW's chat edit box silently truncates past this, which breaks the Lua chunk mid-string/mid-expression with a confusing error, e.g. `"unfinished string near '<eof>'`". Split into multiple shorter calls, e.g. stash a short global alias first (`Z=AutoInvitePlus`) to shave chars off every subsequent reference."
+    }
+    Send-WowChat $full
 }
 
 function Screenshot-Wow {
