@@ -6562,7 +6562,11 @@ function GUI.CreateAddGroupPopup()
 
         -- Tile 1: last used
         local last = AIP.db and AIP.db.lastListingConfig
-        if last and last.raidType then
+        -- Guard against a raidType saved before a GUI.RaidSizeInfo key was
+        -- renamed (e.g. the old "FoS"/"PoS"/"HoR"/"ToC5" -> "HCFOS"/etc.
+        -- rename) - falls through to the "none yet" branch below instead of
+        -- restoring a raid/size combo that no longer means anything.
+        if last and last.raidType and GUI.RaidSizeInfo[last.raidType] then
             local key = (last.raidType or "?") .. (last.raidSize or "") .. (last.heroic and "H" or "N")
             tiles.last.titleText:SetText("|cFFFFD100* Last|r")
             tiles.last.subText:SetText(key .. (last.gs and ("  " .. last.gs .. "+") or ""))
@@ -6823,7 +6827,11 @@ function GUI.ShowEnrollPopup()
     end
     -- Restore the last enrollment config (raid/size/heroic/weekly)
     local last = AIP.db and AIP.db.lastEnrollConfig
-    if last and last.raidType then
+    -- Same guard as the Add-Group popup's "Last" tile: a raidType saved
+    -- before a GUI.RaidSizeInfo key was renamed would otherwise restore a
+    -- stale raid selection with no matching size list (falls back to the
+    -- popup's own default raidType/raidSize instead).
+    if last and last.raidType and GUI.RaidSizeInfo[last.raidType] then
         GUI.EnrollPopup.raidType = last.raidType
         GUI.EnrollPopup.raidSize = last.raidSize or GUI.EnrollPopup.raidSize
         if GUI.EnrollPopup.heroicCheck then
