@@ -13,7 +13,7 @@ AIP.LFGWatch = AIP.LFGWatch or {}
 local LW = AIP.LFGWatch
 
 LW.State = { mode = nil, submode = nil, elapsed = 0, stats = nil,
-    dungeons = {}, proposal = nil, roles = nil }
+    dungeons = {}, proposal = nil, roles = nil, queueStartTime = nil }
 
 local function fmtTime(s)
     s = math.floor(tonumber(s) or 0)
@@ -39,9 +39,16 @@ local function readStats()
         = pcall(GetLFGQueueStats)
     if not ok or not hasData then return nil end
     local num = function(v) return tonumber(v) or 0 end
+    -- Some 3.3.5a cores return these as a real boolean/1-or-nil, others as a
+    -- numeric count still needed - and 0 is TRUTHY in Lua, so a plain
+    -- `if tankNeeds then` reads a count of 0 as "still needs a tank" and the
+    -- needs list never reflects reality. Normalize both encodings to a real
+    -- boolean here instead.
+    local function needBool(v) return (v ~= nil and v ~= false and v ~= 0) end
     return {
         instanceName = asStr(instanceName), instanceType = instanceType,
-        needs  = { leader = leaderNeeds, tank = tankNeeds, healer = healerNeeds, dps = dpsNeeds },
+        needs  = { leader = needBool(leaderNeeds), tank = needBool(tankNeeds),
+            healer = needBool(healerNeeds), dps = needBool(dpsNeeds) },
         totals = { tanks = num(totalTanks), healers = num(totalHealers), dps = num(totalDPS) },
         wait   = { average = num(averageWait), tank = num(tankWait), healer = num(healerWait), dps = num(damageWait), mine = num(myWait) },
         queuedTime = tonumber(queuedTime),   -- nil if non-numeric; elapsed math guards for nil
@@ -94,14 +101,42 @@ end
 -- Refresh + accessors
 -- ============================================================================
 function LW.Refresh()
+    local prevMode = LW.State.mode
     if GetLFGMode then LW.State.mode, LW.State.submode = GetLFGMode() else LW.State.mode = nil end
     LW.State.stats = readStats()
     LW.State.dungeons = readDungeons()
     LW.State.proposal = readProposal()
     LW.State.roles = readRoles()
-    if LW.State.stats and LW.State.stats.queuedTime and GetTime then
-        LW.State.elapsed = math.max(0, GetTime() - LW.State.stats.queuedTime)
+
+    -- Elapsed queue time. Some 3.3.5a cores return a `queuedTime` field from
+    -- GetLFGQueueStats() that isn't a usable GetTime()-relative timestamp
+    -- (nil, misaligned, or otherwise garbage) - trusting it blindly is what
+    -- caused the footer to read "In queue 0s" forever, which in turn silently
+    -- disabled the auto-requeue timer (it never sees elapsed cross the 120s
+    -- threshold). So: track our own start time the moment we first observe
+    -- the queued state (cheap, always-available via GetLFGMode()), and only
+    -- prefer the server's queuedTime when it produces a sane (0-6h) result -
+    -- that path also keeps the timer correct across a /reload while queued,
+    -- which our own tracking alone can't (it would restart at 0).
+    local inQueue = (LW.State.mode == "queued" or LW.State.mode == "suspended")
+    local wasInQueue = (prevMode == "queued" or prevMode == "suspended")
+    if inQueue and not wasInQueue then
+        LW.State.queueStartTime = GetTime and GetTime() or nil
+    elseif not inQueue then
+        LW.State.queueStartTime = nil
     end
+
+    if inQueue and GetTime then
+        local now = GetTime()
+        local st = LW.State.stats
+        local viaServer = st and st.queuedTime and (now - st.queuedTime)
+        if viaServer and viaServer >= 0 and viaServer < 21600 then
+            LW.State.elapsed = viaServer
+        elseif LW.State.queueStartTime then
+            LW.State.elapsed = math.max(0, now - LW.State.queueStartTime)
+        end
+    end
+
     if LW.UpdateWidget then LW.UpdateWidget() end
     if LW.BroadcastMine then LW.BroadcastMine() end
 end
@@ -274,9 +309,22 @@ function LW.CheckAutoRequeue()
     local now = (GetTime and GetTime()) or 0
     if (now - lastRequeueAt) < 30 then return end   -- guard the leave/rejoin transition
     lastRequeueAt = now
-    if LeaveLFG then pcall(LeaveLFG) end
+    if LeaveLFG then
+        local ok = pcall(LeaveLFG)
+        if not ok and AIP.Debug then AIP.Debug("[LFGWatch] LeaveLFG() errored during auto-requeue") end
+    end
     -- Re-queue after the leave is confirmed server-side (LeaveLFG is async).
-    local function rejoin() if LFDQueueFrame_Join then pcall(LFDQueueFrame_Join) end end
+    -- LFDQueueFrame_Join() re-submits whatever dungeon(s) are currently
+    -- selected in the LFD UI's own saved state - if that pcall fails (e.g.
+    -- nothing was ever selected there this session) it used to fail silently.
+    local function rejoin()
+        if LFDQueueFrame_Join then
+            local ok = pcall(LFDQueueFrame_Join)
+            if not ok and AIP.Debug then
+                AIP.Debug("[LFGWatch] LFDQueueFrame_Join() errored during auto-requeue - open the Dungeon Finder and select a dungeon at least once this session")
+            end
+        end
+    end
     if AIP.Utils and AIP.Utils.DelayedCall then AIP.Utils.DelayedCall(2, rejoin) else rejoin() end
     if AIP.Print then AIP.Print("|cff33ccff[LFG]|r No group after " ..
         math.floor(LW.REQUEUE_AFTER / 60) .. " min - left and re-queued.") end
@@ -364,8 +412,11 @@ ev:SetScript("OnUpdate", function(self, e)
     self.acc = 0
     local m = LW.State.mode
     if not (m == "queued" or m == "suspended" or m == "rolecheck" or m == "proposal") then return end
-    if LW.State.stats and LW.State.stats.queuedTime and GetTime then
-        LW.State.elapsed = math.max(0, GetTime() - LW.State.stats.queuedTime)
+    -- Cheap per-second nudge from our own tracked start (see LW.Refresh) rather
+    -- than re-deriving from the server's queuedTime every tick - the slower
+    -- full Refresh below already does the sanity-checked server/local pick.
+    if (m == "queued" or m == "suspended") and LW.State.queueStartTime and GetTime then
+        LW.State.elapsed = math.max(0, GetTime() - LW.State.queueStartTime)
     end
     self.slow = self.slow + 1
     if self.slow >= 3 then

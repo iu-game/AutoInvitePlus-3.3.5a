@@ -297,6 +297,9 @@ local function pvpPlanArch()
     if a == "healerCrit" or a == "casterHot" then return "healer" end
     if a == "casterDPS" then return "caster" end
     if a == "agiDPS" then return "agiMelee" end
+    -- Hunters (rangedDPS) share the agiMelee PvP gem/enchant text - it already
+    -- explicitly calls out the Hunter-specific weapon-enchant substitution below.
+    if a == "rangedDPS" then return "agiMelee" end
     if a == "tank" then
         -- "tank" is Strength-scaled for Warrior/Paladin/DK, but
         -- IS.PlayerArchetype also assigns it to feral druid bear tanks

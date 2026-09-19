@@ -10,6 +10,16 @@ end
 AIP.CentralGUI = {}
 local GUI = AIP.CentralGUI
 
+-- Keybinding: lets players bind a key (CTRL-ALT-I by default, set once via
+-- GUI.EnsureDefaultKeybind below) to toggle the main window. The suffix
+-- after BINDING_NAME_ doubles as the global function name WoW's keybinding
+-- system calls on keypress, so this must stay a plain global (not GUI.*).
+BINDING_HEADER_AUTOINVITEPLUS = "AutoInvite+"
+BINDING_NAME_AIP_TOGGLEMAIN = "Toggle AutoInvite+ Window"
+function AIP_TOGGLEMAIN()
+    GUI.Toggle()
+end
+
 -- Debug: confirm module loaded
 -- DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00[AIP Debug]|r CentralGUI module loaded")
 
@@ -17,7 +27,11 @@ local GUI = AIP.CentralGUI
 GUI.Config = {
     defaultWidth = 1000,
     defaultHeight = 760,   -- taller default so the Character paperdoll + detail + stats aren't cramped
-    minWidth = 800,
+    -- Floor for Full View's resize grip. 800 left too little headroom for the
+    -- title bar's full content at once (title+subtitle, the 6 quick-action
+    -- buttons, and the 4 window-chrome buttons) - narrowing to exactly 800
+    -- could push the chrome buttons past the window's right edge.
+    minWidth = 900,
     minHeight = 600,       -- keep enough vertical room for the paperdoll columns at min size
     minimizedHeight = 45,  -- Height when minimized (just title bar)
 }
@@ -876,18 +890,66 @@ function GUI.CreateFrame()
     subtitleText:SetText("by iuGames")
     subtitleText:SetTextColor(0.6, 0.6, 0.6)
 
-    -- Close button
-    local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -5, -5)
+    -- Window-chrome buttons (close/maximize/minimize/simplify) reuse the
+    -- addon's own maroon/gold UIPanelButtonTemplate skin - the same one the
+    -- Rolls/Break/Pull/RDF/Bar/Ready buttons below and the Apply/Whisper/etc.
+    -- buttons elsewhere already use - with a flat glyph (gold, matching the
+    -- title text/tab-selected accent color) drawn on top instead of a label.
+    -- Built from axis-aligned solid-color blocks only (no Texture:SetRotation
+    -- - it's a no-op for a plain color texture in this client, confirmed via
+    -- live testing), so diagonals (the x) are drawn as a pixel staircase
+    -- instead of a rotated bar.
+    local CHROME_ICON_TEX = "Interface\\Buttons\\WHITE8x8"
+    local CHROME_GOLD = {1, 0.82, 0}
 
-    -- Maximize/Restore button
-    local maxBtn = CreateFrame("Button", nil, frame)
-    maxBtn:SetSize(20, 20)
+    local function chromeBar(btn, w, h, x, y)
+        local t = btn:CreateTexture(nil, "OVERLAY")
+        t:SetTexture(CHROME_ICON_TEX)
+        t:SetVertexColor(unpack(CHROME_GOLD))
+        t:SetSize(w, h)
+        t:SetPoint("CENTER", x, y)
+        return t
+    end
+
+    -- A staircase of small square blocks along a straight line from
+    -- (x1,y1) to (x2,y2) - used to fake a diagonal stroke without rotation.
+    local function chromeDiagonal(btn, x1, y1, x2, y2, steps, blockSize)
+        for i = 0, steps do
+            local t = i / steps
+            chromeBar(btn, blockSize, blockSize, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t)
+        end
+    end
+
+    local function chromeButton(size)
+        local b = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+        b:SetSize(size, size)
+        b:SetText("")
+        return b
+    end
+
+    -- Close button (x)
+    local closeBtn = chromeButton(17)
+    closeBtn:SetPoint("TOPRIGHT", -6, -6)
+    chromeDiagonal(closeBtn, -4, -4, 4, 4, 3, 2)
+    chromeDiagonal(closeBtn, 4, -4, -4, 4, 3, 2)
+    closeBtn:SetScript("OnClick", function() frame:Hide() end)
+    closeBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Close")
+        GameTooltip:Show()
+    end)
+    closeBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    frame.closeBtn = closeBtn
+
+    -- Maximize/Restore button ([]) - a plain square outline; the tooltip
+    -- (not the glyph) communicates which direction the click will go.
+    local maxBtn = chromeButton(17)
     maxBtn:SetPoint("RIGHT", closeBtn, "LEFT", -2, 0)
-    maxBtn:SetNormalTexture("Interface\\Buttons\\UI-Panel-BiggerButton-Up")
-    maxBtn:SetPushedTexture("Interface\\Buttons\\UI-Panel-BiggerButton-Down")
-    maxBtn:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight")
     frame.maxBtn = maxBtn
+    chromeBar(maxBtn, 9, 1.3, 0, 4)
+    chromeBar(maxBtn, 9, 1.3, 0, -4)
+    chromeBar(maxBtn, 1.3, 9, -4, 0)
+    chromeBar(maxBtn, 1.3, 9, 4, 0)
 
     maxBtn:SetScript("OnClick", function()
         GUI.ToggleMaximize()
@@ -899,14 +961,13 @@ function GUI.CreateFrame()
     end)
     maxBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    -- Minimize button
-    local minBtn = CreateFrame("Button", nil, frame)
-    minBtn:SetSize(20, 20)
+    -- Minimize button (-) - shrinks the whole window down to just the title
+    -- bar; the glyph stays the same "-" both ways (like a real OS title bar),
+    -- the tooltip covers the "click again to expand" direction.
+    local minBtn = chromeButton(17)
     minBtn:SetPoint("RIGHT", maxBtn, "LEFT", -2, 0)
-    minBtn:SetNormalTexture("Interface\\Buttons\\UI-Panel-CollapseButton-Up")
-    minBtn:SetPushedTexture("Interface\\Buttons\\UI-Panel-CollapseButton-Down")
-    minBtn:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight")
     frame.minBtn = minBtn
+    chromeBar(minBtn, 9, 1.3, 0, 0)
 
     minBtn:SetScript("OnClick", function()
         GUI.ToggleMinimize()
@@ -928,15 +989,27 @@ function GUI.CreateFrame()
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
         return b
     end
-    -- Simplified View toggle - lives in the title bar (not the tab bar) because
-    -- simplified mode hides the tab bar itself; this button must stay reachable
-    -- to turn it back off. Label/highlight state is set by ApplySimplifiedView.
-    local simpleBtn = titleBtn("Simple", 50, minBtn, -8,
-        function() GUI.ToggleSimplifiedView() end,
-        "Simplified View: show only the LFM/LFG tree")
+    -- Simplified View toggle - lives in the title bar (not the tab bar)
+    -- because simplified mode hides the tab bar itself; this button must stay
+    -- reachable to turn it back off. Three tapering stacked bars read as a
+    -- "view density" control (this toggle shows less/more content, not a
+    -- window resize), the same idiom as a list/detail-density icon.
+    local simpleBtn = chromeButton(17)
+    simpleBtn:SetPoint("RIGHT", minBtn, "LEFT", -8, 0)
     frame.simpleBtn = simpleBtn
+    chromeBar(simpleBtn, 10, 1.3, 0, 4)
+    chromeBar(simpleBtn, 7, 1.3, 0, 0)
+    chromeBar(simpleBtn, 4, 1.3, 0, -4)
+    simpleBtn:SetScript("OnClick", function() GUI.ToggleSimplifiedView() end)
+    simpleBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine((AIP.db and AIP.db.simplifiedView) and "Full View" or "Simplify")
+        GameTooltip:AddLine("Show only the LFM/LFG tree", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    simpleBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    local qTools = titleBtn("Tools", 46, simpleBtn, -3,
+    local qTools = titleBtn("Rolls", 46, simpleBtn, -3,
         function() if AIP.RaidTools and AIP.RaidTools.ToggleRollWindow then AIP.RaidTools.ToggleRollWindow() end end,
         "Raid Tools (roll window)")
     local qBreak = titleBtn("Break", 44, qTools, -3,
@@ -949,9 +1022,53 @@ function GUI.CreateFrame()
     local qBar = titleBtn("Bar", 38, qRDF, -3,
         function() if AIP.RaidTools and AIP.RaidTools.ToggleBar then AIP.RaidTools.ToggleBar() end end,
         "Toggle the floating announcement bar")
-    titleBtn("Ready", 52, qBar, -3,
+    local qReady = titleBtn("Ready", 52, qBar, -3,
         function() if AIP.RaidTools and AIP.RaidTools.StartReadyCheck then AIP.RaidTools.StartReadyCheck() end end,
         "Start a ready check")
+
+    -- Simplified View shrinks the window to GUI.SIMPLIFIED_WIDTH (380px),
+    -- which isn't wide enough for "AutoInvite+ by iuGames" plus all six
+    -- text quick-buttons above without them overlapping the title - so in
+    -- that mode they're replaced by this single dropdown button instead.
+    -- Full View has room (1000px default) and keeps the buttons as-is.
+    frame.quickTitleButtons = {qTools, qBreak, qPull, qRDF, qBar, qReady}
+
+    local quickActionsBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    quickActionsBtn:SetSize(28, 18)
+    quickActionsBtn:SetText("...")
+    quickActionsBtn:SetPoint("RIGHT", simpleBtn, "LEFT", -3, 0)
+    quickActionsBtn:Hide()
+    quickActionsBtn:SetScript("OnClick", function(self)
+        if not GUI.TitlebarQuickMenu then
+            GUI.TitlebarQuickMenu = CreateFrame("Frame", "AIPTitlebarQuickMenu", UIParent, "UIDropDownMenuTemplate")
+        end
+        local menuList = {
+            {text = "Quick Actions", isTitle = true, notCheckable = true},
+            {text = "Start Ready Check", notCheckable = true,
+                func = function() if AIP.RaidTools and AIP.RaidTools.StartReadyCheck then AIP.RaidTools.StartReadyCheck() end end},
+            {text = "Toggle Announcement Bar", notCheckable = true,
+                func = function() if AIP.RaidTools and AIP.RaidTools.ToggleBar then AIP.RaidTools.ToggleBar() end end},
+            {text = "Toggle Dungeon Finder (RDF)", notCheckable = true,
+                func = function() if AIP.LFGWatch and AIP.LFGWatch.Toggle then AIP.LFGWatch.Toggle() end end},
+            {text = "Pull Timer (10s)", notCheckable = true,
+                func = function() if AIP.DBMBridge then AIP.DBMBridge.SendPull(10) end end},
+            {text = "Break Timer (5m)", notCheckable = true,
+                func = function() if AIP.DBMBridge then AIP.DBMBridge.SendBreak(5) end end},
+            {text = "Roll Window", notCheckable = true,
+                func = function() if AIP.RaidTools and AIP.RaidTools.ToggleRollWindow then AIP.RaidTools.ToggleRollWindow() end end},
+            {text = " ", disabled = true, notCheckable = true},
+            {text = "Cancel", notCheckable = true},
+        }
+        EasyMenu(menuList, GUI.TitlebarQuickMenu, self, 0, 0, "MENU")
+    end)
+    quickActionsBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Quick Actions")
+        GameTooltip:AddLine("Ready Check, Bar, RDF, Pull, Break, Rolls", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    quickActionsBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    frame.quickActionsBtn = quickActionsBtn
 
     -- Drag to move
     frame:RegisterForDrag("LeftButton")
@@ -1134,6 +1251,28 @@ function GUI.CreateFrame()
     broadcastStatus:SetText("")
     statusBar.broadcastStatus = broadcastStatus
 
+    -- Compact two-line footer for Simplified View. The full-view footer above
+    -- (statusText + gsDisplay on one line, chatBanStatus/broadcastStatus at
+    -- fixed pixel offsets) is sized for the 1000px default window and spills
+    -- past the right edge of the narrow 380px Simplified window - see
+    -- GUI.RenderSimplifiedFooter, which is the only thing that writes to
+    -- these two lines. Hidden by default; ApplySimplifiedView swaps them in.
+    local simpleLine1 = statusBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    simpleLine1:SetPoint("TOPLEFT", 6, -4)
+    simpleLine1:SetPoint("TOPRIGHT", -6, -4)
+    simpleLine1:SetJustifyH("LEFT")
+    simpleLine1:SetText("")
+    simpleLine1:Hide()
+    statusBar.simpleLine1 = simpleLine1
+
+    local simpleLine2 = statusBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    simpleLine2:SetPoint("BOTTOMLEFT", 6, 4)
+    simpleLine2:SetPoint("BOTTOMRIGHT", -6, 4)
+    simpleLine2:SetJustifyH("LEFT")
+    simpleLine2:SetText("")
+    simpleLine2:Hide()
+    statusBar.simpleLine2 = simpleLine2
+
     -- Resize grip
     local resizeGrip = CreateFrame("Button", nil, frame)
     resizeGrip:SetSize(16, 16)
@@ -1148,9 +1287,13 @@ function GUI.CreateFrame()
 
     resizeGrip:SetScript("OnMouseUp", function(self)
         frame:StopMovingOrSizing()
-        -- Save size
+        -- Save size - but not the width while Simplified View is shrinking
+        -- it, or the next "full view" restore would come back at the narrow
+        -- simplified width instead of the user's real preferred size.
         if AIP.db then
-            AIP.db.guiWidth = frame:GetWidth()
+            if not AIP.db.simplifiedView then
+                AIP.db.guiWidth = frame:GetWidth()
+            end
             AIP.db.guiHeight = frame:GetHeight()
         end
         -- Force refresh active panel after resize completes
@@ -1172,12 +1315,6 @@ function GUI.CreateFrame()
         end
         -- Recompute elastic Queue/LFG/Waitlist row counts on window resize.
         GUI.RefreshQueueLayout()
-        -- The tree panel's width is set explicitly (not anchored to the
-        -- container's right edge) so it can revert to 340px when simplified
-        -- view turns off - keep it following the container while it's on.
-        if AIP.db and AIP.db.simplifiedView then
-            GUI.ResizeSimplifiedTree()
-        end
     end)
 
     frame:SetMinResize(GUI.Config.minWidth, GUI.Config.minHeight)
@@ -1194,22 +1331,22 @@ function GUI.CreateFrame()
 end
 
 -- Widen the LFM tab's tree panel to fill its container (simplified view) or
--- restore its normal 340px column width. Split out from ApplySimplifiedView
--- so the window-resize handler can keep it in sync without redoing the rest
--- of the show/hide work on every resize tick.
-function GUI.ResizeSimplifiedTree()
-    local lfmContainer = GUI.Frame and GUI.Frame.tabContents and GUI.Frame.tabContents["lfm"]
-    if not lfmContainer or not lfmContainer.treePanel then return end
+-- restore its normal 340px column width.
+-- Window width to shrink to in Simplified View: the tree panel's own fixed
+-- 340px column plus the content area's 10px left/right margins, plus a
+-- small buffer so the tree's right-edge scrollbar/buttons aren't clipped.
+GUI.SIMPLIFIED_WIDTH = 380
 
-    local width = lfmContainer:GetWidth()
-    if not width or width < 100 then width = 700 end  -- fallback before first layout pass
-    lfmContainer.treePanel:SetWidth(width)
-end
+-- Height of the compact two-line footer (see GUI.RenderSimplifiedFooter)
+-- used in place of the single-line full-view status bar (30px) once the
+-- window is narrowed to GUI.SIMPLIFIED_WIDTH.
+GUI.SIMPLIFIED_STATUSBAR_HEIGHT = 34
 
 -- Simplified View: show only the LFM/LFG tree, hiding the tab bar and the
--- Group Details / Queue-LFG-Waitlist panels. The tree panel keeps its own
--- header/search/filter/refresh controls - those are controls FOR the tree,
--- not separate content.
+-- Group Details / Queue-LFG-Waitlist panels, and shrinking the WINDOW itself
+-- down to fit just the tree column (rather than stretching the tree to fill
+-- a still-wide window). The tree panel keeps its own header/search/filter/
+-- refresh controls - those are controls FOR the tree, not separate content.
 function GUI.ApplySimplifiedView(enabled)
     if not GUI.Frame then return end
     local frame = GUI.Frame
@@ -1221,11 +1358,74 @@ function GUI.ApplySimplifiedView(enabled)
     if frame.tabBar then
         if enabled then frame.tabBar:Hide() else frame.tabBar:Show() end
     end
+    -- Belt-and-suspenders: also hide/show each tab button individually, not
+    -- just their tabBar parent - a hidden parent should already suppress
+    -- these, but this guards against them rendering past the narrow
+    -- Simplified window's edge if that ever stops being true.
+    if frame.tabButtons then
+        for _, tabBtn in pairs(frame.tabButtons) do
+            if enabled then tabBtn:Hide() else tabBtn:Show() end
+        end
+    end
 
     if frame.content then
         frame.content:ClearAllPoints()
         frame.content:SetPoint("TOPLEFT", 10, enabled and -45 or -75)
-        frame.content:SetPoint("BOTTOMRIGHT", -10, 40)
+        frame.content:SetPoint("BOTTOMRIGHT", -10, enabled and (GUI.SIMPLIFIED_STATUSBAR_HEIGHT + 10) or 40)
+    end
+
+    -- Title bar: swap the six text quick-buttons for a single "..." dropdown
+    -- (see GUI.CreateFrame) so they don't overlap "AutoInvite+ by iuGames" at
+    -- the narrow Simplified width. Full View has room and keeps the buttons.
+    if frame.quickTitleButtons then
+        for _, btn in ipairs(frame.quickTitleButtons) do
+            if enabled then btn:Hide() else btn:Show() end
+        end
+    end
+    if frame.quickActionsBtn then
+        if enabled then frame.quickActionsBtn:Show() else frame.quickActionsBtn:Hide() end
+    end
+
+    -- Maximizing doesn't make sense for the narrow Simplified window (it's
+    -- meant to stay a slim tree-only column), so hide that button in this
+    -- mode; minimize and close remain valid either way. Re-anchor minBtn
+    -- straight to closeBtn when maxBtn is hidden so there's no gap where it
+    -- used to sit (a hidden frame keeps its position - siblings anchored to
+    -- it don't automatically slide over).
+    if frame.maxBtn then
+        if enabled then frame.maxBtn:Hide() else frame.maxBtn:Show() end
+    end
+    if frame.minBtn and frame.maxBtn and frame.closeBtn then
+        frame.minBtn:ClearAllPoints()
+        if enabled then
+            frame.minBtn:SetPoint("RIGHT", frame.closeBtn, "LEFT", -2, 0)
+        else
+            frame.minBtn:SetPoint("RIGHT", frame.maxBtn, "LEFT", -2, 0)
+        end
+    end
+
+    -- Footer: swap the full-view single status line + fixed-offset GS/chat-ban/
+    -- broadcast strings (sized for the 1000px default window) for the compact
+    -- two-line layout - see GUI.RenderSimplifiedFooter.
+    if frame.statusBar then
+        local sb = frame.statusBar
+        sb:SetHeight(enabled and GUI.SIMPLIFIED_STATUSBAR_HEIGHT or 30)
+        if enabled then
+            if frame.statusText then frame.statusText:Hide() end
+            if sb.gsDisplay then sb.gsDisplay:Hide() end
+            if sb.chatBanStatus then sb.chatBanStatus:Hide() end
+            if sb.broadcastStatus then sb.broadcastStatus:Hide() end
+            if sb.simpleLine1 then sb.simpleLine1:Show() end
+            if sb.simpleLine2 then sb.simpleLine2:Show() end
+            GUI.RenderSimplifiedFooter()
+        else
+            if frame.statusText then frame.statusText:Show() end
+            if sb.gsDisplay then sb.gsDisplay:Show() end
+            if sb.chatBanStatus then sb.chatBanStatus:Show() end
+            if sb.broadcastStatus then sb.broadcastStatus:Show() end
+            if sb.simpleLine1 then sb.simpleLine1:Hide() end
+            if sb.simpleLine2 then sb.simpleLine2:Hide() end
+        end
     end
 
     local lfmContainer = frame.tabContents and frame.tabContents["lfm"]
@@ -1237,28 +1437,54 @@ function GUI.ApplySimplifiedView(enabled)
             if enabled then lfmContainer.queuePanel:Hide() else lfmContainer.queuePanel:Show() end
         end
         if lfmContainer.treePanel then
+            local tp = lfmContainer.treePanel
+            tp:ClearAllPoints()
+            tp:SetPoint("TOPLEFT", 0, 0)
             if enabled then
-                GUI.ResizeSimplifiedTree()
+                -- No sibling Group Details panel to leave room for - stretch
+                -- to fill the container so there's no dead space on the
+                -- right (a fixed 340 here left an unused ~20px gap against
+                -- the narrower Simplified window's content width).
+                tp:SetPoint("BOTTOMRIGHT", 0, 0)
             else
-                lfmContainer.treePanel:SetWidth(340)
+                -- Fixed left column - the WINDOW resizes around it in Full
+                -- View, with Group Details filling the remaining width.
+                tp:SetPoint("BOTTOMLEFT", 0, 0)
+                tp:SetWidth(340)
             end
         end
     end
 
-    if frame.simpleBtn then
-        frame.simpleBtn:SetText(enabled and "Full View" or "Simple")
-        local fs = frame.simpleBtn:GetFontString()
-        if fs then
-            if enabled then
-                fs:SetTextColor(1, 0.82, 0)  -- gold, matches the active-tab highlight
-            else
-                fs:SetTextColor(1, 1, 1)
-            end
+    -- Resize the whole window, not just its content. Restoring derives from
+    -- the persisted AIP.db.guiWidth/guiHeight (the same source GUI.Toggle()
+    -- itself restores from) rather than a session-local "size before
+    -- simplifying" snapshot - that snapshot would go stale the moment the
+    -- window is hidden and reshown (GUI.Toggle's own restore-size branch
+    -- runs on every show and doesn't know about Simplified View, so it's
+    -- special-cased there too - see GUI.Toggle). SetMinResize's floor
+    -- (GUI.Config.minWidth, normally 800) would otherwise clamp SetSize
+    -- right back up, so it moves with the mode. Skipped while minimized/
+    -- maximized - those already own the frame's size on their own toggle.
+    if not GUI.IsMinimized and not GUI.IsMaximized then
+        if enabled then
+            -- Width is locked (min == max) - the resize grip only grows/shrinks
+            -- height in Simplified View; widening it defeats the point of a
+            -- slim tree-only column.
+            frame:SetMinResize(GUI.SIMPLIFIED_WIDTH, GUI.Config.minHeight)
+            frame:SetMaxResize(GUI.SIMPLIFIED_WIDTH, 4000)
+            local h = (AIP.db and AIP.db.guiHeight and math.max(AIP.db.guiHeight, GUI.Config.minHeight)) or frame:GetHeight()
+            frame:SetSize(GUI.SIMPLIFIED_WIDTH, h)
+        else
+            frame:SetMinResize(GUI.Config.minWidth, GUI.Config.minHeight)
+            frame:SetMaxResize(4000, 4000)
+            local w = (AIP.db and AIP.db.guiWidth and math.max(AIP.db.guiWidth, GUI.Config.minWidth)) or GUI.Config.defaultWidth
+            local h = (AIP.db and AIP.db.guiHeight and math.max(AIP.db.guiHeight, GUI.Config.minHeight)) or GUI.Config.defaultHeight
+            frame:SetSize(w, h)
         end
     end
 
-    -- Recompute elastic Queue/LFG/Waitlist row counts and tree sizing after
-    -- the layout settles.
+
+    -- Recompute elastic Queue/LFG/Waitlist row counts after the layout settles.
     if AIP.Utils and AIP.Utils.DelayedCall then
         AIP.Utils.DelayedCall(0.05, GUI.RefreshQueueLayout)
     else
@@ -1270,6 +1496,14 @@ end
 function GUI.ToggleSimplifiedView()
     if not AIP.db then return end
     AIP.db.simplifiedView = not AIP.db.simplifiedView
+    -- Simplified View's slim, width-locked column doesn't make sense at a
+    -- maximized full-screen size - ApplySimplifiedView's resize step is
+    -- skipped entirely while maximized (it doesn't own the frame's size
+    -- then), so without this the window would stay full-screen with
+    -- simplified content stranded inside it. Restore first.
+    if AIP.db.simplifiedView and GUI.IsMaximized then
+        GUI.ToggleMaximize()
+    end
     GUI.ApplySimplifiedView(AIP.db.simplifiedView)
 end
 
@@ -1292,12 +1526,6 @@ function GUI.ToggleMinimize()
         -- Shrink to title bar only
         GUI.Frame:SetHeight(GUI.Config.minimizedHeight)
         GUI.Frame:SetResizable(false)
-
-        -- Update button texture to expand
-        if GUI.Frame.minBtn then
-            GUI.Frame.minBtn:SetNormalTexture("Interface\\Buttons\\UI-Panel-ExpandButton-Up")
-            GUI.Frame.minBtn:SetPushedTexture("Interface\\Buttons\\UI-Panel-ExpandButton-Down")
-        end
     else
         -- Restore size
         GUI.Frame:SetHeight(GUI.PreMinimizeHeight or GUI.Config.defaultHeight)
@@ -1307,12 +1535,6 @@ function GUI.ToggleMinimize()
         if GUI.Frame.content then GUI.Frame.content:Show() end
         if GUI.Frame.tabBar then GUI.Frame.tabBar:Show() end
         if GUI.Frame.statusBar then GUI.Frame.statusBar:Show() end
-
-        -- Update button texture to collapse
-        if GUI.Frame.minBtn then
-            GUI.Frame.minBtn:SetNormalTexture("Interface\\Buttons\\UI-Panel-CollapseButton-Up")
-            GUI.Frame.minBtn:SetPushedTexture("Interface\\Buttons\\UI-Panel-CollapseButton-Down")
-        end
 
         -- Recompute elastic list row counts after expanding back to full size.
         if AIP.Utils and AIP.Utils.DelayedCall then
@@ -1351,12 +1573,6 @@ function GUI.ToggleMaximize()
         GUI.Frame:ClearAllPoints()
         GUI.Frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
         GUI.Frame:SetSize(screenWidth - 40, screenHeight - 40)
-
-        -- Update button texture to restore
-        if GUI.Frame.maxBtn then
-            GUI.Frame.maxBtn:SetNormalTexture("Interface\\Buttons\\UI-Panel-SmallerButton-Up")
-            GUI.Frame.maxBtn:SetPushedTexture("Interface\\Buttons\\UI-Panel-SmallerButton-Down")
-        end
     else
         -- Restore saved size and position
         if GUI.SavedSize then
@@ -1369,12 +1585,6 @@ function GUI.ToggleMaximize()
         else
             GUI.Frame:ClearAllPoints()
             GUI.Frame:SetPoint("CENTER")
-        end
-
-        -- Update button texture to maximize
-        if GUI.Frame.maxBtn then
-            GUI.Frame.maxBtn:SetNormalTexture("Interface\\Buttons\\UI-Panel-BiggerButton-Up")
-            GUI.Frame.maxBtn:SetPushedTexture("Interface\\Buttons\\UI-Panel-BiggerButton-Down")
         end
     end
 
@@ -3678,14 +3888,27 @@ function GUI.UpdateDetailsPanel(container, data)
                 local q = AIP.Weekly and AIP.Weekly.ForToken(data.weekly)
                 local bossName = q and q.boss or data.weekly
                 local wanted = AIP.Weekly and AIP.Weekly.IsWanted(data.weekly)
+                -- Real quest hyperlink when you currently hold this weekly
+                -- yourself (see Weekly.LinkFor) - shows the game's own
+                -- tooltip on hover via weeklyHoverFrame below. Falls back to
+                -- the plain boss name (never a guessed/fabricated link) when
+                -- you don't hold it, same as every other *Data.lua file.
+                local link = AIP.Weekly and AIP.Weekly.LinkFor and AIP.Weekly.LinkFor(data.weekly)
+                container.weeklyQuestLink = link
+                local questText = link or bossName
                 if wanted then
-                    container.weeklyIndicator:SetText("|cFF00FF00[W] Weekly: " .. bossName .. " (you need this!)|r")
+                    container.weeklyIndicator:SetText("|cFF00FF00[W] Weekly: " .. questText .. " (you need this!)|r")
                 else
-                    container.weeklyIndicator:SetText("|cFF33CCFF[W] Weekly: " .. bossName .. "|r")
+                    container.weeklyIndicator:SetText("|cFF33CCFF[W] Weekly: " .. questText .. "|r")
                 end
                 container.weeklyIndicator:Show()
+                if container.weeklyHoverFrame then
+                    if link then container.weeklyHoverFrame:Show() else container.weeklyHoverFrame:Hide() end
+                end
             else
                 container.weeklyIndicator:Hide()
+                container.weeklyQuestLink = nil
+                if container.weeklyHoverFrame then container.weeklyHoverFrame:Hide() end
             end
         end
     end
@@ -4458,6 +4681,8 @@ function GUI.UpdateBroadcastStatus()
             chatBanStatus:SetText(statusMsg)
         end
     end
+
+    GUI.RenderSimplifiedFooter()
 end
 
 -- Update enrollment status display
@@ -4889,19 +5114,30 @@ function GUI.RaidKeyForTemplate(templateKey)
     if not (templateKey and Comp and Comp.TemplateKeyForRaid) then return nil end
     for raidType, info in pairs(GUI.RaidSizeInfo or {}) do
         if raidType ~= "CUSTOM" then
-            for _, size in ipairs(info.sizes or {}) do
-                -- Normal first: templates without a distinct heroic entry
-                -- (Ulduar, 5-mans) must reverse-map as NON-heroic
-                local variants = info.hasHeroic and {false, true} or {false}
-                for _, heroic in ipairs(variants) do
-                    local key
-                    if raidType == "TOC" and heroic then
-                        key = "TOGC" .. size
-                    else
-                        key = raidType .. size .. (heroic and "H" or "N")
-                    end
-                    if Comp.TemplateKeyForRaid(key) == templateKey then
-                        return raidType, size, heroic
+            -- HC-prefixed dungeon ids (HCFOS, HCHOL, ...) are already a
+            -- complete key on their own - GetRaidKey() returns them as-is
+            -- rather than appending a size/H-N suffix (see its own comment),
+            -- so reverse-mapping must try the same shortcut instead of
+            -- building "HCFOS5H", which Comp.TemplateKeyForRaid can't parse.
+            if raidType:sub(1, 2) == "HC" then
+                if Comp.TemplateKeyForRaid(raidType) == templateKey then
+                    return raidType, info.defaultSize, true
+                end
+            else
+                for _, size in ipairs(info.sizes or {}) do
+                    -- Normal first: templates without a distinct heroic entry
+                    -- (Ulduar, 5-mans) must reverse-map as NON-heroic
+                    local variants = info.hasHeroic and {false, true} or {false}
+                    for _, heroic in ipairs(variants) do
+                        local key
+                        if raidType == "TOC" and heroic then
+                            key = "TOGC" .. size
+                        else
+                            key = raidType .. size .. (heroic and "H" or "N")
+                        end
+                        if Comp.TemplateKeyForRaid(key) == templateKey then
+                            return raidType, size, heroic
+                        end
                     end
                 end
             end
@@ -8187,6 +8423,83 @@ function GUI.UpdateStatus()
     if GUI.Frame.statusBar.modeIndicator then
         GUI.Frame.statusBar.modeIndicator:SetText("")
     end
+
+    GUI.RenderSimplifiedFooter()
+end
+
+-- Compact two-line footer shown only in Simplified View (see ApplySimplifiedView
+-- / GUI.SIMPLIFIED_STATUSBAR_HEIGHT). The full-view footer's single status
+-- line plus separately-anchored GS/chat-ban/broadcast strings are sized for
+-- the 1000px default window and spill past the narrow 380px Simplified
+-- window's edge, which is the overlap this replaces. Recomputes everything
+-- fresh on every call (rather than depending on GUI.UpdateStatus /
+-- GUI.UpdateBroadcastStatus write order) so it's always correct regardless
+-- of which one triggered it - both call this at the end of their own update.
+function GUI.RenderSimplifiedFooter()
+    if not (GUI.Frame and AIP.db and AIP.db.simplifiedView) then return end
+    local sb = GUI.Frame.statusBar
+    if not (sb and sb.simpleLine1 and sb.simpleLine2) then return end
+
+    -- Line 1: a chat-ban/throttle warning or broadcast countdown is more
+    -- urgent than the routine summary, so it takes over line 1 while active
+    -- (mirrors the accuracy-guard spirit elsewhere: never hide a real warning).
+    local alert = ""
+    if AIP.ChatBan and AIP.ChatBan.detected then
+        local timeSinceBan = time() - (AIP.ChatBan.lastBanTime or 0)
+        if timeSinceBan < 300 then
+            alert = "|cFFFF6666\226\154\160 THROTTLED|r (" .. math.floor(300 - timeSinceBan) .. "s)"
+        end
+    end
+    if alert == "" and GUI.Broadcast and GUI.Broadcast.active then
+        local remaining = math.max(0, (GUI.Broadcast.nextSendAt or 0) - GetTime())
+        local modeStr = GUI.Broadcast.mode == "lfm" and "LFM" or "LFG"
+        local color = remaining < 5 and "|cFFFFFF00" or "|cFF00FF00"
+        alert = color .. "Broadcasting " .. modeStr .. ":|r " .. math.floor(remaining) .. "s"
+    end
+
+    if alert ~= "" then
+        sb.simpleLine1:SetText(alert)
+    else
+        local aiColor = (AIP.db.enabled) and "|cFF00FF00ON|r" or "|cFFFF0000OFF|r"
+        local lfmCount = AIP.GroupTracker and AIP.GroupTracker.GetGroupCount() or 0
+        local lfgCount = GUI.GetLfgEnrollmentCount()
+        sb.simpleLine1:SetText("Auto-Invite: " .. aiColor .. "   LFM: " .. lfmCount .. "   LFG: " .. lfgCount)
+    end
+
+    -- Line 2: peers / mode / gear score - always shown regardless of the alert.
+    local peerCount = AIP.DataBus and AIP.DataBus.GetPeerCount and AIP.DataBus.GetPeerCount() or 0
+    local peerColor = peerCount > 0 and "|cFF00FF00" or "|cFF888888"
+
+    local modeText, modeColor
+    if GUI.Broadcast and GUI.Broadcast.active then
+        if GUI.Broadcast.mode == "lfm" then
+            modeText, modeColor = "LFM", "|cFF00FFFF"
+        elseif GUI.Broadcast.mode == "lfg" then
+            modeText, modeColor = "LFG", "|cFFFFFF00"
+        else
+            modeText, modeColor = "BC", "|cFF00FF00"
+        end
+    else
+        local mode = AIP.GetPlayerMode and AIP.GetPlayerMode() or "none"
+        if mode == "lfm" then
+            modeText, modeColor = "LFM", "|cFF00FFFF"
+        elseif mode == "lfg" then
+            modeText, modeColor = "LFG", "|cFFFFFF00"
+        else
+            modeText, modeColor = "Off", "|cFF888888"
+        end
+    end
+
+    local gs, ilvl = GUI.CalculatePlayerGS()
+    if not ilvl then ilvl = GUI.CalculatePlayerIlvl() end
+    local gsText = ""
+    if gs and gs > 0 then
+        gsText = "   |cFFAAAAAAGS: " .. gs .. "|r"
+    elseif ilvl and ilvl > 0 then
+        gsText = "   |cFFAAAAAAiLvl: " .. ilvl .. "|r"
+    end
+
+    sb.simpleLine2:SetText(peerColor .. "Peers: " .. peerCount .. "|r   " .. modeColor .. "Mode: " .. modeText .. "|r" .. gsText)
 end
 
 -- Update peer count display in status bar (now handled by UpdateStatus)
@@ -8227,6 +8540,12 @@ function GUI.Toggle()
         -- reopens at full size with all panels hidden (a black empty window).
         if GUI.IsMinimized then
             GUI.Frame:SetHeight(GUI.Config.minimizedHeight)
+        elseif AIP.db and AIP.db.simplifiedView then
+            -- Simplified View owns its own width (GUI.ApplySimplifiedView) -
+            -- restoring the pre-simplify guiWidth here would pop the window
+            -- back to full size while its content stays simplified.
+            local h = (AIP.db.guiHeight and math.max(AIP.db.guiHeight, GUI.Config.minHeight)) or GUI.Config.defaultHeight
+            GUI.Frame:SetSize(GUI.SIMPLIFIED_WIDTH, h)
         elseif AIP.db and AIP.db.guiWidth and AIP.db.guiHeight then
             -- Clamp a previously-saved size up to the current minimums, so an old
             -- short saved height gets the new, deeper minimum (fixes cramped panels).
@@ -8326,6 +8645,8 @@ function GUI.UpdateGearScoreDisplay()
             gsDisplay:SetText("")
         end
     end
+
+    GUI.RenderSimplifiedFooter()
 end
 
 -- Hook equipment changes to update GS display
@@ -8503,6 +8824,19 @@ AIP.UpdateQueueUI = function()
     end
 end
 
+-- One-time default keybind: only sets it if the player has no binding for
+-- this action yet, so it never stomps a manual rebind (or an intentional
+-- unbind) on later logins - AIP.db.defaultKeybindSet latches after the first
+-- attempt either way.
+function GUI.EnsureDefaultKeybind()
+    if not AIP.db or AIP.db.defaultKeybindSet then return end
+    if not GetBindingKey("AIP_TOGGLEMAIN") then
+        SetBinding("CTRL-ALT-I", "AIP_TOGGLEMAIN")
+        SaveBindings(GetCurrentBindingSet())
+    end
+    AIP.db.defaultKeybindSet = true
+end
+
 -- Initialize on addon load (delayed to ensure db is available)
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")
@@ -8518,6 +8852,7 @@ initFrame:SetScript("OnEvent", function(self, event, arg1)
             if df.elapsed >= 0.5 then
                 if AIP.db and not initFrame.initialized then
                     GUI.CreateMinimapButton()
+                    GUI.EnsureDefaultKeybind()
                     initFrame.initialized = true
                 end
                 df:SetScript("OnUpdate", nil)
@@ -8528,6 +8863,7 @@ initFrame:SetScript("OnEvent", function(self, event, arg1)
         -- Fallback: create minimap button if not already done
         if AIP.db and not initFrame.initialized then
             GUI.CreateMinimapButton()
+            GUI.EnsureDefaultKeybind()
             initFrame.initialized = true
         end
     end

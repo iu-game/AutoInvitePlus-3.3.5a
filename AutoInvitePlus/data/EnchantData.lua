@@ -62,6 +62,14 @@ E.List = {
         [8]  = { name = "Enchant Boots - Icewalker", spellID = 60623, kind = "spell", source = "Enchanting",
                  mods = { ITEM_MOD_HIT_RATING_SHORT = 12, ITEM_MOD_CRIT_RATING_SHORT = 12 } },
         [16] = { name = "Enchant Weapon - Berserking", spellID = 59621, kind = "spell", source = "Enchanting (proc)", mods = nil },
+        -- Ranged weapon scope: engineer-crafted but usable by anyone (not
+        -- self-only like the tinkers/embroideries below) - same BoE-consumable
+        -- pattern as the Icescale Leg Armor row above. Hunter-only in practice
+        -- (the only agiDPS class that fights with a bow/gun/crossbow here -
+        -- Rogue/Feral/Enhance/Ret share this archetype but don't use slot 18
+        -- for damage), so E.ForSlot gates it to UnitClass == HUNTER.
+        [18] = { name = "Heartseeker Scope", itemID = 41167, spellID = 55135, kind = "item", source = "Engineering (430) - BoE once crafted, anyone can attach",
+                 mods = { ITEM_MOD_CRIT_RATING_SHORT = 40 } },
     },
     casterDPS = {
         [1]  = { name = "Arcanum of Burning Mysteries", itemID = 44877, kind = "item", source = "Kirin Tor - Revered",
@@ -123,16 +131,120 @@ E.List = {
     },
 }
 E.List.casterHot = E.List.healerCrit
+-- Hunters use the same AP-focused enchants as the other agiDPS specs, plus the
+-- ranged-weapon scope already keyed under agiDPS[18] (E.ForSlot class-gates it
+-- to Hunter, so it's inert for Rogue/Enhance/Feral sharing this same table).
+E.List.rangedDPS = E.List.agiDPS
 
 -- Per-spec overrides (SG.KeyFor keys) for cases the archetype default misses
 -- (e.g. ArP weapon enchant differences). Populated by the research pass.
 E.BySpec = {}
+
+-- Profession-exclusive enchants: unlike E.List, these are NOT available to
+-- everyone - each requires the enchanter's own copy of that profession (and,
+-- for rings, can only ever be self-applied - no other profession can enchant
+-- a ring at all in 3.3.5a, so these are the ONLY option for slots 11/12).
+-- Glove/cloak/bracer entries here COMPETE with the E.List entry for the same
+-- slot (one enchant per slot) rather than stacking with it - `note` on each
+-- says so. IDs verified on wowhead.com/wotlk. Proc/on-use effects (glove
+-- tinkers, cloak embroideries) carry no `mods`, same rule as E.List procs.
+E.ProfessionAlts = {
+    strDPS = {
+        [9]  = { { name = "Fur Lining - Attack Power", spellID = 57683, kind = "spell",
+                   source = "Leatherworking (self-only bracer enchant)", mods = { ITEM_MOD_ATTACK_POWER_SHORT = 130 } } },
+        [10] = { { name = "Hyperspeed Accelerators", spellID = 54999, kind = "spell",
+                   source = "Engineering (glove tinker, self-only)", mods = nil,
+                   note = "On-use: +340 Haste for 12 sec, 1 min cooldown. Replaces the glove enchant above (one effect per slot)." } },
+        [11] = { { name = "Enchant Ring - Assault", spellID = 44645, kind = "spell",
+                   source = "Enchanting (self-only ring enchant)", mods = { ITEM_MOD_ATTACK_POWER_SHORT = 40 } } },
+        [12] = { { name = "Enchant Ring - Assault", spellID = 44645, kind = "spell",
+                   source = "Enchanting (self-only ring enchant)", mods = { ITEM_MOD_ATTACK_POWER_SHORT = 40 } } },
+        [15] = { { name = "Swordguard Embroidery", spellID = 55777, kind = "spell",
+                   source = "Tailoring (cloak embroidery, self-only)", mods = nil,
+                   note = "Proc: melee/ranged hits have a chance to grant +400 Attack Power for 15 sec. Replaces the cloak enchant above." } },
+    },
+    tank = {
+        [9]  = { { name = "Fur Lining - Stamina", spellID = 57690, kind = "spell",
+                   source = "Leatherworking (self-only bracer enchant)", mods = { ITEM_MOD_STAMINA_SHORT = 102 } } },
+        [11] = { { name = "Enchant Ring - Stamina", spellID = 59636, kind = "spell",
+                   source = "Enchanting (self-only ring enchant)", mods = { ITEM_MOD_STAMINA_SHORT = 30 } } },
+        [12] = { { name = "Enchant Ring - Stamina", spellID = 59636, kind = "spell",
+                   source = "Enchanting (self-only ring enchant)", mods = { ITEM_MOD_STAMINA_SHORT = 30 } } },
+        [15] = { { name = "Swordguard Embroidery", spellID = 55777, kind = "spell",
+                   source = "Tailoring (cloak embroidery, self-only)", mods = nil,
+                   note = "Proc: melee hits have a chance to grant +400 Attack Power for 15 sec (helps threat). Replaces the cloak enchant above." } },
+    },
+}
+E.ProfessionAlts.agiDPS = E.ProfessionAlts.strDPS
+E.ProfessionAlts.rangedDPS = E.ProfessionAlts.strDPS
+
+-- Blacksmithing sockets (self-only, any armor type - a plate tank and a
+-- cloth caster can both use these). Unlike the tinkers/embroideries above,
+-- a socket is a property of the ITEM, not the enchant slot, so it stacks
+-- with whatever enchant is already on that bracer/glove rather than
+-- replacing it. No `mods` - the actual gain depends on which gem goes in
+-- the new socket, so this points at the GEMS section above instead of
+-- guessing a number.
+local function addSocket(list, slotId, label)
+    list[slotId] = list[slotId] or {}
+    table.insert(list[slotId], { name = label, spellID = (slotId == 9 and 55628 or 55641), kind = "spell",
+        source = "Blacksmithing (self-only, adds a socket - doesn't replace the enchant)",
+        mods = nil, note = "Adds a permanent extra socket (any color). Slot your best-stat gem from the GEMS section above in it." })
+end
+addSocket(E.ProfessionAlts.strDPS, 9, "Socket Bracer")
+addSocket(E.ProfessionAlts.strDPS, 10, "Socket Gloves")
+addSocket(E.ProfessionAlts.tank, 9, "Socket Bracer")
+addSocket(E.ProfessionAlts.tank, 10, "Socket Gloves")
+
+do
+    local casterAlts = {
+        [9]  = { { name = "Fur Lining - Spell Power", spellID = 57691, kind = "spell",
+                   source = "Leatherworking (self-only bracer enchant)", mods = { ITEM_MOD_SPELL_POWER = 76 } } },
+        [10] = { { name = "Hyperspeed Accelerators", spellID = 54999, kind = "spell",
+                   source = "Engineering (glove tinker, self-only)", mods = nil,
+                   note = "On-use: +340 Haste for 12 sec, 1 min cooldown. Replaces the glove enchant above (one effect per slot)." } },
+        [11] = { { name = "Enchant Ring - Greater Spellpower", spellID = 44636, kind = "spell",
+                   source = "Enchanting (self-only ring enchant)", mods = { ITEM_MOD_SPELL_POWER = 23 } } },
+        [12] = { { name = "Enchant Ring - Greater Spellpower", spellID = 44636, kind = "spell",
+                   source = "Enchanting (self-only ring enchant)", mods = { ITEM_MOD_SPELL_POWER = 23 } } },
+        [15] = { { name = "Lightweave Embroidery", spellID = 55642, kind = "spell",
+                   source = "Tailoring (cloak embroidery, self-only)", mods = nil,
+                   note = "Proc: casting a spell has a chance to grant +295 Spell Power for 15 sec. Replaces the cloak enchant above." } },
+    }
+    E.ProfessionAlts.casterDPS = casterAlts
+    E.ProfessionAlts.healerCrit = casterAlts
+    E.ProfessionAlts.casterHot = casterAlts
+    addSocket(casterAlts, 9, "Socket Bracer")
+    addSocket(casterAlts, 10, "Socket Gloves")
+end
+
+-- Profession-gated alternative(s) for a slot, for the current player's archetype.
+function E.ProfessionAltsForSlot(slotId)
+    local IS = AIP.ItemScore
+    local arch = IS and IS.PlayerArchetype and IS.PlayerArchetype()
+    local t = arch and E.ProfessionAlts[arch]
+    return t and t[slotId]
+end
 
 function E.ForArchetype(arch) return E.List[arch] end
 
 -- Enchant for a given slot for the current player (spec override -> archetype).
 function E.ForSlot(slotId)
     local IS, SG = AIP.ItemScore, AIP.SpecGuides
+    -- The "tank" archetype is shared by Warrior/Paladin/DK/Druid, but its
+    -- slot-17 entry ("Enchant Shield - Defense") only applies to classes that
+    -- can actually equip a shield - Druids can't, in any spec or form, so
+    -- there's nothing to enchant there. Item-type check, not just class/spec.
+    if slotId == 17 then
+        local _, class = UnitClass("player")
+        if class == "DRUID" then return nil end
+    end
+    -- Ranged scope only makes sense on an actual bow/gun/crossbow - the other
+    -- agiDPS classes put a wand/idol/totem in slot 18, which can't take one.
+    if slotId == 18 then
+        local _, class = UnitClass("player")
+        if class ~= "HUNTER" then return nil end
+    end
     local key = SG and SG.KeyFor and SG.KeyFor()
     if key and E.BySpec[key] and E.BySpec[key][slotId] then return E.BySpec[key][slotId] end
     local arch = IS and IS.PlayerArchetype and IS.PlayerArchetype()

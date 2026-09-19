@@ -815,9 +815,16 @@ function RT.OnMechanicCombatLog(...)
         local sName = select(10, ...)
         if sName and RT.LustSpells[sName] then
             local srcFlags = select(5, ...)
-            local isRaidPlayer = srcFlags and bit and bit.band
-                and bit.band(srcFlags, 0x00000400) ~= 0   -- COMBATLOG_OBJECT_TYPE_PLAYER
-                and bit.band(srcFlags, 0x00000007) ~= 0   -- MINE | PARTY | RAID affiliation
+            -- `bit` is not a global in this client (see hasCombatLogFlag
+            -- above) - the previous bit.band check silently never ran, so
+            -- isRaidPlayer was always false and the Lust/Sated timer bars
+            -- never fired. 0x00000400 (PLAYER) is a single power-of-two bit,
+            -- handled by hasCombatLogFlag; 0x00000007 (MINE|PARTY|RAID) is a
+            -- 3-bit MASK, not a single bit, so "any of those bits set" is
+            -- tested via `% 8` (the low 3 bits) directly instead.
+            local isRaidPlayer = srcFlags
+                and hasCombatLogFlag(srcFlags, 0x00000400)   -- COMBATLOG_OBJECT_TYPE_PLAYER
+                and (srcFlags % 8) ~= 0                       -- MINE | PARTY | RAID affiliation
             if isRaidPlayer then
                 RT.StartTimer("lust", sName, 40, 0.2, 0.9, 0.3, nil, "Interface\\Icons\\Spell_Nature_BloodLust")
                 RT.StartTimer("sated", "Sated (lockout)", 600, 1, 0.3, 0.3, nil, "Interface\\Icons\\Spell_Nature_BloodLust")

@@ -123,10 +123,16 @@ function GA.BestFromBags()
     -- Classes that can equip an off-hand weapon. Hunters CANNOT dual-wield or use
     -- an off-hand in 3.3.5a (main-hand melee + ranged only), so they're excluded.
     -- Shaman dual-wield is spec-gated (Enhancement's "Dual Wield" talent), unlike
-    -- the other three which are class-gated - an Elemental/Resto Shaman without
-    -- it can't physically equip a weapon in the off-hand slot, so recommending
-    -- one as a bags upgrade would be advice the player can't act on.
-    local canDW = (class == "WARRIOR" or class == "ROGUE" or class == "DEATHKNIGHT"
+    -- Rogue/DK which are class-gated - an Elemental/Resto Shaman without it can't
+    -- physically equip a weapon in the off-hand slot, so recommending one as a
+    -- bags upgrade would be advice the player can't act on. Warrior is likewise
+    -- archetype-gated: Protection uses a shield in that slot, not a second
+    -- weapon, so a Prot Warrior must not be offered an off-hand weapon just
+    -- because slot 17 happens to be empty (mid-gear-change, freshly dinged).
+    -- DK has no shield at all (tank or DPS both dual-wield/2H), so it stays
+    -- class-gated like Rogue.
+    local canDW = (class == "ROGUE" or class == "DEATHKNIGHT"
+        or (class == "WARRIOR" and IS and IS.PlayerArchetype and IS.PlayerArchetype() ~= "tank")
         or (class == "SHAMAN" and IS and IS.PlayerArchetype and IS.PlayerArchetype() == "agiDPS"))
 
     -- Pre-score equipped items per slot.

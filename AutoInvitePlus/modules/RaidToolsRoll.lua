@@ -24,12 +24,18 @@ function RT.StartRoll(itemText, itemLink)
     RT.Send("ROLL for " .. (itemLink or itemText) .. "!  Type /roll (1-100).  " .. duration .. " seconds!", "RAID_WARNING")
 
     if AIP.Utils and AIP.Utils.DelayedCall then
-        AIP.Utils.DelayedCall(math.max(1, duration - 3), function()
+        -- Keep both timer frame handles so RT.CancelRoll can actually cancel
+        -- them (Utils.DelayedCall's only guard against a stale timer firing
+        -- late is the RT.rollActive boolean, which a subsequent StartRoll
+        -- flips back to true - without cancelling these, a roll cancelled
+        -- and immediately restarted could have its OLD finish timer end the
+        -- NEW roll early off the new roll's partial roll pool).
+        RT.rollWarnFrame = AIP.Utils.DelayedCall(math.max(1, duration - 3), function()
             if RT.rollActive then
                 RT.Send("3 seconds left to roll for " .. tostring(RT.rollItem) .. "!", "RAID_WARNING")
             end
         end)
-        AIP.Utils.DelayedCall(duration, function() RT.FinishRoll() end)
+        RT.rollFinishFrame = AIP.Utils.DelayedCall(duration, function() RT.FinishRoll() end)
     end
 
     if RT.RefreshRollWindow then RT.RefreshRollWindow() end
@@ -104,6 +110,12 @@ function RT.CancelRoll()
     RT.rollActive = false
     RT.rollEndTime = nil
     RT.rolls = {}
+    if AIP.Utils and AIP.Utils.CancelDelayedCall then
+        AIP.Utils.CancelDelayedCall(RT.rollWarnFrame)
+        AIP.Utils.CancelDelayedCall(RT.rollFinishFrame)
+    end
+    RT.rollWarnFrame = nil
+    RT.rollFinishFrame = nil
     RT.Send("Roll cancelled.", "RAID")
     if RT.RefreshRollWindow then RT.RefreshRollWindow() end
 end

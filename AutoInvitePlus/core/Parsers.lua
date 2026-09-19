@@ -55,8 +55,15 @@ Parsers.RaidPatterns = {
     -- come before the bare "icc" catch-all below or every ICC rep message
     -- would just match that instead.
     {pattern = "ashen%s*verdict", raid = "ICCREP", category = "ICC"},
-    {pattern = "icc.-rep", raid = "ICCREP", category = "ICC"},
-    {pattern = "rep.-icc", raid = "ICCREP", category = "ICC"},
+    -- "rep" must be a whole word (frontier-bounded on both sides) so this
+    -- doesn't false-positive on any word merely CONTAINING "rep" - "reply",
+    -- "repeat", "report", "represent" all start with "rep" but aren't about
+    -- reputation ("LFM ICC, reply for invite" was matching via "reply").
+    -- "reputation" spelled out in full is matched separately below.
+    {pattern = "icc.-%f[%a]rep%f[%A]", raid = "ICCREP", category = "ICC"},
+    {pattern = "%f[%a]rep%f[%A].-icc", raid = "ICCREP", category = "ICC"},
+    {pattern = "icc.-reputation", raid = "ICCREP", category = "ICC"},
+    {pattern = "reputation.-icc", raid = "ICCREP", category = "ICC"},
     {pattern = "icc", raid = "ICC", category = "ICC"},
     {pattern = "icecrown", raid = "ICC", category = "ICC"},
     -- Boss-name shorthand (verified against Comp.RaidBosses in

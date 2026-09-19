@@ -345,6 +345,27 @@ function GUI.CreateBrowserTab(container, tabType)
     weeklyIndicator:Hide()
     container.weeklyIndicator = weeklyIndicator
 
+    -- FontStrings can't receive mouse events in this client - an invisible
+    -- frame anchored to the same bounds (SetAllPoints tracks the FontString
+    -- live as its text/width changes) is what makes the embedded quest link
+    -- show a real tooltip on hover, same idea as the achievement-link hover
+    -- in GUI.SetupMessageBoxAchievementTooltips. Only shown/interactive when
+    -- GUI.RefreshBrowserTab actually has a real link to offer (see
+    -- container.weeklyQuestLink).
+    local weeklyHoverFrame = CreateFrame("Frame", nil, detContent)
+    weeklyHoverFrame:SetAllPoints(weeklyIndicator)
+    weeklyHoverFrame:EnableMouse(true)
+    weeklyHoverFrame:Hide()
+    weeklyHoverFrame:SetScript("OnEnter", function(self)
+        if container.weeklyQuestLink then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetHyperlink(container.weeklyQuestLink)
+            GameTooltip:Show()
+        end
+    end)
+    weeklyHoverFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    container.weeklyHoverFrame = weeklyHoverFrame
+
     -- Message box
     local msgLabel = detContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     msgLabel:SetPoint("TOPLEFT", 0, -36)

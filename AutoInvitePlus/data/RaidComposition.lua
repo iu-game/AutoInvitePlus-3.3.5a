@@ -2446,9 +2446,13 @@ end
 
 -- Get GearScore if addon is available
 function Comp.GetGearScore(name)
-    -- Check for GearScore addon
-    if GearScore_GetScore then
-        local gs = GearScore_GetScore(name)
+    -- Prefer AIP.Integrations.GetGearScore: GearScore_GetScore(Name, Target)
+    -- only actually reads its SECOND argument (a resolved unit token, not a
+    -- name) - Integrations.lua already does that raid/party unit resolution
+    -- correctly, so delegate to it rather than duplicating (and getting
+    -- wrong) the same call here.
+    if AIP.Integrations and AIP.Integrations.GetGearScore then
+        local gs = AIP.Integrations.GetGearScore(name)
         if gs and gs > 0 then
             return gs
         end
@@ -3043,6 +3047,16 @@ function Comp.TemplateKeyForRaid(raidKey)
     local key = tostring(raidKey):upper()
     if key == "CUSTOM" then return nil end
     if Comp.RaidTemplates[key] then return key end   -- TOGC25, HEROIC5, TOC5 ...
+
+    -- HC-prefixed dungeon ids (HCFOS, HCHOL, ...) are GetRaidKey()'s own id
+    -- for a WotLK 5-man - they match Parsers.RaidHierarchy exactly, but
+    -- Comp.RaidTemplates keys the same dungeons without the "HC" prefix
+    -- (FOS, HOL, ...) since it has no separate normal-mode template to
+    -- distinguish from. Strip it before falling through to the size/H-N
+    -- suffix parser below, which HC-prefixed ids don't have at all.
+    if key:sub(1, 2) == "HC" and Comp.RaidTemplates[key:sub(3)] then
+        return key:sub(3)
+    end
 
     -- Custom templates match by NAME (the popup's CUSTOM raid key is the
     -- free-text custom name, e.g. "My Zerg 15")

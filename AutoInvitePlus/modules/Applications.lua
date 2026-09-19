@@ -209,9 +209,13 @@ local function onApply(event)
     Apply.incoming[event.sender] = { time = time() }
     pruneAll()
 
-    -- Blacklist: decline immediately (truthful, no queue noise)
+    -- Blacklist: decline immediately (truthful, no queue noise). Goes
+    -- through Apply.NotifyDeclined (not a raw sendAck) so it also clears
+    -- Apply.incoming[event.sender] - otherwise a later un-blacklist + invite
+    -- within the TTL would find that stale entry still set and send a
+    -- contradicting "invited" ACK after the applicant already saw "declined".
     if AIP.IsBlacklisted and AIP.IsBlacklisted(event.sender) then
-        sendAck(event.sender, "declined")
+        Apply.NotifyDeclined(event.sender)
         return
     end
 

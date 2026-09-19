@@ -4,7 +4,7 @@
 -- Refactored with DRY principle and OOP patterns
 
 local ADDON_NAME = "AutoInvitePlus"
-local VERSION = "6.7.2"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
+local VERSION = "6.7.3"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
 local DB_VERSION = 5  -- Increment when saved variables structure changes (5.5: raid sessions, 5.4: mdps/rdps split, 4: loot history retention)
 
 -- Create main addon namespace (may already exist from Utils.lua)
@@ -160,6 +160,7 @@ local defaults = {
     guiUnfocusedEnabled = false, -- Enable unfocused opacity reduction
     minimapAngle = 220,         -- Minimap button angle
     simplifiedView = false,     -- Hide the tab bar + Group Details/Queue panels, tree only
+    defaultKeybindSet = false, -- One-time: has the CTRL-ALT-I default keybind been applied?
 
     -- LFM/LFG Browser settings
     treeStaleTimeout = 180,     -- Hide tree entries older than this (seconds). Default: 3 min

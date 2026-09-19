@@ -1298,7 +1298,11 @@ function TB.CreateTreeView(parent, width, height)
     -- Create row buttons
     for i = 1, numRows do
         local row = CreateFrame("Button", frameName.."Row"..i, content)
-        row:SetSize(width - 35, TB.Config.rowHeight)
+        -- -27 exactly matches content's own width (content is inset 5+22 from
+        -- this frame) - rows used to be cut 8px narrower than their own
+        -- parent, leaving a dead strip on the right that grew more visible
+        -- once the tree panel itself was made to stretch full-width.
+        row:SetSize(width - 27, TB.Config.rowHeight)
         row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((i - 1) * TB.Config.rowHeight))
         row:SetFrameLevel(content:GetFrameLevel() + 1)
 
@@ -1652,6 +1656,16 @@ function TB.CreateTreeView(parent, width, height)
                                 GameTooltip:AddLine(" ")
                                 GameTooltip:AddLine("Note: " .. group.note, 0.7, 0.7, 0.7, true)
                             end
+
+                            -- Simplified View hides the Group Details panel (where the raw
+                            -- listing text normally shows), so surface it in the tooltip
+                            -- instead - Full View already shows it there, so skip it here
+                            -- to avoid duplicating the same text in two places at once.
+                            if AIP.db and AIP.db.simplifiedView and group.message and group.message ~= "" then
+                                GameTooltip:AddLine(" ")
+                                GameTooltip:AddLine("Message:", 0.8, 0.8, 0.8)
+                                GameTooltip:AddLine(group.message, 1, 1, 1, true)
+                            end
                             GameTooltip:Show()
                         end
                     end
@@ -1757,7 +1771,10 @@ function TB.CreateTreeView(parent, width, height)
         end
 
         -- Create additional rows if needed
-        local rowWidth = newWidth - 35
+        -- -27 matches self.content's own width (set just above: inset 5+22
+        -- from this frame) so rows fill their parent exactly instead of
+        -- leaving a dead strip short of it.
+        local rowWidth = newWidth - 27
         for i = #self.rows + 1, newNumRows do
             local row = CreateFrame("Button", self:GetName().."Row"..i, self.content)
             row:SetSize(rowWidth, TB.Config.rowHeight)

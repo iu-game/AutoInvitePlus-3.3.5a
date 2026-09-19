@@ -53,7 +53,13 @@ local function scanQuestLog()
         if not isHeader and title then
             local q = W.ByTitle[title]
             if q then
-                return { quest = q, complete = (isComplete and isComplete > 0) and true or false }
+                -- GetQuestLink builds a real, always-correct hyperlink from the
+                -- client's own quest log entry - no need to hardcode a quest
+                -- ID (same "never fabricate, degrade to text" rule as every
+                -- other *Data.lua file). Only available for a quest we
+                -- currently hold ourselves; see W.LinkFor.
+                local link = GetQuestLink and GetQuestLink(i) or nil
+                return { quest = q, complete = (isComplete and isComplete > 0) and true or false, link = link }
             end
         end
     end
@@ -83,6 +89,20 @@ end
 function W.ForToken(token)
     if not token then return nil end
     return W.ByToken[token:lower()]
+end
+
+-- Real quest hyperlink for a listing's weekly token, or nil. Only ever
+-- returns a link when the token matches the quest YOU currently hold (the
+-- weekly target is realm-wide and rotates as one, so any listing's token
+-- should match what's in your own log once you've picked it up) - there's
+-- no hardcoded quest ID to fall back on, so a token you don't hold yourself
+-- degrades to nil (caller shows the plain boss name instead, never a guess).
+function W.LinkFor(token)
+    if not token then return nil end
+    local held = W.Current()
+    if not held or not held.link then return nil end
+    if held.quest.token:lower() ~= token:lower() then return nil end
+    return held.link
 end
 
 -- Human status line for the popups' weekly strip.

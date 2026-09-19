@@ -41,6 +41,7 @@ C.List = {
     },
 }
 C.List.casterHot = C.List.healerCrit
+C.List.rangedDPS = C.List.agiDPS
 
 -- Per-spec overrides (SG.KeyFor keys) refined by the research pass.
 C.BySpec = {}

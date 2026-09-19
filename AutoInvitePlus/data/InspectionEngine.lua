@@ -255,7 +255,9 @@ function IE.InspectUnit(unit)
         local gs = AIP.Integrations.GetGearScore(name)
         data.gearScore = gs or 0
     elseif GearScore_GetScore then
-        data.gearScore = GearScore_GetScore(name) or 0
+        -- GearScore_GetScore(Name, Target) only actually reads Target (a
+        -- unit token) - IE.InspectUnit already has one in scope.
+        data.gearScore = GearScore_GetScore(name, unit) or 0
     elseif PlayerScore_GetScore then
         data.gearScore = PlayerScore_GetScore(name) or 0
     else

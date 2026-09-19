@@ -151,6 +151,7 @@ function CS.AddGroup(info)
         existing.channel = info.channel
         existing.isOwn = info.isOwn or existing.isOwn
         existing.isDataBus = info.isDataBus or existing.isDataBus
+        existing.hasExplicitComposition = info.hasExplicitComposition or existing.hasExplicitComposition
         -- Extended group info fields
         existing.gsMin = info.gsMin or existing.gsMin
         existing.ilvlMin = info.ilvlMin or existing.ilvlMin
@@ -247,6 +248,7 @@ function CS.AddGroup(info)
             time = info.time,
             isOwn = info.isOwn,
             isDataBus = info.isDataBus,
+            hasExplicitComposition = info.hasExplicitComposition,
             isGroup = true,
             -- Extended group info fields
             gsMin = info.gsMin,
@@ -316,8 +318,12 @@ function CS.AddPlayer(info)
         if info.role then existing.role = info.role end
         if info.class then existing.class = info.class end
         if info.gs then existing.gs = info.gs end
+        if info.ilvl then existing.ilvl = info.ilvl end
+        if info.spec then existing.spec = info.spec end
+        if info.version then existing.version = info.version end
         existing.isLFG = info.isLFG or existing.isLFG
         existing.isLFM = info.isLFM or existing.isLFM
+        existing.isDataBus = info.isDataBus or existing.isDataBus
         existing.weekly = info.weekly or existing.weekly
     else
         CS.Players[info.author] = {
@@ -326,11 +332,15 @@ function CS.AddPlayer(info)
             role = info.role,
             class = info.class,
             gs = info.gs,
+            ilvl = info.ilvl,
+            spec = info.spec,
+            version = info.version,
             message = info.message,
             channel = info.channel,
             time = info.time,
             isLFG = info.isLFG,
             isLFM = info.isLFM,
+            isDataBus = info.isDataBus,
             weekly = info.weekly,
         }
         CS.PrunePlayers()

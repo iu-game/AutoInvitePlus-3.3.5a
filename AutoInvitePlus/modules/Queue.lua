@@ -274,11 +274,11 @@ function AIP.InviteFromQueue(index)
     if index > 0 and index <= #AIP.db.queue then
         local entry = AIP.db.queue[index]
 
-        -- Send response message before invite
-        if AIP.db.responseInvite and AIP.db.responseInvite ~= "" then
-            SendChatMessage(AIP.db.responseInvite, "WHISPER", nil, entry.name)
-        end
-
+        -- AIP.InvitePlayer already sends AIP.db.responseInvite itself, only
+        -- on a successful invite - sending it here too duplicated the
+        -- whisper on success and sent a false "you've been invited" whisper
+        -- ahead of a rejected invite (blacklisted/guild-only/group-full/not
+        -- leader).
         if AIP.InvitePlayer(entry.name) then
             AIP.RemoveFromQueueByIndex(index)
             return true
@@ -294,11 +294,8 @@ function AIP.InviteFromQueueByName(name)
     local lowerName = name:lower()
     for i, entry in ipairs(AIP.db.queue) do
         if entry.name and entry.name:lower() == lowerName then
-            -- Send response message before invite
-            if AIP.db.responseInvite and AIP.db.responseInvite ~= "" then
-                SendChatMessage(AIP.db.responseInvite, "WHISPER", nil, entry.name)
-            end
-
+            -- See AIP.InviteFromQueue above - AIP.InvitePlayer already sends
+            -- the invite whisper itself, only on success.
             if AIP.InvitePlayer(entry.name) then
                 AIP.RemoveFromQueueByIndex(i)
                 -- Refresh UI
@@ -323,8 +320,11 @@ function AIP.RejectFromQueue(index, addToBlacklist, reason)
         SendChatMessage(AIP.db.responseReject, "WHISPER", nil, entry.name)
     end
 
-    -- Truthful application status for DataBus applicants
-    if AIP.Apply and AIP.Apply.NotifyDeclined then
+    -- Truthful application status for DataBus applicants. Same guard as
+    -- Waitlist.lua's equivalent: never whisper "declined" to someone
+    -- already standing in the raid/party (e.g. invited out-of-band).
+    if entry.isApplication and AIP.Apply and AIP.Apply.NotifyDeclined
+        and not UnitInRaid(entry.name) and not UnitInParty(entry.name) then
         AIP.Apply.NotifyDeclined(entry.name)
     end
 
@@ -353,8 +353,11 @@ function AIP.RejectFromQueueByName(name, addToBlacklist, reason)
                 SendChatMessage(AIP.db.responseReject, "WHISPER", nil, entry.name)
             end
 
-            -- Truthful application status for DataBus applicants
-            if AIP.Apply and AIP.Apply.NotifyDeclined then
+            -- Truthful application status for DataBus applicants. Same
+            -- guard as Waitlist.lua's equivalent: never whisper "declined"
+            -- to someone already standing in the raid/party.
+            if entry.isApplication and AIP.Apply and AIP.Apply.NotifyDeclined
+                and not UnitInRaid(entry.name) and not UnitInParty(entry.name) then
                 AIP.Apply.NotifyDeclined(entry.name)
             end
 
@@ -495,11 +498,9 @@ inviteTimer:SetScript("OnUpdate", function(self, elapsed)
             -- Auto-reject blacklisted
             AIP.RejectFromQueue(1, false)
         else
+            -- AIP.InvitePlayer already sends AIP.db.responseInvite itself,
+            -- only on success.
             if AIP.InvitePlayer(entry.name) then
-                -- Send invite message
-                if AIP.db.responseInvite and AIP.db.responseInvite ~= "" then
-                    SendChatMessage(AIP.db.responseInvite, "WHISPER", nil, entry.name)
-                end
                 table.remove(AIP.db.queue, 1)
             else
                 -- Move failed invite to end of queue
@@ -642,10 +643,11 @@ autoProcessTimer:SetScript("OnUpdate", function(self, elapsed)
                 if entry.isBlacklisted and AIP.db.blacklistMode == "reject" then
                     AIP.RejectFromQueue(1, false)
                 else
-                    -- Attempt to invite
-                    if AIP.db.responseInvite and AIP.db.responseInvite ~= "" then
-                        SendChatMessage(AIP.db.responseInvite, "WHISPER", nil, entry.name)
-                    end
+                    -- Attempt to invite. AIP.InvitePlayer already sends
+                    -- AIP.db.responseInvite itself, only on success - sending
+                    -- it here first meant a rejected invite (blacklisted,
+                    -- guild-only, group full, not leader) still got a false
+                    -- "you have been invited!" whisper.
                     if AIP.InvitePlayer(entry.name) then
                         AIP.Print("Auto-invited " .. entry.name .. " from queue (slot opened)")
                         table.remove(AIP.db.queue, 1)
