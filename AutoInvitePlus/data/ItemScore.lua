@@ -70,6 +70,11 @@ IS.Scales = {
     healerCrit= { int=1.0, haste=0.8, sp=0.75, crit=0.55, mp5=0.4, spi=0.3, sta=0.05 },-- hpal/rsham
     strDPS    = { str=1.0, hit=0.9, exp=0.85, arp=0.8, crit=0.6, ap=0.5, haste=0.45, agi=0.4, sta=0.05 },
     agiDPS    = { agi=1.0, arp=0.85, hit=0.85, exp=0.7, crit=0.6, ap=0.5, haste=0.45, str=0.3, sta=0.05 },
+    -- Hunter-only. Same primary stat as agiDPS (melee agi specs), but NO
+    -- Expertise: expertise only reduces dodge/parry chance, both of which are
+    -- melee-only avoidance - a ranged auto-shot/ability can't be dodged or
+    -- parried, so expertise rating is dead weight on a Hunter's gear score.
+    rangedDPS = { agi=1.0, arp=0.85, hit=0.85, crit=0.6, ap=0.5, haste=0.45, str=0.3, sta=0.05 },
     tank      = { sta=1.0, def=0.9, dodge=0.7, parry=0.65, blockv=0.4, blockr=0.35, agi=0.4, str=0.3, ap=0.2, def_gate=true },
 }
 
@@ -85,7 +90,7 @@ IS.SpecArchetype = {
     WARRIOR    = { "strDPS","strDPS","tank" },                     -- arms / fury / prot
     DEATHKNIGHT= { "strDPS","strDPS","strDPS" },                   -- blood/frost/unholy (tank via prot detect below)
     ROGUE      = { "agiDPS","agiDPS","agiDPS" },
-    HUNTER     = { "agiDPS","agiDPS","agiDPS" },
+    HUNTER     = { "rangedDPS","rangedDPS","rangedDPS" },
 }
 
 -- ============================================================================
@@ -115,9 +120,17 @@ function IS.PlayerArchetype()
     if class == "DRUID" and (IS.HasBuff("Bear Form") or IS.HasBuff("Dire Bear Form")) then arch = "tank" end
     if class == "WARRIOR" and GetShapeshiftForm and GetShapeshiftForm() == 2 then arch = "tank" end
     if class == "PALADIN" and IS.HasBuff("Righteous Fury") then arch = "tank" end
-    -- NOTE: we deliberately do NOT infer DK tank from Frost Presence - Frost/Unholy
-    -- DPS also run it, so it would mis-score DPS DKs as tanks (same reasoning as
-    -- Readiness). DKs default to strDPS; a Blood tank is a known un-detected case.
+    -- DKs have no tank stance/form/buff to key off (Frost Presence is also run by
+    -- Frost/Unholy DPS, so it isn't a safe signal - same reasoning as Readiness).
+    -- Use live Defense skill instead: DPS gear carries essentially no Defense
+    -- Rating, so a Blood-tree DK sitting at the 540 uncrittable cap is realistically
+    -- only a geared tank, never a DPS sidegrade. This under-detects an undergeared
+    -- leveling Blood tank (falls back to strDPS) but never misclassifies a Blood
+    -- DPS build, which is the safer direction to err in.
+    if class == "DEATHKNIGHT" and tree == 1 and UnitDefense then
+        local base, mod = UnitDefense("player")
+        if (base or 0) + (mod or 0) >= 540 then arch = "tank" end
+    end
     return arch
 end
 
@@ -198,11 +211,16 @@ end
 function IS.CurrentCaps()
     local function cr(id) return (GetCombatRating and id and GetCombatRating(id)) or 0 end
     -- Pick the hit type + cap that matches the spec (spell for casters/healers,
-    -- melee/ranged 263 for physical) so the clamp isn't always the 446 spell cap.
+    -- ranged for Hunters, melee for everyone else) so the clamp isn't always the
+    -- 446 spell cap - and, for rangedDPS, isn't read off the wrong rating pool
+    -- (CR_HIT_MELEE and CR_HIT_RANGED are separate combat ratings; a Hunter's
+    -- gear feeds the ranged one). The numeric cap itself (263) is the same for
+    -- both melee-single and ranged, so IS.CAPS.meleeHit doubles for both.
     local arch = IS.PlayerArchetype()
     local caster = arch:find("cast") or arch:find("heal")
+    local hit = caster and cr(CR_HIT_SPELL) or (arch == "rangedDPS" and cr(CR_HIT_RANGED) or cr(CR_HIT_MELEE))
     return {
-        hit = caster and cr(CR_HIT_SPELL) or cr(CR_HIT_MELEE),
+        hit = hit,
         hitCap = caster and IS.CAPS.spellHit or IS.CAPS.meleeHit,
         exp = cr(CR_EXPERTISE),
         arp = cr(CR_ARMOR_PENETRATION),
@@ -275,6 +293,47 @@ function IS.UpgradeInfo(link)
     local equipLoc = select(9, GetItemInfo(link))
     local slots = equipLoc and IS.INVTYPE_SLOTS[equipLoc]
     if not slots then return score end
+
+    -- A 2H weapon replaces BOTH hands, not just slot 16 - compare it against
+    -- the COMBINED value of what's currently in 16+17 (e.g. a 1H weapon AND a
+    -- shield), not slot 16 alone. Without this, a 2H always looked like a
+    -- massive upgrade for a shield tank even when it costs the shield's whole
+    -- stamina/avoidance/block budget, which this scale weighs heavily.
+    if equipLoc == "INVTYPE_2HWEAPON" then
+        local mhLink = GetInventoryItemLink("player", 16)
+        local ohLink = GetInventoryItemLink("player", 17)
+        local bestEq = (mhLink and IS.ScoreLink(mhLink) or 0) + (ohLink and IS.ScoreLink(ohLink) or 0)
+        local delta = bestEq > 0 and (score / bestEq - 1) * 100 or nil
+        return score, bestEq, delta, IS.SLOT_NAME[16]
+    end
+
+    -- A plain one-hand weapon (INVTYPE_WEAPON) can go in either hand, but slot
+    -- 17 might currently hold a SHIELD/holdable instead of a weapon - that's
+    -- not a swap this item can make, and scoring a weapon against a shield
+    -- (which carries almost none of a weapon's offensive stats) made every 1H
+    -- weapon look like a huge "Off Hand upgrade" for shield-using tanks. Only
+    -- compare against slot 17 if the class can actually dual-wield AND
+    -- whatever's there now is itself a weapon (or the slot is empty).
+    if equipLoc == "INVTYPE_WEAPON" then
+        local _, class = UnitClass("player")
+        -- Warrior is class-eligible to dual-wield, but Protection uses a
+        -- shield instead - without the archetype check, a Prot Warrior with
+        -- nothing currently in slot 17 (mid-gear-change, or freshly dinged)
+        -- fell through to the empty-slot case below and had a 1H weapon
+        -- scored as an "Off Hand upgrade" they can never actually use. DK
+        -- has no shield at all (tank or DPS both dual-wield/2H), so it's not
+        -- archetype-gated the same way.
+        local canDW = (class == "ROGUE" or class == "DEATHKNIGHT"
+            or (class == "WARRIOR" and IS.PlayerArchetype() ~= "tank")
+            or (class == "SHAMAN" and IS.PlayerArchetype() == "agiDPS"))
+        local ohLink = GetInventoryItemLink("player", 17)
+        local ohLoc = ohLink and select(9, GetItemInfo(ohLink))
+        local ohIsWeapon = ohLoc == "INVTYPE_WEAPON" or ohLoc == "INVTYPE_WEAPONOFFHAND"
+        if not canDW or (ohLink and not ohIsWeapon) then
+            slots = { 16 }
+        end
+    end
+
     local bestEq, bestSlot
     for _, slot in ipairs(slots) do
         local eqLink = GetInventoryItemLink("player", slot)

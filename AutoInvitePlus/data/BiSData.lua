@@ -31,12 +31,30 @@ B.List = {
             { "Scourgelord / Ymirjar / Lightsworn Battlegear", nil, "EoF (251) -> Sanctified 264", "Emblems + ICC tokens" },
         } },
     },
+    -- Melee agi (Rogue/Enhance/Feral) - dual-wield weapon chain. Hunters don't
+    -- dual-wield in 3.3.5a, so they get their own rangedDPS chain below instead
+    -- of this one (a Hunter was previously shown this melee off-hand chain
+    -- alongside their bow chain, which they can't act on).
     agiDPS = {
         { slot = "Weapon", chain = {
             { "Havoc's Call, Blade of Lordaeron Kings", 50737, "The Lich King (ICC 25)", "boss drop (main-hand)" },
             { "Heaven's Fall, Kryss of a Thousand Lies", 50736, "The Lich King (ICC 25)", "boss drop (off-hand)" },
         } },
-        { slot = "Ranged (Hunter)", chain = {
+        { slot = "Trinket 1", chain = {
+            { "Herkuml War Token", 50355, "Emblem of Frost vendor", "buy w/ Emblems of Frost" },
+            { "Whispering Fanged Skull", 50342, "Lady Deathwhisper (ICC 25)", "boss drop - BiS" },
+        } },
+        { slot = "Trinket 2", chain = {
+            { "Deathbringer's Will", 50362, "Deathbringer Saurfang (ICC 25)", "boss drop" },
+            { "Sharpened Twilight Scale", 54569, "Halion (Ruby Sanctum 25)", "boss drop - top ArP" },
+        } },
+        { slot = "Tier (T10)", chain = {
+            { "Shadowblade / Frost Witch Battlegear", nil, "EoF (251) -> Sanctified 264", "Emblems + ICC tokens" },
+        } },
+    },
+    -- Hunter-only.
+    rangedDPS = {
+        { slot = "Ranged", chain = {
             { "Zod's Repeating Longbow", 50034, "Lady Deathwhisper (ICC 25, ilvl 264)", "strong early bow" },
             { "Fal'inrush, Defender of Quel'thalas", 50733, "The Lich King (ICC 25H, ilvl 284)", "true Hunter BiS ranged" },
         } },
@@ -49,7 +67,7 @@ B.List = {
             { "Sharpened Twilight Scale", 54569, "Halion (Ruby Sanctum 25)", "boss drop - top ArP" },
         } },
         { slot = "Tier (T10)", chain = {
-            { "Shadowblade / Ahn'Kahar / Frost Witch Battlegear", nil, "EoF (251) -> Sanctified 264", "Emblems + ICC tokens" },
+            { "Ahn'Kahar Blood Hunter's Battlegear", nil, "EoF (251) -> Sanctified 264", "Emblems + ICC tokens" },
         } },
     },
     casterDPS = {
@@ -125,7 +143,7 @@ B.Tier = {
         strDPS = { "Scourgelord Battlegear", 51127, 51125, 51134, 51128, 51126 },
         tank   = { "Scourgelord Plate",      51133, 51130, 51129, 51132, 51131 },
     },
-    HUNTER = { agiDPS = { "Ahn'Kahar Blood Hunter's Battlegear", 51153, 51151, 51150, 51154, 51152 } },
+    HUNTER = { rangedDPS = { "Ahn'Kahar Blood Hunter's Battlegear", 51153, 51151, 51150, 51154, 51152 } },
     ROGUE  = { agiDPS = { "Shadowblade's Battlegear", 51187, 51185, 51189, 51188, 51186 } },
     SHAMAN = {
         agiDPS    = { "Frost Witch's Battlegear", 51197, 51199, 51195, 51196, 51198 },

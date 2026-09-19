@@ -91,6 +91,9 @@ G.List = {
 }
 -- Resto druid/shaman share the healer gem plan (spirit/int lean refined by research).
 G.List.casterHot = G.List.healerCrit
+-- Hunters gem the same primary stat (Agility) as the other agiDPS specs - the
+-- Expertise-vs-ranged distinction only affects ItemScore's cap math, not gems.
+G.List.rangedDPS = G.List.agiDPS
 
 -- Socketing strategy (Warmane min-max): ONE meta gem, ONE all-stats prismatic
 -- (Nightmare Tear) placed to satisfy the meta's colour requirement, and EVERY other
@@ -106,7 +109,41 @@ G.Strategy = "Plan: 1 meta gem + 1 Nightmare Tear (activates the meta), every ot
 -- Per-spec overrides (SG.KeyFor() keys) where an archetype default is too coarse
 -- (e.g. ArP-stacking combat rogue gems Armor Pen, not Agility). Populated by the
 -- data-research pass; falls back to the archetype plan when absent.
-G.BySpec = {}
+--
+-- Combat Rogue and Fury/Arms Warrior are the WotLK-documented exceptions where
+-- Armor Penetration gems out-value the archetype's default primary-stat gem
+-- (Icy Veins + Warmane community guides, research pass) - but only once ArP's
+-- soft cap (1400 rating) is in realistic reach, which in practice means
+-- ICC-tier gear. This addon's whole gear-optimization suite already targets
+-- that endgame tier (BiSData/GearUpgrades chase ICC drops specifically), so
+-- these overrides assume that audience rather than a fresh level 80. Ret
+-- Paladin and Unholy/Frost DK were checked too - both stay Strength-first per
+-- the same guides (their damage split or crit/haste reliance keeps ArP from
+-- overtaking it), so they're deliberately left on the strDPS default.
+G.BySpec = {
+    Rogue_Combat = {
+        groups = {
+            { label = "Armor Penetration (all sockets)", tiers = {
+                { "Fractured Bloodstone",    39909, 2, { ITEM_MOD_ARMOR_PENETRATION_RATING_SHORT = 12 } },
+                { "Fractured Scarlet Ruby",  40002, 3, { ITEM_MOD_ARMOR_PENETRATION_RATING_SHORT = 16 } },
+                { "Fractured Cardinal Ruby", 40117, 4, { ITEM_MOD_ARMOR_PENETRATION_RATING_SHORT = 20 } },
+            } },
+        },
+        meta = { name = "Relentless Earthsiege Diamond", itemID = 41398,
+                 note = "+21 Agi, +3% crit dmg. activate: >=1 Red, 1 Yellow, 1 Blue gem", mods = { ITEM_MOD_AGILITY_SHORT = 21 } },
+    },
+}
+G.BySpec.War_Fury_DPS = {
+    groups = {
+        { label = "Armor Penetration (all sockets)", tiers = {
+            { "Fractured Bloodstone",    39909, 2, { ITEM_MOD_ARMOR_PENETRATION_RATING_SHORT = 12 } },
+            { "Fractured Scarlet Ruby",  40002, 3, { ITEM_MOD_ARMOR_PENETRATION_RATING_SHORT = 16 } },
+            { "Fractured Cardinal Ruby", 40117, 4, { ITEM_MOD_ARMOR_PENETRATION_RATING_SHORT = 20 } },
+        } },
+    },
+    meta = G.List.strDPS.meta,
+}
+G.BySpec.War_Arms_DPS = G.BySpec.War_Fury_DPS
 
 function G.ForArchetype(arch) return G.List[arch] end
 

@@ -386,15 +386,31 @@ local PROCS = {
         [2] = { { "Hot Streak", "Pyroblast" } },
         [3] = { { "Fingers of Frost", "Ice Lance" }, { "Brain Freeze", "Frostfire Bolt" } },
     },
-    SHAMAN = { [2] = { { "Maelstrom Weapon", "Lightning Bolt", 5 } } },
+    -- Elemental (1): Elemental Focus is a near-universal PvE talent pick,
+    -- granting "Clearcasting" (free next spell) on a harmful-spell crit -
+    -- same buff name Feral Druid's Omen of Clarity uses, no collision since
+    -- this table is keyed by class first. Enhance (2): Maelstrom Weapon.
+    SHAMAN = { [1] = { { "Clearcasting", "Lightning Bolt" } }, [2] = { { "Maelstrom Weapon", "Lightning Bolt", 5 } } },
     WARLOCK = {
         [1] = { { "Shadow Trance", "Shadow Bolt" } },   -- Nightfall is the talent; the proc buff is Shadow Trance
         [2] = { { "Molten Core", "Incinerate" }, { "Decimation", "Soul Fire" } },
         [3] = { { "Backdraft", "Incinerate" }, { "Backlash", "Shadow Bolt" } },  -- Backlash procs instant Shadow Bolt
     },
     PALADIN = { [3] = { { "The Art of War", "Exorcism" } } },
-    WARRIOR = { [2] = { { "Bloodsurge", "Slam" } }, [1] = { { "Sudden Death", "Execute" } } },
-    DEATHKNIGHT = { [1] = { { "Sudden Doom", "Death Coil" } }, [3] = { { "Sudden Doom", "Death Coil" } } },
+    -- Arms (1): Taste for Blood (Overpower window) and Sudden Death (free
+    -- Execute, usable above 20% too) are independent procs, both worth flagging.
+    WARRIOR = { [1] = { { "Taste for Blood", "Overpower" }, { "Sudden Death", "Execute" } }, [2] = { { "Bloodsurge", "Slam" } } },
+    -- Frost (2): Rime's "Freezing Fog" (free Howling Blast) and Killing Machine
+    -- (guaranteed-crit Frost Strike/Obliterate) - previously missing entirely,
+    -- so Frost DKs never saw anything in the Free bar despite both being
+    -- documented in SpecGuides.lua's SG.Procs.DK_Frost_DPS. Blood (1) has no
+    -- real free-cast proc of its own - it never had a genuine entry here
+    -- (the old [1] duplicated Unholy's Sudden Doom, which a Blood-primary
+    -- spec wouldn't realistically have talented).
+    DEATHKNIGHT = {
+        [2] = { { "Freezing Fog", "Howling Blast" }, { "Killing Machine", "Frost Strike" } },
+        [3] = { { "Sudden Doom", "Death Coil" } },
+    },
     HUNTER = { [3] = { { "Lock and Load", "Explosive Shot" } } },
     DRUID = { [1] = { { "Eclipse (Lunar)", "Starfire" }, { "Eclipse (Solar)", "Wrath" } },
               [2] = { { "Clearcasting", "Shred" } } },   -- feral Omen of Clarity free Shred

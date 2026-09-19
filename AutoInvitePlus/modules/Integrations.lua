@@ -197,24 +197,33 @@ function Int.GetGearScore(name)
     if not name then return nil end
 
     -- Try GearScore addon first (most accurate)
-    -- GearScore_GetScore expects (unitId) as parameter, not player name
+    -- GearScore_GetScore(Name, Target) - despite the first parameter's name,
+    -- GearScoreLite's own implementation only actually reads the SECOND
+    -- argument (everything is `UnitIsPlayer(Target)`/inventory-slot lookups
+    -- against Target; Name is only used for a self-name comparison) - it
+    -- must be called with a resolved unit token as the second argument, not
+    -- the only argument.
     if GearScore_GetScore then
         local gs, ilvl = nil, nil
 
-        -- Find the unit ID for this player
+        -- Find the unit ID for this player. Case-insensitive throughout to
+        -- match the fallback branch below - callers (e.g. the /aip gs
+        -- slash handler) may pass an already-lowercased name.
+        local lname = name:lower()
         local unit = nil
-        if UnitExists("target") and UnitName("target") == name then
+        if UnitExists("target") and UnitName("target") and UnitName("target"):lower() == lname then
             unit = "target"
-        elseif UnitExists("mouseover") and UnitName("mouseover") == name then
+        elseif UnitExists("mouseover") and UnitName("mouseover") and UnitName("mouseover"):lower() == lname then
             unit = "mouseover"
-        elseif UnitName("player") == name then
+        elseif UnitName("player"):lower() == lname then
             unit = "player"
         else
             -- Check party/raid
             local numRaid = GetNumRaidMembers()
             if numRaid > 0 then
                 for i = 1, numRaid do
-                    if UnitName("raid" .. i) == name then
+                    local rname = UnitName("raid" .. i)
+                    if rname and rname:lower() == lname then
                         unit = "raid" .. i
                         break
                     end
@@ -222,7 +231,8 @@ function Int.GetGearScore(name)
             else
                 local numParty = GetNumPartyMembers()
                 for i = 1, numParty do
-                    if UnitName("party" .. i) == name then
+                    local pname = UnitName("party" .. i)
+                    if pname and pname:lower() == lname then
                         unit = "party" .. i
                         break
                     end
@@ -231,7 +241,7 @@ function Int.GetGearScore(name)
         end
 
         if unit then
-            gs, ilvl = GearScore_GetScore(unit)
+            gs, ilvl = GearScore_GetScore(name, unit)
         end
 
         if gs and gs > 0 then
@@ -434,8 +444,14 @@ function Int.FindWarlocks()
     if numRaid == 0 then return {} end
 
     for i = 1, numRaid do
+        -- GetRaidRosterInfo return order: name, rank, subgroup, level,
+        -- className(localized), classFileName, zone, online, ... - 5 skips
+        -- reaches classFileName (position 6), not className (position 5).
+        -- Compare against the uppercase fileName token, matching this
+        -- codebase's convention everywhere else (RaidTools.MechanicClassDuties,
+        -- Parsers.SpecCodeInfo, etc.) and locale-independent besides.
         local name, _, _, _, _, class = GetRaidRosterInfo(i)
-        if class == "Warlock" then
+        if class == "WARLOCK" then
             Int.SummonStatus.warlocks[name] = true
         end
     end
@@ -653,6 +669,56 @@ end
 -- ==========================================
 -- TOOLTIP ENHANCEMENTS
 -- ==========================================
+-- GearScore for another player is one-shot at hover time - GetInventoryItemLink
+-- on a non-self unit is empty until that unit has actually been inspected, so
+-- the very first hover almost always shows no GS at all (fixed only by moving
+-- the mouse away and re-hovering once the inspect happens to already be
+-- cached from something else). This kicks off an inspect on hover and, when it
+-- completes, updates the GS line in the SAME tooltip in place - no re-hover.
+
+local TT_GS_PREFIX = "GearScore: "
+-- Same idiom as Comp.RequestInspect/IE's queue elsewhere in this addon: our
+-- own NotifyInspect call, our own remembered pending unit/name, validated
+-- against InspectFrame.unit (when available) before trusting the result -
+-- INSPECT_TALENT_READY carries no unit argument in 3.3.5a.
+local pendingTT = { name = nil, unit = nil }
+
+-- Find an existing "GearScore: " line in the tooltip so a later update can
+-- SetText it in place instead of AddLine+Show (which reflows the tooltip -
+-- fine the first time GS appears, but jarring on every subsequent update with
+-- tooltip skinning addons like TipTac).
+local function FindGSLine(tooltip)
+    local tipName = tooltip:GetName()
+    if not tipName then return nil end
+    for i = 2, tooltip:NumLines() do
+        local left = _G[tipName .. "TextLeft" .. i]
+        local text = left and left:GetText()
+        if text and text:find(TT_GS_PREFIX, 1, true) == 1 then
+            return left
+        end
+    end
+    return nil
+end
+
+local function ApplyGSToTooltip(tooltip, name, unit)
+    if not tooltip:IsShown() then return end
+    local gs = Int.GetGearScore(name)
+    if not gs and unit and UnitExists(unit) then
+        -- Post-inspect: inventory links now exist on this unit token even
+        -- though Int.GetGearScore's own resolution may not have found them.
+        gs = select(1, CalculateUnitGS(unit))
+    end
+    if not gs or gs <= 0 then return end
+
+    local text = TT_GS_PREFIX .. Int.FormatGS(gs)
+    local line = FindGSLine(tooltip)
+    if line then
+        line:SetText(text)
+    else
+        tooltip:AddLine(text)
+        tooltip:Show()
+    end
+end
 
 -- Add info to player tooltips
 local function OnTooltipSetUnit(tooltip)
@@ -664,35 +730,61 @@ local function OnTooltipSetUnit(tooltip)
     local name = UnitName(unit)
     if not name then return end
 
-    -- Add GearScore
-    local gs = Int.GetGearScore(name)
-    if gs then
-        tooltip:AddLine("GearScore: " .. Int.FormatGS(gs))
+    pendingTT.name, pendingTT.unit = name, unit
+
+    -- Immediate best-effort (self, or an already-inspected/cached unit).
+    ApplyGSToTooltip(tooltip, name, unit)
+
+    -- Kick off an inspect for a fresh GS if this isn't ourselves - the
+    -- INSPECT_TALENT_READY handler below fills the line in once it lands.
+    if not UnitIsUnit(unit, "player") and CanInspect(unit) then
+        NotifyInspect(unit)
     end
 
-    -- Add player notes if available
+    -- Add player notes if available. Only reflow (Show) when one of these
+    -- actually got added - an unconditional Show() on every hover re-triggers
+    -- TipTac/ElvUI's own tooltip styling hook even when nothing changed.
+    local addedLine = false
     if AIP.Roster and AIP.Roster.GetPlayerNote then
         local note = AIP.Roster.GetPlayerNote(name)
         if note and note ~= "" then
             tooltip:AddLine("Note: " .. note, 1, 0.82, 0)
+            addedLine = true
         end
 
         local rating = AIP.Roster.GetPlayerRating(name)
         if rating then
             tooltip:AddLine("Rating: " .. rating .. "/5", 0.7, 0.7, 0.7)
+            addedLine = true
         end
 
         local attPercent = AIP.Roster.GetAttendancePercent(name)
         if attPercent then
             tooltip:AddLine("Attendance: " .. attPercent .. "%", 0.7, 0.7, 0.7)
+            addedLine = true
         end
     end
 
-    tooltip:Show()
+    if addedLine then tooltip:Show() end
 end
 
 -- Hook tooltips
 GameTooltip:HookScript("OnTooltipSetUnit", OnTooltipSetUnit)
+
+GameTooltip:HookScript("OnTooltipCleared", function()
+    pendingTT.name, pendingTT.unit = nil, nil
+end)
+
+local ttInspectFrame = CreateFrame("Frame")
+ttInspectFrame:RegisterEvent("INSPECT_TALENT_READY")
+ttInspectFrame:SetScript("OnEvent", function()
+    if not pendingTT.name or not GameTooltip:IsShown() then return end
+    local unit = (InspectFrame and InspectFrame.unit) or pendingTT.unit
+    if not unit or not UnitExists(unit) or UnitName(unit) ~= pendingTT.name then return end
+    local _, ttUnit = GameTooltip:GetUnit()
+    if not ttUnit or UnitName(ttUnit) ~= pendingTT.name then return end
+    ApplyGSToTooltip(GameTooltip, pendingTT.name, unit)
+end)
 
 -- ==========================================
 -- BLIZZARD RAID BROWSER INTEGRATION

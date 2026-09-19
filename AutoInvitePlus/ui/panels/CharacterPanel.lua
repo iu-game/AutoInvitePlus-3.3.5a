@@ -1200,7 +1200,7 @@ buildSlotDetail = function(slotId)
             local int = t.ITEM_MOD_INTELLECT_SHORT or t.ITEM_MOD_INTELLECT or 0
             if str == 0 and agi == 0 and int == 0 then return true end     -- neutral - fine for anyone
             if arch == "strDPS" then return str > 0
-            elseif arch == "agiDPS" then return agi > 0
+            elseif arch == "agiDPS" or arch == "rangedDPS" then return agi > 0
             elseif arch == "tank" then return str > 0 or agi > 0            -- druid tank = agi, others str
             else return int > 0 end                                        -- casterDPS / healerCrit / casterHot
         end
@@ -1274,8 +1274,14 @@ buildSlotDetail = function(slotId)
     if emptySockets > 0 then
         e[#e + 1] = { text = "  " .. CROSS .. " " .. emptySockets .. " empty socket(s) to gem", rcolor = {1,0.6,0.4} }
     else
+        -- Zero here means either "this piece never had a socket" (most rings/
+        -- necks/trinkets/belts in this content tier) or "already fully gemmed" -
+        -- either way there's nothing actionable, so the gem shopping list below
+        -- is skipped entirely rather than recommending gems for a slot/item
+        -- that can't take them.
         e[#e + 1] = { text = "  " .. CHECK .. " no empty sockets on this piece", rcolor = {0.5,0.9,0.5} }
     end
+    if emptySockets > 0 then
     local GEM = AIP.GemData
     -- Socketing strategy: 1 meta + 1 all-stats activator + rest best-stat gems.
     if GEM and GEM.Strategy then e[#e + 1] = { text = "  " .. GEM.Strategy, rcolor = {0.55,0.7,0.85} } end
@@ -1326,6 +1332,7 @@ buildSlotDetail = function(slotId)
     else
         e[#e + 1] = { text = "  No gem data for your spec yet.", rcolor = {0.7,0.7,0.7} }
     end
+    end
 
     -- Enchant (item scroll or applied spell), + where to get it.
     e[#e + 1] = { text = " " }
@@ -1350,6 +1357,29 @@ buildSlotDetail = function(slotId)
         if en.source then e[#e + 1] = { text = "        source: " .. en.source, rcolor = {0.58,0.58,0.62} } end
     else
         e[#e + 1] = { text = "  No permanent enchant for this slot.", rcolor = {0.7,0.7,0.7} }
+    end
+
+    -- Profession-exclusive alternatives (ring enchants, glove tinkers, cloak
+    -- embroideries, LW bracer linings) - generic recommendations for this
+    -- class/spec's archetype, independent of which professions the player
+    -- actually has (that's a "worth leveling this?" question, not something
+    -- to gate the info behind).
+    local alts = AIP.EnchantData and AIP.EnchantData.ProfessionAltsForSlot and AIP.EnchantData.ProfessionAltsForSlot(slotId)
+    if alts then
+        e[#e + 1] = { text = " " }
+        header(e, "PROFESSION ENCHANTS")
+        for _, alt in ipairs(alts) do
+            local link = (alt.kind == "spell" and alt.spellID and GetSpellLink) and GetSpellLink(alt.spellID) or nil
+            local sel = alt.mods and { key = "professench:" .. slotId .. ":" .. (alt.spellID or alt.name), kind = "enchant", mods = alt.mods } or nil
+            if link then
+                local ic = alt.spellID and select(3, GetSpellInfo(alt.spellID))
+                e[#e + 1] = { link = link, icon = ic, sel = sel }
+            else
+                e[#e + 1] = { text = "  " .. alt.name, rcolor = {0.6,0.85,1}, sel = sel }
+            end
+            if alt.source then e[#e + 1] = { text = "        source: " .. alt.source, rcolor = {0.58,0.58,0.62} } end
+            if alt.note then e[#e + 1] = { text = "        " .. alt.note, rcolor = {0.58,0.58,0.62} } end
+        end
     end
     return e
 end
@@ -1626,6 +1656,20 @@ function P.Create(container)
         if P.section == "Gear" and frame and frame:IsVisible() and frame.gearPane then
             renderPaperdoll()
             renderSlotDetail(P.detailSlot)
+        end
+    end)
+
+    -- Every recommendation on this panel (gems/enchants/upgrades/caps) is derived
+    -- from IS.PlayerArchetype(), which reads the CURRENTLY ACTIVE talent build -
+    -- but nothing previously re-rendered the panel when that build changed out
+    -- from under it (dual-spec swap, or points spent/reset mid-respec) while it
+    -- stayed open. Re-run whichever section is showing so it never goes stale.
+    local specf = CreateFrame("Frame")
+    specf:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
+    specf:RegisterEvent("CHARACTER_POINTS_CHANGED")
+    specf:SetScript("OnEvent", function()
+        if frame and frame:IsVisible() then
+            selectSection(P.section)
         end
     end)
 

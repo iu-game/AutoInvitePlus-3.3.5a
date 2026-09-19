@@ -120,6 +120,7 @@ SG.Procs = {
     Druid_FeralCat = { { "Clearcasting", "free Shred" } },
     Pala_Ret_DPS   = { { "The Art of War", "instant Exorcism" } },
     Hunter_SV      = { { "Lock and Load", "free Explosive Shots" } },
+    Sham_Elemental = { { "Clearcasting", "free spell (Elemental Focus proc)" } },
     Sham_Enhance   = { { "Maelstrom Weapon", "instant Lightning Bolt (5 stacks)" } },
     Mage_Arcane    = { { "Missile Barrage", "free Arcane Missiles" } },
     Mage_Fire      = { { "Hot Streak", "instant Pyroblast" } },

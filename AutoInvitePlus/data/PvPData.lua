@@ -297,6 +297,9 @@ local function pvpPlanArch()
     if a == "healerCrit" or a == "casterHot" then return "healer" end
     if a == "casterDPS" then return "caster" end
     if a == "agiDPS" then return "agiMelee" end
+    -- Hunters (rangedDPS) share the agiMelee PvP gem/enchant text - it already
+    -- explicitly calls out the Hunter-specific weapon-enchant substitution below.
+    if a == "rangedDPS" then return "agiMelee" end
     if a == "strDPS" or a == "tank" then return "strMelee" end
     return "caster"
 end

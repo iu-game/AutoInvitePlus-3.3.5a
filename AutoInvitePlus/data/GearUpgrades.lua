@@ -136,6 +136,10 @@ GU.List = {
                  { "Mithrios, Bronzebeard's Legacy", 50738, 277, "The Lich King", "ICC 25 Heroic" } },
     },
 }
+-- Hunters share the agiDPS armor/trinket/tier progression; their weapon chain
+-- lives at slot 18 (Ranged) within that same table, already correctly separate
+-- from the melee slot-16 chain (Rogue/Enhance/Feral).
+GU.List.rangedDPS = GU.List.agiDPS
 
 -- Per-spec overrides (SG.KeyFor keys) where a spec diverges from its archetype.
 GU.BySpec = {
