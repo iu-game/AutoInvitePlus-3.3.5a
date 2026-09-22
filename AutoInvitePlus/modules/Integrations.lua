@@ -700,8 +700,15 @@ local function FindGSLine(tooltip)
     return nil
 end
 
-local function ApplyGSToTooltip(tooltip, name, unit)
-    if not tooltip:IsShown() then return end
+-- allowHidden: bypass the IsShown() gate for the initial call made from inside
+-- OnTooltipSetUnit itself - Blizzard doesn't flag the tooltip as shown until
+-- after all OnTooltipSetUnit hooks finish, so checking IsShown() there was
+-- silently dropping GS on the very first hover. This mattered most for self:
+-- other units get a second chance via the INSPECT_TALENT_READY handler below,
+-- but self never triggers NotifyInspect, so a false IsShown() here means self
+-- GS never appears until you hover a different unit and re-hover yourself.
+local function ApplyGSToTooltip(tooltip, name, unit, allowHidden)
+    if not allowHidden and not tooltip:IsShown() then return end
     local gs = Int.GetGearScore(name)
     if not gs and unit and UnitExists(unit) then
         -- Post-inspect: inventory links now exist on this unit token even
@@ -733,7 +740,7 @@ local function OnTooltipSetUnit(tooltip)
     pendingTT.name, pendingTT.unit = name, unit
 
     -- Immediate best-effort (self, or an already-inspected/cached unit).
-    ApplyGSToTooltip(tooltip, name, unit)
+    ApplyGSToTooltip(tooltip, name, unit, true)
 
     -- Kick off an inspect for a fresh GS if this isn't ourselves - the
     -- INSPECT_TALENT_READY handler below fills the line in once it lands.
