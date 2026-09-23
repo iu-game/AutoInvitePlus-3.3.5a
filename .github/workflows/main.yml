@@ -20,6 +20,9 @@ jobs:
         run: |
           zip -r AutoInvitePlus.zip AutoInvitePlus
           zip -r GearScoreLite.zip GearScoreLite
+          zip -r GSE.zip GSE
+          zip -r GSE_GUI.zip GSE_GUI
+          zip -r GSE_LDB.zip GSE_LDB
 
       - name: Create GitHub Release
         id: create_release
@@ -50,4 +53,40 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./GearScoreLite.zip
           asset_name: GearScoreLite-1.84.zip
+          asset_content_type: application/zip
+
+      # GSE (Gnome Sequencer Enhanced) is a 3-folder addon - GSE_GUI and
+      # GSE_LDB are separate top-level AddOns directories GSE depends on,
+      # not GSE's own subfolders, so each ships as its own zip, matching
+      # the one-zip-per-installable-folder pattern above. The version
+      # suffix on GSE_GUI/GSE_LDB's asset names is hardcoded the same way
+      # GearScoreLite's is above - update it if GSE is ever version-bumped.
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./GSE.zip
+          asset_name: GSE-2205-wotlk.zip
+          asset_content_type: application/zip
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./GSE_GUI.zip
+          asset_name: GSE_GUI-2205-wotlk.zip
+          asset_content_type: application/zip
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./GSE_LDB.zip
+          asset_name: GSE_LDB-2205-wotlk.zip
           asset_content_type: application/zip

@@ -108,7 +108,7 @@ For UI work, these test commands are often enough to avoid needing live chat tra
 
 ## Release and versioning
 
-Release automation lives in .github/workflows/main.yml. The workflow is triggered by git tag pushes and archives both AutoInvitePlus/ and GearScoreLite/ as release assets.
+Release automation lives in .github/workflows/main.yml. The workflow is triggered by git tag pushes and archives AutoInvitePlus/, GearScoreLite/, GSE/, GSE_GUI/, and GSE_LDB/ as release assets - one zip per top-level AddOns folder (GSE_GUI and GSE_LDB are separate installable folders GSE depends on, not subfolders of GSE itself).
 
 To cut a release:
 
@@ -116,7 +116,7 @@ To cut a release:
 2. Bump the VERSION constant in AutoInvitePlus/core/Core.lua so the update checker and peers receive the same version string.
 3. Commit and tag the release, then push the tag so CI publishes the assets.
 
-Note that the GearScoreLite release asset name is currently hardcoded in the workflow and should be updated if that dependency is ever version-bumped.
+Note that the GearScoreLite and GSE/GSE_GUI/GSE_LDB release asset names are currently hardcoded in the workflow (GearScoreLite-1.84.zip, GSE-2205-wotlk.zip, etc.) and should be updated if either dependency is ever version-bumped. GSE's own version lives in GSE/GSE.toc's `## Version` line, independent of AutoInvitePlus's versioning.
 
 ## Where to start for changes
 
