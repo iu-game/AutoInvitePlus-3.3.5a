@@ -54,6 +54,7 @@ function Apply.SendApply(listing, note)
     if not listing.isDataBus then return false end
     if not (AIP.DataBus and AIP.DataBus.CreateEvent and AIP.DataBus.Broadcast) then return false end
 
+    local leader = (AIP.Utils and AIP.Utils.NormalizeName and AIP.Utils.NormalizeName(listing.leader)) or listing.leader
     local GUI = AIP.CentralGUI or {}
     local me = AIP.FitEngine and AIP.FitEngine.Me() or {}
 
@@ -74,10 +75,10 @@ function Apply.SendApply(listing, note)
         note = note,
     })
     if not ev then return false end
-    AIP.DataBus.Broadcast(ev, listing.leader)
+    AIP.DataBus.Broadcast(ev, leader)
 
-    Apply.mine[listing.leader] = { raid = listing.raid, status = "sent", time = time() }
-    AIP.Print("Applied to |cFFFFD100" .. listing.leader .. "|r (" .. (listing.raid or "?") .. ") - status updates will appear here.")
+    Apply.mine[leader] = { raid = listing.raid, status = "sent", time = time() }
+    AIP.Print("Applied to |cFFFFD100" .. leader .. "|r (" .. (listing.raid or "?") .. ") - status updates will appear here.")
     pruneAll()
     if AIP.UpdateCentralGUI then AIP.UpdateCentralGUI() end
     return true
@@ -86,12 +87,14 @@ end
 -- Record a whisper-based application to a non-AIP leader (no ACKs possible)
 function Apply.MarkWhispered(leader, raid)
     if not leader then return end
+    leader = (AIP.Utils and AIP.Utils.NormalizeName and AIP.Utils.NormalizeName(leader)) or leader
     Apply.mine[leader] = { raid = raid, status = "whispered", time = time() }
     if AIP.UpdateCentralGUI then AIP.UpdateCentralGUI() end
 end
 
 -- Status text for the details panel ("Applied - queued #4")
 function Apply.StatusFor(leader)
+    leader = leader and ((AIP.Utils and AIP.Utils.NormalizeName and AIP.Utils.NormalizeName(leader)) or leader)
     local app = leader and Apply.mine[leader]
     if not app then return nil end
     if app.status == "sent" then return "|cFFFFD100Applied - waiting for response|r" end
@@ -117,11 +120,12 @@ function Apply.OnNewListing(group)
     if fit.verdict ~= "GREEN" then return end
 
     -- Throttle per leader
+    local leader = (AIP.Utils and AIP.Utils.NormalizeName and AIP.Utils.NormalizeName(group.leader)) or group.leader
     local now = time()
-    if Apply.alerted[group.leader] and (now - Apply.alerted[group.leader]) < ALERT_THROTTLE then
+    if Apply.alerted[leader] and (now - Apply.alerted[leader]) < ALERT_THROTTLE then
         return
     end
-    Apply.alerted[group.leader] = now
+    Apply.alerted[leader] = now
 
     local weeklyNote = ""
     if group.weekly and AIP.Weekly and AIP.Weekly.IsWanted and AIP.Weekly.IsWanted(group.weekly) then
@@ -136,7 +140,7 @@ function Apply.OnNewListing(group)
 
     -- Opt-in auto-apply, AIP peers only (auto-whispering non-addon strangers
     -- reads as botting and was deliberately rejected)
-    if AIP.db.autoApplyGreen and group.isDataBus and not Apply.mine[group.leader] then
+    if AIP.db.autoApplyGreen and group.isDataBus and not Apply.mine[leader] then
         if Apply.SendApply(group) then
             AIP.Print("|cFF00FF00Auto-applied|r (autoApplyGreen is on).")
         end
@@ -196,32 +200,38 @@ end
 
 local function onApply(event)
     if not (event and event.sender and event.data) then return end
-    if event.sender == UnitName("player") then return end
+    -- Normalize once at the boundary so every key/comparison below (and in
+    -- NotifyInvited/NotifyDeclined, reached later via a differently-cased
+    -- caller) agrees - see AutoInvitePlus/CLAUDE.md: "Player names: normalize
+    -- with AIP.Utils.NormalizeName and compare case-insensitively - chat
+    -- delivers inconsistent casing."
+    local sender = (AIP.Utils and AIP.Utils.NormalizeName and AIP.Utils.NormalizeName(event.sender)) or event.sender
+    if sender == UnitName("player") then return end
     local d = event.data
     local GUI = AIP.CentralGUI
 
     -- No active listing: acknowledge sighting so the seeker isn't left hanging
     if not (GUI and GUI.MyGroup) then
-        sendAck(event.sender, "seen")
+        sendAck(sender, "seen")
         return
     end
 
-    Apply.incoming[event.sender] = { time = time() }
+    Apply.incoming[sender] = { time = time() }
     pruneAll()
 
     -- Blacklist: decline immediately (truthful, no queue noise). Goes
     -- through Apply.NotifyDeclined (not a raw sendAck) so it also clears
-    -- Apply.incoming[event.sender] - otherwise a later un-blacklist + invite
+    -- Apply.incoming[sender] - otherwise a later un-blacklist + invite
     -- within the TTL would find that stale entry still set and send a
     -- contradicting "invited" ACK after the applicant already saw "declined".
-    if AIP.IsBlacklisted and AIP.IsBlacklisted(event.sender) then
-        Apply.NotifyDeclined(event.sender)
+    if AIP.IsBlacklisted and AIP.IsBlacklisted(sender) then
+        Apply.NotifyDeclined(sender)
         return
     end
 
     -- Fit verdict against the live listing
     local applicant = {
-        name = event.sender,
+        name = sender,
         raid = d.raid,
         role = d.role,
         class = d.class,
@@ -234,16 +244,16 @@ local function onApply(event)
 
     -- Green fast-lane: favorites always (existing prioritize behavior),
     -- anyone GREEN when the leader opted into autoInviteGreen
-    local isFavorite = AIP.IsPlayerFavorite and AIP.IsPlayerFavorite(event.sender)
+    local isFavorite = AIP.IsPlayerFavorite and AIP.IsPlayerFavorite(sender)
     local smart = AIP.db and AIP.db.smartInvite
     local favoriteLane = isFavorite and smart and smart.prioritizeFavorites
     local greenLane = AIP.db and AIP.db.autoInviteGreen and fit and fit.verdict == "GREEN"
     if (favoriteLane or greenLane) and AIP.InvitePlayer then
         -- Don't sendAck here: AIP.InvitePlayer, on success, already calls
-        -- Apply.NotifyInvited (Apply.incoming[event.sender] was set above),
+        -- Apply.NotifyInvited (Apply.incoming[sender] was set above),
         -- which sends the "invited" ACK. Sending it again here double-whispers
         -- the applicant with two identical APPLYACKs.
-        if AIP.InvitePlayer(event.sender) then
+        if AIP.InvitePlayer(sender) then
             return
         end
     end
@@ -261,13 +271,13 @@ local function onApply(event)
         -- The waitlist store/UI only understands TANK/HEALER/DPS; peers may
         -- send the four-way MDPS/RDPS split (Fit.Me role detection)
         local wlRole = AIP.Utils.FoldRole(d.role)
-        local existed = AIP.IsOnWaitlist(event.sender)
+        local existed = AIP.IsOnWaitlist(sender)
         if not existed then
             -- silent: the richer feedback whisper below replaces the generic one
-            AIP.AddToWaitlist(event.sender, wlRole, applyNote, d.class, d.gs, true)
+            AIP.AddToWaitlist(sender, wlRole, applyNote, d.class, d.gs, true)
         end
         -- Enrich the waitlist entry with structured fields the manual path lacks
-        local onList, entry, position = AIP.IsOnWaitlist(event.sender)
+        local onList, entry, position = AIP.IsOnWaitlist(sender)
         if onList and entry then
             entry.spec = d.spec or entry.spec
             entry.ilvl = d.ilvl or entry.ilvl
@@ -275,74 +285,79 @@ local function onApply(event)
             entry.gs = d.gs or entry.gs
             entry.class = d.class or entry.class
             entry.isApplication = true
-            sendAck(event.sender, "queued", position)
-            Apply.SendFeedbackWhisper(event.sender, applicant, fit, position, GUI.MyGroup)
+            sendAck(sender, "queued", position)
+            Apply.SendFeedbackWhisper(sender, applicant, fit, position, GUI.MyGroup)
             AIP.Print(string.format("%s |cFFFFD100Application:|r %s (%s %s, GS %s) -> waitlist #%d",
                 (fit and AIP.FitEngine.Chip(fit)) or "",
-                event.sender, d.class or "?", d.role or "?", tostring(d.gs or "?"), position or 0))
+                sender, d.class or "?", d.role or "?", tostring(d.gs or "?"), position or 0))
             if AIP.UpdateWaitlistUI then AIP.UpdateWaitlistUI() end
             if AIP.UpdateCentralGUI then AIP.UpdateCentralGUI() end
         else
-            sendAck(event.sender, "seen")
+            sendAck(sender, "seen")
         end
         return
     end
 
     -- Legacy queue routing (applyToWaitlist = false)
     if AIP.AddToQueue then
-        local existed = AIP.IsInQueue and AIP.IsInQueue(event.sender)
+        local existed = AIP.IsInQueue and AIP.IsInQueue(sender)
         if not existed then
-            AIP.AddToQueue(event.sender, applyNote, d.role, d.gs, d.class)
+            AIP.AddToQueue(sender, applyNote, d.role, d.gs, d.class)
         end
         -- Enrich the queue entry with structured fields the whisper path lacks
-        local inQueue, entry, position = AIP.IsInQueue(event.sender)
+        local inQueue, entry, position = AIP.IsInQueue(sender)
         if inQueue and entry then
             entry.spec = d.spec or entry.spec
             entry.ilvl = d.ilvl or entry.ilvl
             entry.weekly = d.weekly or entry.weekly
             entry.isApplication = true
-            sendAck(event.sender, "queued", position)
-            Apply.SendFeedbackWhisper(event.sender, applicant, fit, position, GUI.MyGroup)
+            sendAck(sender, "queued", position)
+            Apply.SendFeedbackWhisper(sender, applicant, fit, position, GUI.MyGroup)
             AIP.Print(string.format("%s |cFFFFD100Application:|r %s (%s %s, GS %s) -> queue #%d",
                 (fit and AIP.FitEngine.Chip(fit)) or "",
-                event.sender, d.class or "?", d.role or "?", tostring(d.gs or "?"), position or 0))
+                sender, d.class or "?", d.role or "?", tostring(d.gs or "?"), position or 0))
             if AIP.UpdateQueueUI then AIP.UpdateQueueUI() end
             if AIP.UpdateCentralGUI then AIP.UpdateCentralGUI() end
         else
-            sendAck(event.sender, "seen")
+            sendAck(sender, "seen")
         end
     else
-        sendAck(event.sender, "seen")
+        sendAck(sender, "seen")
     end
 end
 
 local function onApplyAck(event)
     if not (event and event.sender and event.data) then return end
+    local sender = (AIP.Utils and AIP.Utils.NormalizeName and AIP.Utils.NormalizeName(event.sender)) or event.sender
     local d = event.data
     -- The ACK is about ME (directed), from the leader I applied to
-    local app = Apply.mine[event.sender]
+    local app = Apply.mine[sender]
     if not app then return end
     app.status = d.status or app.status
     app.position = d.position
     app.time = time()
 
     if d.status == "invited" then
-        AIP.Print("|cFF00FF00" .. event.sender .. " invited you!|r Accept the invite window.")
+        AIP.Print("|cFF00FF00" .. sender .. " invited you!|r Accept the invite window.")
         local GUI = AIP.CentralGUI
-        if GUI and GUI.ShowMinimapBubble then GUI.ShowMinimapBubble("Invited by " .. event.sender .. "!") end
+        if GUI and GUI.ShowMinimapBubble then GUI.ShowMinimapBubble("Invited by " .. sender .. "!") end
     elseif d.status == "queued" then
-        AIP.Print(event.sender .. ": application queued" .. (d.position and (" |cFF00FF00#" .. d.position .. "|r") or "") .. ".")
+        AIP.Print(sender .. ": application queued" .. (d.position and (" |cFF00FF00#" .. d.position .. "|r") or "") .. ".")
     elseif d.status == "declined" then
-        AIP.Print(event.sender .. ": |cFFFF6666application declined|r.")
+        AIP.Print(sender .. ": |cFFFF6666application declined|r.")
     elseif d.status == "seen" then
-        AIP.Print(event.sender .. ": application seen (no active listing right now).")
+        AIP.Print(sender .. ": application seen (no active listing right now).")
     end
     if AIP.UpdateCentralGUI then AIP.UpdateCentralGUI() end
 end
 
 -- Truthful ACKs no matter which UI path invited/declined the applicant.
 -- Called (guarded) from Core.InvitePlayer and the queue reject paths.
+-- `name` is normalized here too so a caller passing a differently-cased
+-- name (e.g. Core.InvitePlayer's UI-sourced argument) still matches the
+-- Apply.incoming key set by onApply above.
 function Apply.NotifyInvited(name)
+    name = (AIP.Utils and AIP.Utils.NormalizeName and AIP.Utils.NormalizeName(name)) or name
     if name and Apply.incoming[name] then
         sendAck(name, "invited")
         Apply.incoming[name] = nil
@@ -350,6 +365,7 @@ function Apply.NotifyInvited(name)
 end
 
 function Apply.NotifyDeclined(name)
+    name = (AIP.Utils and AIP.Utils.NormalizeName and AIP.Utils.NormalizeName(name)) or name
     if name and Apply.incoming[name] then
         sendAck(name, "declined")
         Apply.incoming[name] = nil

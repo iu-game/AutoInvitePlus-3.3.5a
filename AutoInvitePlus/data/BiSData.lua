@@ -81,7 +81,7 @@ B.List = {
             { "Phylactery of the Nameless Lich", 50365, "Professor Putricide (ICC 25)", "boss drop - BiS" },
         } },
         { slot = "Trinket 2", chain = {
-            { "Charred Twilight Scale", 54588, "Halion (Ruby Sanctum 25)", "boss drop - spell power" },
+            { "Charred Twilight Scale", 54588, "Halion (Ruby Sanctum 25 Heroic)", "boss drop - spell power" },
         } },
         { slot = "Tier (T10)", chain = {
             { "Bloodmage / Dark Coven / Crimson Acolyte Regalia", nil, "EoF (251) -> Sanctified 264", "Emblems + ICC tokens" },

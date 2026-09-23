@@ -516,13 +516,13 @@ function GUI.CreateBrowserTab(container, tabType)
     -- Store class buttons for reuse
     container.lookingForButtons = {}
 
-    -- Details action buttons - Apply (structured DataBus application to AIP
-    -- peers with status ACKs; detailed whisper to everyone else)
-    local requestInviteBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
-    requestInviteBtn:SetSize(120, 24)
-    requestInviteBtn:SetPoint("BOTTOMLEFT", 10, 8)
-    requestInviteBtn:SetText("Apply")
-    requestInviteBtn:SetScript("OnClick", function()
+    -- Apply (structured DataBus application to AIP peers with status ACKs;
+    -- detailed whisper to everyone else). Shared by the Full View Details
+    -- panel's button AND the Simplified View tree-panel button below -
+    -- Simplified View clips detailsPanel off-window (it just narrows the
+    -- frame to treePanel's width), so without a second entry point there,
+    -- applying to a group required switching to Full View first.
+    local function DoApply()
         local data = container.selectedGroupData
         -- The details panel shows both leader-keyed group rows AND name-keyed
         -- LFG player rows (see GUI.UpdateDetailsPanel) - guarding on
@@ -536,6 +536,12 @@ function GUI.CreateBrowserTab(container, tabType)
         -- AIP peer: structured application over the DataBus (seen/queued/
         -- invited/declined status comes back automatically)
         if AIP.Apply and AIP.Apply.SendApply and AIP.Apply.SendApply(data) then
+            -- GUI.UpdateApplyStatus alone isn't visible feedback in Simplified
+            -- View: its target FontString lives under detailsPanel, which
+            -- Simplified View hides entirely (a hidden ancestor hides every
+            -- descendant regardless of the descendant's own Show/Hide state).
+            -- AIP.Print always reaches the player, in either view.
+            AIP.Print("Application sent to " .. name)
             if AIP.ChatScanner and AIP.ChatScanner.MarkRequested then
                 AIP.ChatScanner.MarkRequested(name)
                 GUI.RefreshBrowserTab(tabType)
@@ -577,7 +583,13 @@ function GUI.CreateBrowserTab(container, tabType)
             AIP.ChatScanner.MarkRequested(name)
             GUI.RefreshBrowserTab(tabType)
         end
-    end)
+    end
+
+    local requestInviteBtn = CreateFrame("Button", nil, detailsPanel, "UIPanelButtonTemplate")
+    requestInviteBtn:SetSize(120, 24)
+    requestInviteBtn:SetPoint("BOTTOMLEFT", 10, 8)
+    requestInviteBtn:SetText("Apply")
+    requestInviteBtn:SetScript("OnClick", DoApply)
     requestInviteBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Apply")
@@ -588,6 +600,29 @@ function GUI.CreateBrowserTab(container, tabType)
     end)
     requestInviteBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     container.requestInviteBtn = requestInviteBtn
+
+    -- Simplified View's own Apply entry point (see DoApply comment above).
+    -- Lives on treePanel (which stays visible/full-width in Simplified View)
+    -- rather than detailsPanel, sharing the countsText row (BOTTOMRIGHT vs
+    -- countsText's BOTTOMLEFT - the "Groups: N" label is short, so there's no
+    -- horizontal overlap) rather than a new row, which collided with
+    -- countsText vertically. Only shown while Simplified View is active -
+    -- Full View already has the button above.
+    local simplifiedApplyBtn = CreateFrame("Button", nil, treePanel, "UIPanelButtonTemplate")
+    simplifiedApplyBtn:SetSize(90, 20)
+    simplifiedApplyBtn:SetPoint("BOTTOMRIGHT", -8, 33)
+    simplifiedApplyBtn:SetText("Apply")
+    simplifiedApplyBtn:SetScript("OnClick", DoApply)
+    simplifiedApplyBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Apply")
+        GameTooltip:AddLine("Apply to the group selected in the tree.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    simplifiedApplyBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    simplifiedApplyBtn:Hide()
+    container.simplifiedApplyBtn = simplifiedApplyBtn
+    if AIP.db and AIP.db.simplifiedView then simplifiedApplyBtn:Show() end
 
     -- Application status line ("Queued #4") above the action buttons
     local applyStatus = detailsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")

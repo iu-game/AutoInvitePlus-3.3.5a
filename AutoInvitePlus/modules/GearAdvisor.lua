@@ -13,7 +13,11 @@ local IS = AIP.ItemScore
 
 -- Slots that everyone can put a permanent enchant on (common set; rings are
 -- enchanter-only, off-hand/ranged are situational, so we skip those to avoid
--- false "missing enchant" flags).
+-- false "missing enchant" flags). Waist (6) is deliberately excluded too: the
+-- Eternal Belt Buckle is a rare, separately-acquired BoE item most raiders
+-- never bother with (unlike the near-universal Legs (7) leg-armor patches),
+-- so flagging it would be a near-constant false "missing enchant" warning
+-- for the majority of players rather than a genuine gap.
 local ENCHANTABLE = { [1]="Head",[3]="Shoulder",[5]="Chest",[7]="Legs",[8]="Feet",
                       [9]="Wrist",[10]="Hands",[15]="Back",[16]="Weapon" }
 

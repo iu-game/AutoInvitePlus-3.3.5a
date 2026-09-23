@@ -847,11 +847,12 @@ local function renderTalents()
         e[#e + 1] = { text = "Paste a Wowhead talent string below + Import.", rcolor = {0.6,0.6,0.65} }
     end
 
-    -- Recommended glyphs as REAL item links (have = green, missing = orange).
+    -- Recommended MAJOR glyphs as REAL item links (have = green, missing = orange).
+    local majors, minors, minorEmpty = {}, {}, 0
+    if SA and SA.ReadGlyphs then local _; majors, minors, _, minorEmpty = SA.ReadGlyphs() end
     if guide and guide[3] and guide[3] ~= "" then
         e[#e + 1] = { text = " " }
-        e[#e + 1] = { text = "|cffffd100Recommended glyphs|r" }
-        local majors = (SA and SA.ReadGlyphs and (SA.ReadGlyphs())) or {}
+        e[#e + 1] = { text = "|cffffd100Recommended glyphs (Major)|r" }
         local function haveGlyph(nm)
             for _, mg in ipairs(majors) do if nm ~= "" and mg:find(nm, 1, true) then return true end end
             return false
@@ -869,6 +870,28 @@ local function renderTalents()
                     e[#e + 1] = { text = "  " .. nm, rcolor = col, right = have and "have" or "need", rightColor = col }
                 end
             end
+        end
+    end
+
+    -- Minor glyphs: shown factually (what's actually slotted, and how many of
+    -- the 3 slots are empty) rather than naming a "best" pick per spec - every
+    -- WotLK glyph guide agrees minors are almost entirely QoL/reagent-cost/
+    -- cosmetic with no real combat-performance consensus (unlike majors), so
+    -- claiming one recommended answer here would be exactly the kind of
+    -- fabricated-confidence this addon's data files deliberately avoid.
+    if SA and SA.ReadGlyphs then
+        e[#e + 1] = { text = " " }
+        e[#e + 1] = { text = "|cffffd100Minor glyphs|r" }
+        e[#e + 1] = { text = "  Mostly utility/reagent-cost/cosmetic - pick whichever effects you value, unlocked at level 25/50/75.", rcolor = {0.58,0.58,0.62} }
+        if #minors == 0 then
+            e[#e + 1] = { text = "  none slotted", rcolor = {1,0.65,0.3} }
+        else
+            for _, nm in ipairs(minors) do
+                e[#e + 1] = { text = "  " .. nm, rcolor = {0.7,0.85,1} }
+            end
+        end
+        if minorEmpty > 0 then
+            e[#e + 1] = { text = "  " .. minorEmpty .. " minor slot(s) still empty", rcolor = {1,0.75,0.4} }
         end
     end
 
@@ -1355,6 +1378,7 @@ buildSlotDetail = function(slotId)
             e[#e + 1] = { text = "  " .. CROSS .. " not enchanted yet", rcolor = {1,0.6,0.4} }
         end
         if en.source then e[#e + 1] = { text = "        source: " .. en.source, rcolor = {0.58,0.58,0.62} } end
+        if en.note then e[#e + 1] = { text = "        " .. en.note, rcolor = {0.58,0.58,0.62} } end
     else
         e[#e + 1] = { text = "  No permanent enchant for this slot.", rcolor = {0.7,0.7,0.7} }
     end

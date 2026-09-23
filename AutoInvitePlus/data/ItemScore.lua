@@ -120,14 +120,29 @@ function IS.PlayerArchetype()
     if class == "DRUID" and (IS.HasBuff("Bear Form") or IS.HasBuff("Dire Bear Form")) then arch = "tank" end
     if class == "WARRIOR" and GetShapeshiftForm and GetShapeshiftForm() == 2 then arch = "tank" end
     if class == "PALADIN" and IS.HasBuff("Righteous Fury") then arch = "tank" end
-    -- DKs have no tank stance/form/buff to key off (Frost Presence is also run by
-    -- Frost/Unholy DPS, so it isn't a safe signal - same reasoning as Readiness).
-    -- Use live Defense skill instead: DPS gear carries essentially no Defense
-    -- Rating, so a Blood-tree DK sitting at the 540 uncrittable cap is realistically
-    -- only a geared tank, never a DPS sidegrade. This under-detects an undergeared
-    -- leveling Blood tank (falls back to strDPS) but never misclassifies a Blood
-    -- DPS build, which is the safer direction to err in.
-    if class == "DEATHKNIGHT" and tree == 1 and UnitDefense then
+    -- Frost Presence is DK's tanking presence (this addon's own
+    -- SpecGuides.DK_Tank rotation opens with it) - Unholy DPS raids on Unholy
+    -- Presence instead (SpecGuides.DK_Unholy_DPS), since Frost Presence trades
+    -- damage dealt for threat/mitigation a DPS doesn't need. Gated on
+    -- tree ~= 3 (not Unholy): WotLK has no viable Unholy tank build, so an
+    -- Unholy-specced DK who briefly pops Frost Presence (soloing, a threat-
+    -- drop moment, testing) must not flip this addon-wide archetype signal
+    -- (gear/enchant/upgrade scoring, not just the Readiness pre-pull gate) to
+    -- tank for a DPS player. Blood AND Frost are both real WotLK ICC tank
+    -- trees (Frost tank is a legitimate, popular Rime/Killing Machine build,
+    -- not just Blood), so neither is excluded here - a Frost-tree DPS DK
+    -- briefly in Frost Presence is a genuinely ambiguous case the tree alone
+    -- can't resolve (Frost Presence + Frost tree describes both a DPS testing
+    -- rotation and an actual tank), and this addon accepts that rare,
+    -- harmless false positive rather than risk under-detecting a real tank.
+    if class == "DEATHKNIGHT" and tree ~= 3 and IS.HasBuff("Frost Presence") then arch = "tank" end
+    -- Fallback for the rare moment Frost Presence isn't up (e.g. just logged
+    -- in, presence swapped mid-fight): a Blood- or Frost-tree DK sitting at
+    -- the 540 uncrittable cap is realistically only a geared tank, never a
+    -- DPS sidegrade (DPS gear carries essentially no Defense Rating).
+    -- Under-detects an undergeared leveling tank with neither signal up, but
+    -- never misclassifies a DPS build, which is the safer direction to err in.
+    if class == "DEATHKNIGHT" and arch ~= "tank" and tree ~= 3 and UnitDefense then
         local base, mod = UnitDefense("player")
         if (base or 0) + (mod or 0) >= 540 then arch = "tank" end
     end

@@ -20,6 +20,13 @@ AIP.DBVersion = DB_VERSION
 local defaults = {
     dbVersion = DB_VERSION,
     enabled = false,
+    -- /aip auditlinks results, keyed by realm (AutoInvitePlusDB is account-wide
+    -- SavedVariables, so this cache is automatically shared across every
+    -- character on the account - item/spell availability is a server fact,
+    -- not a per-character one, so there's no reason to re-run the ~8s check
+    -- per character). { [realmName] = { brokenItems={ids}, brokenSpells={ids},
+    -- remaps={[oldID]=newID}, checkedAt=epoch } }
+    linkAudit = {},
     debugLogging = false,   -- persistent debug logging to db.debugLog (Settings toggle)
     triggers = "invme-auto",
     -- Only <key> is auto-substituted (with your trigger words); other tokens would
@@ -304,22 +311,28 @@ AIP.IsPlayerInGuild = IsPlayerInGuild
 -- Parsed-trigger cache. The trigger string rarely changes, but CheckTriggers
 -- runs on every incoming message of every listened channel, so we parse the
 -- list once and rebuild only when the source string changes.
-local triggerCache = { source = nil, list = {} }
+local triggerCache = { source = nil, list = {}, patterns = {} }
 
 local function GetParsedTriggers()
     local raw = AIP.db.triggers or ""
     if triggerCache.source ~= raw then
         triggerCache.source = raw
         local list = {}
+        local patterns = {}
         for _, trigger in ipairs({ strsplit(";", raw:lower()) }) do
             trigger = trigger:trim()
             if trigger ~= "" then
                 list[#list + 1] = trigger
+                -- Compile the word-boundary pattern once here rather than on
+                -- every CheckTriggers call (which runs on every incoming
+                -- message of every listened channel).
+                patterns[#patterns + 1] = "%f[%w]" .. AIP.Utils.EscapePattern(trigger) .. "%f[%W]"
             end
         end
         triggerCache.list = list
+        triggerCache.patterns = patterns
     end
-    return triggerCache.list
+    return triggerCache.list, triggerCache.patterns
 end
 
 -- Check if message contains any trigger word.
@@ -331,14 +344,13 @@ local function CheckTriggers(message)
     if not AIP.db or not AIP.db.triggers then return false end
 
     local msg = message:lower():gsub("%s+", " "):trim()
-    local triggers = GetParsedTriggers()
+    local _, patterns = GetParsedTriggers()
 
     -- Word-boundary match (like Parsers.DetectRole/DetectClass) so a short/common
     -- trigger word can't false-positive on a substring of an unrelated word
     -- ("raid" inside "upgraded", "inv" inside "invalid").
-    for i = 1, #triggers do
-        local pattern = "%f[%w]" .. AIP.Utils.EscapePattern(triggers[i]) .. "%f[%W]"
-        if msg:find(pattern) then
+    for i = 1, #patterns do
+        if msg:find(patterns[i]) then
             return true
         end
     end
@@ -364,6 +376,19 @@ AIP.CheckTriggers = CheckTriggers
 -- Shared per-channel listen decision: returns (shouldListen, channelTag).
 -- Used by the invite handler below AND by data/ChatScanner.lua, so the
 -- LFM/LFG browser and the auto-inviter always agree on which channels count.
+-- Built-in channel-type patterns, checked in order - the FIRST type whose
+-- pattern matches wins (mirrors the previous if/elseif chain exactly): a
+-- channel name matching an earlier type never falls through to try a later
+-- type's pattern, even if that earlier type's listen flag is off.
+local LISTEN_CHANNEL_TYPES = {
+    { patterns = { "lookingforgroup", "lfg" }, dbKey = "listenLFG", label = "lfg" },
+    { patterns = { "trade" }, dbKey = "listenTrade", label = "trade" },
+    { patterns = { "general" }, dbKey = "listenGeneral", label = "general" },
+    { patterns = { "localdefense", "defense" }, dbKey = "listenDefense", label = "defense" },
+    { patterns = { "global" }, dbKey = "listenGlobal", label = "global" },
+    { patterns = { "world" }, dbKey = "listenWorld", label = "world" },
+}
+
 function AIP.IsListenChannel(channelName)
     if not AIP.db then return false, nil end
     local channelLower = channelName and channelName:lower() or ""
@@ -375,18 +400,15 @@ function AIP.IsListenChannel(channelName)
     end
 
     local db = AIP.db
-    if channelLower:find("lookingforgroup", 1, true) or channelLower:find("lfg", 1, true) then
-        if db.listenLFG then return true, "lfg" end
-    elseif channelLower:find("trade", 1, true) then
-        if db.listenTrade then return true, "trade" end
-    elseif channelLower:find("general", 1, true) then
-        if db.listenGeneral then return true, "general" end
-    elseif channelLower:find("localdefense", 1, true) or channelLower:find("defense", 1, true) then
-        if db.listenDefense then return true, "defense" end
-    elseif channelLower:find("global", 1, true) then
-        if db.listenGlobal then return true, "global" end
-    elseif channelLower:find("world", 1, true) then
-        if db.listenWorld then return true, "world" end
+    for _, chType in ipairs(LISTEN_CHANNEL_TYPES) do
+        local matched = false
+        for _, pattern in ipairs(chType.patterns) do
+            if channelLower:find(pattern, 1, true) then matched = true break end
+        end
+        if matched then
+            if db[chType.dbKey] then return true, chType.label end
+            break
+        end
     end
 
     -- Custom listen channels
@@ -1494,6 +1516,198 @@ local function SlashHandler(msg)
         end
     elseif cmd == "check" or cmd == "ready" then
         if AIP.Readiness then AIP.Readiness.Check(false) end
+    elseif cmd == "auditlinks" then
+        -- Dev tool: verify every itemID/spellID referenced by the gear-advisor
+        -- data files (EnchantData/GemData/GearUpgrades/BiSData/Consumables/
+        -- PvPData) actually resolves on THIS server's DBC/spell data - a
+        -- correct Blizzard-live id can still be missing/renumbered on a
+        -- private server. Two-pass: warm the cache, wait for the async
+        -- server round-trip, then report anything that still won't resolve.
+        --
+        -- Result is cached per-realm in AIP.db.linkAudit (account-wide
+        -- SavedVariables, so every character on the account reuses it instead
+        -- of re-running the ~8s scan) - `/aip auditlinks` alone just prints
+        -- the cached result if one exists; `/aip auditlinks refresh` forces a
+        -- fresh scan and overwrites the cache.
+        local realm = GetRealmName and GetRealmName() or "unknown"
+        AIP.db.linkAudit = AIP.db.linkAudit or {}
+        local cached = AIP.db.linkAudit[realm]
+        if cached and not (rest and rest:lower() == "refresh") then
+            local age = math.floor(((time and time() or 0) - (cached.checkedAt or 0)) / 60)
+            AIP.Print(string.format("[auditlinks] Cached result from %d min ago on %s: %d broken item id(s), %d broken spell id(s). Run '/aip auditlinks refresh' to re-check.",
+                age, realm, #(cached.brokenItems or {}), #(cached.brokenSpells or {})))
+            if cached.brokenItems and #cached.brokenItems > 0 then
+                AIP.Print("[auditlinks] BROKEN item IDs: " .. table.concat(cached.brokenItems, ", "))
+            end
+            if cached.brokenSpells and #cached.brokenSpells > 0 then
+                AIP.Print("[auditlinks] BROKEN spell IDs: " .. table.concat(cached.brokenSpells, ", "))
+            end
+            return
+        end
+
+        local itemIDs, spellIDs, badTypes = {}, {}, {}
+        local itemNames, spellNames = {}, {}
+        local function addItem(id, name)
+            if id == nil then return end
+            if type(id) ~= "number" then badTypes[#badTypes + 1] = "item:" .. type(id) .. ":" .. tostring(id) return end
+            itemIDs[id] = true
+            if name and not itemNames[id] then itemNames[id] = name end
+        end
+        local function addSpell(id, name)
+            if id == nil then return end
+            if type(id) ~= "number" then badTypes[#badTypes + 1] = "spell:" .. type(id) .. ":" .. tostring(id) return end
+            spellIDs[id] = true
+            if name and not spellNames[id] then spellNames[id] = name end
+        end
+
+        local E = AIP.EnchantData
+        if E then
+            for _, t in pairs(E.List or {}) do
+                for _, e in pairs(t) do addItem(e.itemID, e.name) addSpell(e.spellID, e.name) end
+            end
+            for _, t in pairs(E.BySpec or {}) do
+                for _, e in pairs(t) do addItem(e.itemID, e.name) addSpell(e.spellID, e.name) end
+            end
+            for _, t in pairs(E.ProfessionAlts or {}) do
+                for _, list in pairs(t) do
+                    for _, e in ipairs(list) do addItem(e.itemID, e.name) addSpell(e.spellID, e.name) end
+                end
+            end
+        end
+        local G = AIP.GemData
+        if G then
+            local function scanArch(arch)
+                if arch.meta then addItem(arch.meta.itemID, arch.meta.name) end
+                for _, grp in ipairs(arch.groups or {}) do
+                    for _, tier in ipairs(grp.tiers or {}) do addItem(tier[2], tier[1]) end
+                end
+            end
+            for _, arch in pairs(G.List or {}) do scanArch(arch) end
+            for _, arch in pairs(G.BySpec or {}) do scanArch(arch) end
+            if G.Activator then addItem(G.Activator.itemID, G.Activator.name) end
+        end
+        local GU = AIP.GearUpgrades
+        if GU then
+            -- GU.List[arch] is SLOT-keyed (e.g. [1]=,[3]=,[7]=..., not sequential
+            -- from 1), and each slot's value is itself a LIST of progression rows
+            -- - ipairs() on the slot-keyed table stops after key 1 (no key 2), so
+            -- it must be walked with pairs(); ipairs() is then correct on the
+            -- inner per-slot chain, which IS a plain sequential array.
+            for _, bySlot in pairs(GU.List or {}) do
+                for _, chain in pairs(bySlot) do
+                    for _, row in ipairs(chain) do addItem(row[2], row[1]) end
+                end
+            end
+        end
+        local B = AIP.BiSData
+        if B then
+            for _, list in pairs(B.List or {}) do
+                for _, entry in ipairs(list) do
+                    for _, row in ipairs(entry.chain or {}) do addItem(row[2], row[1]) end
+                end
+            end
+            for _, byArch in pairs(B.Tier or {}) do
+                for _, row in pairs(byArch) do
+                    -- row[1] is the SET name (e.g. "Ymirjar Lord's Battlegear"),
+                    -- not any individual piece's name - B.Tier doesn't carry
+                    -- per-piece names (only B.TierSlots position labels like
+                    -- "Helm"/"Chest"), so there's no real item name to pass
+                    -- here. Passing the set name would make the broken-item
+                    -- by-name recheck below query GetItemInfo() with a name
+                    -- that can never match any single piece, always reporting
+                    -- a false "not found by name either" for tier pieces - so
+                    -- these ids are audited (still checked/reported if broken)
+                    -- but skip the by-name recovery attempt (nil name).
+                    for i = 2, #row do addItem(row[i]) end
+                end
+            end
+        end
+        local C = AIP.Consumables
+        if C then
+            for _, arch in pairs(C.List or {}) do
+                for _, e in pairs(arch) do
+                    if type(e) == "table" then addItem(e.itemID, e.name) end
+                end
+            end
+        end
+        local GD = AIP.GlyphData
+        if GD then
+            for nm, id in pairs(GD.ByName or {}) do addItem(id, nm) end
+        end
+        local PvPD = AIP.PvPData
+        if PvPD then
+            for _, byslot in pairs(PvPD.Gear or {}) do
+                for _, list in pairs(byslot) do
+                    for _, row in ipairs(list) do addItem(row[2], row[1]) end
+                end
+            end
+        end
+
+        if #badTypes > 0 then
+            AIP.Print("[auditlinks] SKIPPED non-numeric ids (data bug, fix the source table): " .. table.concat(badTypes, ", "))
+        end
+
+        local totalItems, totalSpells = 0, 0
+        for _ in pairs(itemIDs) do totalItems = totalItems + 1 end
+        for _ in pairs(spellIDs) do totalSpells = totalSpells + 1 end
+        for id in pairs(itemIDs) do pcall(GetItemInfo, id) end
+        for id in pairs(spellIDs) do pcall(GetSpellInfo, id) end
+        AIP.Print(string.format("[auditlinks] Warming %d items, %d spells - reporting in 8s...", totalItems, totalSpells))
+
+        -- 8s, not 3s: with ~250+ ids in one batch, most of them for items/spells
+        -- this character has never actually seen (other archetypes' gear), the
+        -- server's async cache-fill responses queue up - 3s produced false
+        -- "broken" positives that were just slow, not actually invalid.
+        AIP.Utils.DelayedCall(8, function()
+            local brokenItems, brokenSpells, remaps = {}, {}, {}
+            for id in pairs(itemIDs) do
+                local ok, name = pcall(GetItemInfo, id)
+                if not (ok and name) then brokenItems[#brokenItems + 1] = id end
+            end
+            for id in pairs(spellIDs) do
+                local ok, name = pcall(GetSpellInfo, id)
+                if not (ok and name) then brokenSpells[#brokenSpells + 1] = id end
+            end
+            AIP.Print(string.format("[auditlinks] %d/%d items OK, %d/%d spells OK",
+                totalItems - #brokenItems, totalItems, totalSpells - #brokenSpells, totalSpells))
+            if #brokenItems > 0 then
+                table.sort(brokenItems)
+                AIP.Print("[auditlinks] BROKEN item IDs: " .. table.concat(brokenItems, ", "))
+                -- Name-based re-check: this server may carry the same item under a
+                -- DIFFERENT id (common on custom item_template tables) rather than
+                -- being missing outright. GetItemInfo(name) queries by name instead
+                -- of id - if that resolves, pull the real id back out of the
+                -- returned item link so the data file can be repointed at it.
+                for _, id in ipairs(brokenItems) do
+                    local nm = itemNames[id]
+                    if nm then
+                        local ok2, foundName, foundLink = pcall(GetItemInfo, nm)
+                        if ok2 and foundName and foundLink then
+                            local realID = foundLink:match("item:(%d+):")
+                            if realID then remaps[id] = tonumber(realID) end
+                            AIP.Print(string.format("[auditlinks]   %d (%s) -> FOUND under a different id: %s (id %s)",
+                                id, nm, foundName, realID or "?"))
+                        else
+                            AIP.Print(string.format("[auditlinks]   %d (%s) -> not found by name either, likely absent from this server's item DB", id, nm))
+                        end
+                    end
+                end
+            end
+            if #brokenSpells > 0 then
+                table.sort(brokenSpells)
+                AIP.Print("[auditlinks] BROKEN spell IDs: " .. table.concat(brokenSpells, ", "))
+                for _, id in ipairs(brokenSpells) do
+                    local nm = spellNames[id]
+                    if nm then AIP.Print(string.format("[auditlinks]   %d = %s", id, nm)) end
+                end
+            end
+
+            AIP.db.linkAudit = AIP.db.linkAudit or {}
+            AIP.db.linkAudit[realm] = {
+                brokenItems = brokenItems, brokenSpells = brokenSpells,
+                remaps = remaps, checkedAt = (time and time() or 0),
+            }
+        end)
     elseif cmd == "gear" then
         if rest and rest:lower():match("^raid") then
             if AIP.GearAdvisor then AIP.GearAdvisor.RaidReport() end

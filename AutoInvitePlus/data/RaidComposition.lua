@@ -3054,7 +3054,7 @@ function Comp.TemplateKeyForRaid(raidKey)
     -- (FOS, HOL, ...) since it has no separate normal-mode template to
     -- distinguish from. Strip it before falling through to the size/H-N
     -- suffix parser below, which HC-prefixed ids don't have at all.
-    if key:sub(1, 2) == "HC" and Comp.RaidTemplates[key:sub(3)] then
+    if AIP.Parsers.IsHeroicDungeonId(key) and Comp.RaidTemplates[key:sub(3)] then
         return key:sub(3)
     end
 

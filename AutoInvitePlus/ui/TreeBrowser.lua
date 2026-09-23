@@ -543,7 +543,7 @@ end
 -- Established raid codes (ICC25H, VOA10, ...) are left as-is; they're already
 -- familiar shorthand and changing them would be an unrelated cosmetic churn.
 local function DisplayRaidLabel(raidId)
-    if raidId and raidId:sub(1, 2) == "HC" and AIP.Parsers and AIP.Parsers.GetRaidName then
+    if raidId and AIP.Parsers and AIP.Parsers.IsHeroicDungeonId(raidId) and AIP.Parsers.GetRaidName then
         return AIP.Parsers.GetRaidName(raidId)
     end
     return raidId

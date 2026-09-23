@@ -230,9 +230,15 @@ end
 -- ============================================================================
 -- Glyphs
 -- ============================================================================
+-- 4th return `minorEmpty` is the count of UNLOCKED minor sockets that are
+-- empty - distinct from `empty` (major+minor combined) so a caller that wants
+-- to report specifically on minor glyphs doesn't conflate a locked (not yet
+-- unlocked at the player's level) socket with a genuinely empty one; a locked
+-- socket never enters this loop at all (enabled is false), so it can't be
+-- counted as "empty" by mistake.
 function SA.ReadGlyphs()
-    local majors, minors, empty = {}, {}, 0
-    if not (GetNumGlyphSockets and GetGlyphSocketInfo) then return majors, minors, empty end
+    local majors, minors, empty, minorEmpty = {}, {}, 0, 0
+    if not (GetNumGlyphSockets and GetGlyphSocketInfo) then return majors, minors, empty, minorEmpty end
     for i = 1, GetNumGlyphSockets() do
         -- Return order varies by client (glyph spell ID is not always the same
         -- slot, and one of the returns is the icon path). Find the numeric return
@@ -248,12 +254,14 @@ function SA.ReadGlyphs()
                     if n then name = n; break end
                 end
             end
-            if not name then empty = empty + 1
+            if not name then
+                empty = empty + 1
+                if gtype == 2 then minorEmpty = minorEmpty + 1 end
             elseif gtype == 2 then minors[#minors + 1] = name
             else majors[#majors + 1] = name end
         end
     end
-    return majors, minors, empty
+    return majors, minors, empty, minorEmpty
 end
 
 -- ============================================================================

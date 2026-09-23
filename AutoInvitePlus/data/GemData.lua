@@ -40,6 +40,13 @@ G.List = {
                 { "Bold Scarlet Ruby",  39996, 3, { ITEM_MOD_STRENGTH_SHORT = 16 } },
                 { "Bold Cardinal Ruby", 40111, 4, { ITEM_MOD_STRENGTH_SHORT = 20 } },
             } },
+            { label = "Hybrid for a Red/Yellow socket - Strength + Haste", tiers = {
+                { "Fierce Ametrine", 40146, 4, { ITEM_MOD_STRENGTH_SHORT = 10, ITEM_MOD_HASTE_RATING_SHORT = 10 } },
+            } },
+            { label = "Hybrid for a Red/Blue socket - Strength + Stamina", tiers = {
+                { "Sovereign Twilight Opal", 40022, 3, { ITEM_MOD_STRENGTH_SHORT = 8, ITEM_MOD_STAMINA_SHORT = 12 } },
+                { "Sovereign Dreadstone",    40129, 4, { ITEM_MOD_STRENGTH_SHORT = 10, ITEM_MOD_STAMINA_SHORT = 15 } },
+            } },
         },
         meta = { name = "Relentless Earthsiege Diamond", itemID = 41398,
                  note = "+21 Agi, +3% crit dmg. activate: >=1 Red, 1 Yellow, 1 Blue gem", mods = { ITEM_MOD_AGILITY_SHORT = 21 } },
@@ -50,6 +57,12 @@ G.List = {
                 { "Delicate Bloodstone",    39905, 2, { ITEM_MOD_AGILITY_SHORT = 12 } },
                 { "Delicate Scarlet Ruby",  39997, 3, { ITEM_MOD_AGILITY_SHORT = 16 } },
                 { "Delicate Cardinal Ruby", 40112, 4, { ITEM_MOD_AGILITY_SHORT = 20 } },
+            } },
+            { label = "Hybrid for a Red/Yellow socket - Agility + Hit", tiers = {
+                { "Glinting Ametrine", 40148, 4, { ITEM_MOD_AGILITY_SHORT = 10, ITEM_MOD_HIT_RATING_SHORT = 10 } },
+            } },
+            { label = "Hybrid for a Red/Yellow socket - Agility + Crit (once Hit is capped)", tiers = {
+                { "Deadly Ametrine", 40147, 4, { ITEM_MOD_AGILITY_SHORT = 10, ITEM_MOD_CRIT_RATING_SHORT = 10 } },
             } },
         },
         meta = { name = "Relentless Earthsiege Diamond", itemID = 41398,
@@ -62,6 +75,12 @@ G.List = {
                 { "Runed Scarlet Ruby",  39998, 3, { ITEM_MOD_SPELL_POWER = 19 } },
                 { "Runed Cardinal Ruby", 40113, 4, { ITEM_MOD_SPELL_POWER = 23 } },
             } },
+            { label = "Hybrid for a Red/Yellow socket - Spell Power + Hit", tiers = {
+                { "Veiled Ametrine", 40153, 4, { ITEM_MOD_SPELL_POWER = 12, ITEM_MOD_HIT_RATING_SHORT = 10 } },
+            } },
+            { label = "Hybrid for a Red/Yellow socket - Spell Power + Crit (once Hit is capped)", tiers = {
+                { "Potent Ametrine", 40152, 4, { ITEM_MOD_SPELL_POWER = 12, ITEM_MOD_CRIT_RATING_SHORT = 10 } },
+            } },
         },
         meta = { name = "Chaotic Skyflare Diamond", itemID = 41285,
                  note = "+21 crit, +3% crit dmg. activate: >=2 Blue gems", mods = { ITEM_MOD_CRIT_RATING_SHORT = 21 } },
@@ -73,6 +92,9 @@ G.List = {
                 { "Brilliant Autumn's Glow", 40012, 3, { ITEM_MOD_INTELLECT_SHORT = 16 } },
                 { "Brilliant King's Amber",  40123, 4, { ITEM_MOD_INTELLECT_SHORT = 20 } },
             } },
+            { label = "Hybrid for a Yellow/Blue socket - Intellect + Stamina", tiers = {
+                { "Timeless Eye of Zul", 40164, 4, { ITEM_MOD_INTELLECT_SHORT = 10, ITEM_MOD_STAMINA_SHORT = 15 } },
+            } },
         },
         meta = { name = "Insightful Earthsiege Diamond", itemID = 41401,
                  note = "+21 Int, chance to restore mana. activate: >=1 Red, 1 Yellow, 1 Blue gem", mods = { ITEM_MOD_INTELLECT_SHORT = 21 } },
@@ -83,6 +105,10 @@ G.List = {
                 { "Solid Chalcedony",      39919, 2, { ITEM_MOD_STAMINA_SHORT = 18 } },
                 { "Solid Sky Sapphire",    40008, 3, { ITEM_MOD_STAMINA_SHORT = 24 } },
                 { "Solid Majestic Zircon", 40119, 4, { ITEM_MOD_STAMINA_SHORT = 30 } },
+            } },
+            { label = "Hybrid for a Red/Blue socket - Strength + Stamina (bonus threat)", tiers = {
+                { "Sovereign Twilight Opal", 40022, 3, { ITEM_MOD_STRENGTH_SHORT = 8, ITEM_MOD_STAMINA_SHORT = 12 } },
+                { "Sovereign Dreadstone",    40129, 4, { ITEM_MOD_STRENGTH_SHORT = 10, ITEM_MOD_STAMINA_SHORT = 15 } },
             } },
         },
         meta = { name = "Austere Earthsiege Diamond", itemID = 41380,
@@ -104,7 +130,7 @@ G.Activator = { name = "Nightmare Tear", itemID = 49110, quality = 4,
     note = "+10 all stats; prismatic - one activates any meta",
     mods = { ITEM_MOD_STRENGTH_SHORT = 10, ITEM_MOD_AGILITY_SHORT = 10, ITEM_MOD_STAMINA_SHORT = 10,
              ITEM_MOD_INTELLECT_SHORT = 10, ITEM_MOD_SPIRIT_SHORT = 10 } }
-G.Strategy = "Plan: 1 meta gem + 1 Nightmare Tear (activates the meta), every other socket = the best-stat gem below (ignore socket bonuses - the extra stat beats them)."
+G.Strategy = "Plan: 1 meta gem + 1 Nightmare Tear (activates the meta), every other socket = the best-stat gem below (ignore socket bonuses - the extra stat beats them). Prefer chasing socket bonuses instead? The Hybrid groups below give a real option for each off-colour socket."
 
 -- Per-spec overrides (SG.KeyFor() keys) where an archetype default is too coarse
 -- (e.g. ArP-stacking combat rogue gems Armor Pen, not Agility). Populated by the
@@ -144,6 +170,27 @@ G.BySpec.War_Fury_DPS = {
     meta = G.List.strDPS.meta,
 }
 G.BySpec.War_Arms_DPS = G.BySpec.War_Fury_DPS
+
+-- The shared "tank" archetype covers Warrior/Paladin/DK (Strength-scaled) AND
+-- Feral Druid bears (Agility-scaled - see SG.KeyFor, which routes a Druid
+-- tank to this exact key). G.List.tank's Red/Blue hybrid recommends
+-- Strength+Stamina, which is dead weight for a bear (Strength does nothing
+-- for Feral tanks) - override with the Agility+Stamina equivalent instead,
+-- keeping the same Stamina primary group and meta.
+G.BySpec.Druid_FeralBear = {
+    groups = {
+        { label = "Stamina (all sockets) - blue cut", tiers = {
+            { "Solid Chalcedony",      39919, 2, { ITEM_MOD_STAMINA_SHORT = 18 } },
+            { "Solid Sky Sapphire",    40008, 3, { ITEM_MOD_STAMINA_SHORT = 24 } },
+            { "Solid Majestic Zircon", 40119, 4, { ITEM_MOD_STAMINA_SHORT = 30 } },
+        } },
+        { label = "Hybrid for a Red/Blue socket - Agility + Stamina (bonus armor/dodge)", tiers = {
+            { "Shifting Twilight Opal", 40023, 3, { ITEM_MOD_AGILITY_SHORT = 8, ITEM_MOD_STAMINA_SHORT = 12 } },
+            { "Shifting Dreadstone",    40130, 4, { ITEM_MOD_AGILITY_SHORT = 10, ITEM_MOD_STAMINA_SHORT = 15 } },
+        } },
+    },
+    meta = G.List.tank.meta,
+}
 
 function G.ForArchetype(arch) return G.List[arch] end
 

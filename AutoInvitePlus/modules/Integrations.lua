@@ -196,6 +196,24 @@ end
 function Int.GetGearScore(name)
     if not name then return nil end
 
+    -- Self: always calculate directly from our own live-inventory formula
+    -- rather than routing through the external GearScore_GetScore first.
+    -- Self never needs an inspect (GetInventoryItemLink("player", slot) is
+    -- always immediately available), so CalculateUnitGS is both sufficient
+    -- and fully within this addon's control here - unlike the external
+    -- addon's own score for "player", whose internal caching/calculation
+    -- timing this addon doesn't control and can't guarantee is ready on
+    -- every call. Removing that dependency for the one case (self) that
+    -- never actually needs it closes off a plausible source of the
+    -- self-tooltip GS intermittently not appearing.
+    local myName = UnitName("player")
+    if myName and name:lower() == myName:lower() then
+        local gs, ilvl = CalculateUnitGS("player")
+        if gs and gs > 0 then
+            return gs, "Calculated", ilvl
+        end
+    end
+
     -- Try GearScore addon first (most accurate)
     -- GearScore_GetScore(Name, Target) - despite the first parameter's name,
     -- GearScoreLite's own implementation only actually reads the SECOND

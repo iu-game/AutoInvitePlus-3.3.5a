@@ -697,6 +697,33 @@ function CS.GetPlayers(filters)
     return results
 end
 
+-- raid id -> {catId, childId} reverse index for GetGroupsByRaid below, built
+-- once and cached (Parsers.RaidHierarchy is static data, never mutated at
+-- runtime) instead of the old nested pairs()-over-every-category scan that
+-- ran per group on every call - this runs on every browser refresh, so with
+-- G groups and C categories that was an O(G*C) scan per refresh.
+-- childId is nil only if the category itself somehow has no children.
+local raidCategoryIndex = nil
+local function GetRaidCategoryIndex()
+    if raidCategoryIndex then return raidCategoryIndex end
+    local idx = {}
+    local hierarchy = AIP.Parsers and AIP.Parsers.RaidHierarchy or {}
+    for _, cat in ipairs(hierarchy) do
+        -- Category-level match falls back to the first child bucket. Set
+        -- before the child loop so that if a child happens to share the
+        -- category's own id, the child's direct-match entry (set below)
+        -- wins - same precedence the original nested loop had, since it
+        -- would find that id as a specific child match rather than falling
+        -- through to the first-child fallback.
+        idx[cat.id] = { catId = cat.id, childId = cat.children[1] and cat.children[1].id or nil }
+        for _, child in ipairs(cat.children) do
+            idx[child.id] = { catId = cat.id, childId = child.id }
+        end
+    end
+    raidCategoryIndex = idx
+    return idx
+end
+
 -- Get groups organized by raid hierarchy (for tree view)
 function CS.GetGroupsByRaid(filters)
     filters = filters or {}
@@ -739,38 +766,17 @@ function CS.GetGroupsByRaid(filters)
             info.age = now - info.time
             info.leader = leader
 
-            -- Find category. Exact match against the category's own id OR one
-            -- of its children's ids - a string-prefix guess (e.g. "TOC") would
-            -- wrongly also match "TOGC10"/"TOGC25" (3rd char differs: C vs G),
-            -- dropping ToGC listings out of every category bucket entirely.
-            local placed = false
-            for catId, catData in pairs(results) do
-                local isMatch = (info.raid == catId)
-                if not isMatch and info.raid then
-                    for _, child in ipairs(catData.category.children) do
-                        if child.id == info.raid then isMatch = true break end
-                    end
-                end
-                if isMatch then
-                    -- Find specific child
-                    for childId, childData in pairs(catData.children) do
-                        if info.raid == childId then
-                            table.insert(childData.groups, info)
-                            childData.count = childData.count + 1
-                            placed = true
-                            break
-                        end
-                    end
-                    -- Fallback to first child if no specific match
-                    if not placed and info.raid == catId then
-                        local firstChild = catData.children[catData.category.children[1].id]
-                        if firstChild then
-                            table.insert(firstChild.groups, info)
-                            firstChild.count = firstChild.count + 1
-                            placed = true
-                        end
-                    end
-                    break
+            -- Find category via the reverse index (exact match against the
+            -- category's own id OR one of its children's ids - a
+            -- string-prefix guess (e.g. "TOC") would wrongly also match
+            -- "TOGC10"/"TOGC25" (3rd char differs: C vs G), dropping ToGC
+            -- listings out of every category bucket entirely).
+            local placement = info.raid and GetRaidCategoryIndex()[info.raid]
+            if placement then
+                local childData = results[placement.catId].children[placement.childId]
+                if childData then
+                    table.insert(childData.groups, info)
+                    childData.count = childData.count + 1
                 end
             end
         end

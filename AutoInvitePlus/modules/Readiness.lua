@@ -23,9 +23,16 @@ local function hasBuff(sub)
 end
 
 -- Best-effort "am I tanking right now?" so we only enforce the 540 Defense gate
--- on actual tanks (DPS/healers don't need it). DK tanks aren't auto-detected
--- (Frost Presence is shared with Frost DPS) - documented gap.
+-- on actual tanks (DPS/healers don't need it). Delegates to
+-- AIP.ItemScore.PlayerArchetype() (data/ItemScore.lua, loads before this file
+-- per the .toc) so there is a single source of truth for tank detection shared
+-- with gear/enchant/upgrade scoring, instead of a second, driftable copy of
+-- the same Warrior/Druid/Paladin/DK signals. Falls back to the local heuristic
+-- only if ItemScore somehow isn't loaded.
 local function isTankNow()
+    if AIP.ItemScore and AIP.ItemScore.PlayerArchetype then
+        return AIP.ItemScore.PlayerArchetype() == "tank"
+    end
     local _, class = UnitClass("player")
     if class == "WARRIOR" then
         return GetShapeshiftForm and GetShapeshiftForm() == 2       -- Defensive Stance
@@ -33,6 +40,8 @@ local function isTankNow()
         return hasBuff("Bear Form") or hasBuff("Dire Bear Form")
     elseif class == "PALADIN" then
         return hasBuff("Righteous Fury")
+    elseif class == "DEATHKNIGHT" then
+        return hasBuff("Frost Presence")
     end
     return false
 end

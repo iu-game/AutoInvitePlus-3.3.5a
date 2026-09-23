@@ -707,10 +707,24 @@ function Parsers.IsGuildRecruitment(message)
         or msg:find("isn'?t%s+recruit") or msg:find("aren'?t%s+recruit")
         or msg:find("not%s+currently%s+recruit") or msg:find("no%s+recruit")
 
+    -- Purely structural signals (guild tag, "members", "discord", a website)
+    -- that a real raid LFM can innocently contain - per the tuning invariant
+    -- above, these alone (even with the no-raid-detected nudge below) must
+    -- never be enough to flag a message; an actual recruitment word/phrase
+    -- has to be present too.
+    local structuralOnly = {
+        ["guild"] = true, ["members"] = true, ["discord"] = true,
+        ["<"] = true, ["www."] = true, [".com"] = true,
+    }
+
     local score = 0
+    local sawRecruitmentWord = false
     for _, signal in ipairs(Parsers.GuildRecruitmentSignals) do
         if not (negatedRecruit and signal.pattern == "recruit") and msg:find(signal.pattern, 1, true) then
             score = score + signal.weight
+            if not structuralOnly[signal.pattern] then
+                sawRecruitmentWord = true
+            end
         end
     end
 
@@ -718,8 +732,12 @@ function Parsers.IsGuildRecruitment(message)
     -- A message that doesn't match ANY known raid/dungeon pattern is more
     -- likely a guild ad than an oddly-worded run listing, so nudge the score
     -- up - enough for two weak signals together to clear the threshold, but
-    -- not so much that a single incidental hit (e.g. a lone "<") does.
-    if not Parsers.DetectRaid(message) then
+    -- not so much that a single incidental hit (e.g. a lone "<") does. Only
+    -- apply the nudge when a real recruitment word/phrase already matched -
+    -- otherwise the purely structural weak signals (guild/members/discord/
+    -- </www./.com, summing to 53) plus this +20 could cross the threshold
+    -- on their own, violating the tuning invariant above.
+    if not Parsers.DetectRaid(message) and sawRecruitmentWord then
         score = score + 20
     end
 
@@ -1258,6 +1276,18 @@ Parsers.RaidHierarchy = {
         },
     },
 }
+
+-- Is `id` one of this addon's own HC-prefixed heroic-dungeon codes (HCFOS,
+-- HCHOL, ...)? This is a literal-prefix check on the addon's OWN id
+-- convention, not a Parsers.RaidHierarchy category lookup - GetRaidCategory
+-- below classifies a raid id INTO a category (which happens to also be named
+-- "HC" for heroics), a different question with different failure modes
+-- (nil on an id not yet in the hierarchy, ambiguous prefix matches). Shared
+-- helper so the 9 call sites that used to inline `id:sub(1,2) == "HC"`
+-- can't drift out of sync with each other.
+function Parsers.IsHeroicDungeonId(id)
+    return id ~= nil and id:sub(1, 2) == "HC"
+end
 
 -- Get parent category for a raid ID
 function Parsers.GetRaidCategory(raidId)

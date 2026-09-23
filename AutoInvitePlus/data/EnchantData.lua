@@ -13,8 +13,18 @@
 --   kind "item"  -> link via GetItemInfo(itemID)  (a scroll / leg armor / spellthread)
 --   kind "spell" -> link via GetSpellLink(spellID) (an applied-only enchant)
 -- `mods` keys are the ITEM_MOD_*_SHORT forms the stat panel reads (feeds what-if).
--- Slot ids: Head1 Shoulder3 Chest5 Legs7 Feet8 Wrist9 Hands10 Ring11/12 Back15
---   MainHand16 OffHand/Shield17 Ranged18.
+-- Slot ids: Head1 Shoulder3 Chest5 Waist6 Legs7 Feet8 Wrist9 Hands10 Ring11/12
+--   Back15 MainHand16 OffHand/Shield17 Ranged18.
+--
+-- Waist (slot 6) has no generic Enchanting option in this expansion - the only
+-- way to add anything to a belt is the Blacksmithing-crafted Eternal Belt
+-- Buckle (itemID 41611, spell 55656; adds a permanent prismatic socket). Like
+-- the Heartseeker Scope below, it's a tradeable BoE item usable by anyone who
+-- acquires one (not a self-cast profession spell), so it lives in E.List
+-- directly rather than E.ProfessionAlts, identically for every archetype.
+local WAIST_BUCKLE = { name = "Eternal Belt Buckle", itemID = 41611, spellID = 55656, kind = "item",
+    source = "Blacksmithing (415) - BoE until attached, anyone can use", mods = nil,
+    note = "Adds a permanent socket (any color except meta) to your belt. Slot your best-stat gem from the GEMS section above in it." }
 
 local AIP = AutoInvitePlus
 if not AIP then return end
@@ -30,6 +40,7 @@ E.List = {
                  mods = { ITEM_MOD_ATTACK_POWER_SHORT = 50, ITEM_MOD_CRIT_RATING_SHORT = 20 } },
         [3]  = { name = "Greater Inscription of the Axe", itemID = 44133, kind = "item", source = "Sons of Hodir - Exalted",
                  mods = { ITEM_MOD_ATTACK_POWER_SHORT = 40, ITEM_MOD_CRIT_RATING_SHORT = 15 } },
+        [6]  = WAIST_BUCKLE,
         [15] = { name = "Enchant Cloak - Major Agility", spellID = 60663, kind = "spell", source = "Enchanting",
                  mods = { ITEM_MOD_AGILITY_SHORT = 22 } },
         [5]  = { name = "Enchant Chest - Powerful Stats", spellID = 60692, kind = "spell", source = "Enchanting",
@@ -49,6 +60,7 @@ E.List = {
                  mods = { ITEM_MOD_ATTACK_POWER_SHORT = 50, ITEM_MOD_CRIT_RATING_SHORT = 20 } },
         [3]  = { name = "Greater Inscription of the Axe", itemID = 44133, kind = "item", source = "Sons of Hodir - Exalted",
                  mods = { ITEM_MOD_ATTACK_POWER_SHORT = 40, ITEM_MOD_CRIT_RATING_SHORT = 15 } },
+        [6]  = WAIST_BUCKLE,
         [15] = { name = "Enchant Cloak - Major Agility", spellID = 60663, kind = "spell", source = "Enchanting",
                  mods = { ITEM_MOD_AGILITY_SHORT = 22 } },
         [5]  = { name = "Enchant Chest - Powerful Stats", spellID = 60692, kind = "spell", source = "Enchanting",
@@ -76,6 +88,7 @@ E.List = {
                  mods = { ITEM_MOD_SPELL_POWER = 30, ITEM_MOD_CRIT_RATING_SHORT = 20 } },
         [3]  = { name = "Greater Inscription of the Storm", itemID = 44135, kind = "item", source = "Sons of Hodir - Exalted",
                  mods = { ITEM_MOD_SPELL_POWER = 24, ITEM_MOD_CRIT_RATING_SHORT = 15 } },
+        [6]  = WAIST_BUCKLE,
         [15] = { name = "Enchant Cloak - Wisdom", spellID = 47899, kind = "spell", source = "Enchanting",
                  mods = { ITEM_MOD_SPIRIT_SHORT = 10 } },
         [5]  = { name = "Enchant Chest - Powerful Stats", spellID = 60692, kind = "spell", source = "Enchanting",
@@ -95,6 +108,7 @@ E.List = {
                  mods = { ITEM_MOD_SPELL_POWER = 30, ITEM_MOD_MANA_REGENERATION = 10 } },
         [3]  = { name = "Greater Inscription of the Crag", itemID = 44134, kind = "item", source = "Sons of Hodir - Exalted",
                  mods = { ITEM_MOD_SPELL_POWER = 24, ITEM_MOD_MANA_REGENERATION = 8 } },
+        [6]  = WAIST_BUCKLE,
         [15] = { name = "Enchant Cloak - Wisdom", spellID = 47899, kind = "spell", source = "Enchanting",
                  mods = { ITEM_MOD_SPIRIT_SHORT = 10 } },
         [5]  = { name = "Enchant Chest - Powerful Stats", spellID = 60692, kind = "spell", source = "Enchanting",
@@ -114,6 +128,7 @@ E.List = {
                  mods = { ITEM_MOD_STAMINA_SHORT = 37, ITEM_MOD_DEFENSE_SKILL_RATING_SHORT = 20 } },
         [3]  = { name = "Greater Inscription of the Pinnacle", itemID = 44136, kind = "item", source = "Sons of Hodir - Exalted",
                  mods = { ITEM_MOD_DODGE_RATING_SHORT = 20, ITEM_MOD_DEFENSE_SKILL_RATING_SHORT = 15 } },
+        [6]  = WAIST_BUCKLE,
         [15] = { name = "Enchant Cloak - Titanweave", spellID = 44591, kind = "spell", source = "Enchanting",
                  mods = { ITEM_MOD_DEFENSE_SKILL_RATING_SHORT = 16 } },
         [5]  = { name = "Enchant Chest - Super Health", spellID = 47900, kind = "spell", source = "Enchanting (+275 Health)", mods = nil },
@@ -138,7 +153,37 @@ E.List.rangedDPS = E.List.agiDPS
 
 -- Per-spec overrides (SG.KeyFor keys) for cases the archetype default misses
 -- (e.g. ArP weapon enchant differences). Populated by the research pass.
+--
+-- Death Knights physically cannot use "Enchant Weapon" scrolls at all - their
+-- weapon is modified exclusively through class-only Runeforging (applied at
+-- the runeforge NPC in Ebon Hold, no profession needed), a completely
+-- different system from the Enchanting-profession weapon enchants in
+-- E.List.strDPS[16]/tank[16] above. Without this override every DK archetype
+-- was being shown an enchant they can never actually apply. Covers slot 16
+-- (main-hand) for every DK spec, and slot 17 (off-hand) for Frost's
+-- dual-wield build - the entry still shows on an empty/2H off-hand slot like
+-- every other slot recommendation in this panel, so the note calls out that
+-- it only applies when dual-wielding.
 E.BySpec = {}
+E.BySpec.DK_Blood_DPS = {
+    [16] = { name = "Rune of the Fallen Crusader", spellID = 53344, kind = "spell", source = "Runeforging (Ebon Hold, no profession needed)",
+             mods = nil, note = "Proc: chance to heal 3% of your health and grant +15% total Strength for 15 sec." },
+}
+E.BySpec.DK_Unholy_DPS = {
+    [16] = { name = "Rune of the Fallen Crusader", spellID = 53344, kind = "spell", source = "Runeforging (Ebon Hold, no profession needed)",
+             mods = nil, note = "Proc: chance to heal 3% of your health and grant +15% total Strength for 15 sec." },
+}
+E.BySpec.DK_Frost_DPS = {
+    [16] = { name = "Rune of the Fallen Crusader", spellID = 53344, kind = "spell", source = "Runeforging (Ebon Hold, no profession needed)",
+             mods = nil, note = "Proc: chance to heal 3% of your health and grant +15% total Strength for 15 sec. Main-hand if dual-wielding, or your only weapon if 2H." },
+    [17] = { name = "Rune of Razorice", spellID = 53343, kind = "spell", source = "Runeforging (Ebon Hold, no profession needed)",
+             mods = nil, note = "Off-hand only, if dual-wielding: +2% weapon damage as Frost and stacks a Frost-vulnerability debuff on the target. Skip this if you run a 2H weapon instead." },
+}
+E.BySpec.DK_Tank = {
+    [16] = { name = "Rune of the Stoneskin Gargoyle", spellID = 62158, kind = "spell", source = "Runeforging (Ebon Hold, no profession needed)",
+             mods = { ITEM_MOD_DEFENSE_SKILL_RATING_SHORT = 25 },
+             note = "Also grants +2% total Stamina (not reflected in the what-if - percentage stat, not a flat rating)." },
+}
 
 -- Profession-exclusive enchants: unlike E.List, these are NOT available to
 -- everyone - each requires the enchanter's own copy of that profession (and,

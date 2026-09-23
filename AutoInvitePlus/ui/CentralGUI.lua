@@ -1355,6 +1355,14 @@ function GUI.ApplySimplifiedView(enabled)
         GUI.SelectTab("lfm")
     end
 
+    -- Simplified View forces the lfm tab above, so its container is the only
+    -- one that can ever be visible here - toggle its Simplified-only Apply
+    -- button (see CentralGUIBrowser.lua's DoApply) to match.
+    local lfmContainer = frame.tabContents and frame.tabContents["lfm"]
+    if lfmContainer and lfmContainer.simplifiedApplyBtn then
+        if enabled then lfmContainer.simplifiedApplyBtn:Show() else lfmContainer.simplifiedApplyBtn:Hide() end
+    end
+
     if frame.tabBar then
         if enabled then frame.tabBar:Hide() else frame.tabBar:Show() end
     end
@@ -1465,7 +1473,26 @@ function GUI.ApplySimplifiedView(enabled)
     -- (GUI.Config.minWidth, normally 800) would otherwise clamp SetSize
     -- right back up, so it moves with the mode. Skipped while minimized/
     -- maximized - those already own the frame's size on their own toggle.
-    if not GUI.IsMinimized and not GUI.IsMaximized then
+    if GUI.IsMinimized then
+        -- Minimize owns the frame's HEIGHT (shrunk to the title bar, restored
+        -- from GUI.PreMinimizeHeight on un-minimize - see GUI.ToggleMinimize),
+        -- but it never touches width. Without correcting width here too, a
+        -- Simplified/Full toggle while minimized left the frame stranded at
+        -- the OTHER mode's width - un-minimizing only restores height, so the
+        -- mismatch (e.g. Full View's ~1000px shell around Simplified's narrow
+        -- content) only became visible after restoring. SetWidth, not
+        -- SetSize, so the current minimized height is left alone.
+        if enabled then
+            frame:SetMinResize(GUI.SIMPLIFIED_WIDTH, GUI.Config.minHeight)
+            frame:SetMaxResize(GUI.SIMPLIFIED_WIDTH, 4000)
+            frame:SetWidth(GUI.SIMPLIFIED_WIDTH)
+        else
+            frame:SetMinResize(GUI.Config.minWidth, GUI.Config.minHeight)
+            frame:SetMaxResize(4000, 4000)
+            local w = (AIP.db and AIP.db.guiWidth and math.max(AIP.db.guiWidth, GUI.Config.minWidth)) or GUI.Config.defaultWidth
+            frame:SetWidth(w)
+        end
+    elseif not GUI.IsMaximized then
         if enabled then
             -- Width is locked (min == max) - the resize grip only grows/shrinks
             -- height in Simplified View; widening it defeats the point of a
@@ -5119,7 +5146,7 @@ function GUI.RaidKeyForTemplate(templateKey)
             -- rather than appending a size/H-N suffix (see its own comment),
             -- so reverse-mapping must try the same shortcut instead of
             -- building "HCFOS5H", which Comp.TemplateKeyForRaid can't parse.
-            if raidType:sub(1, 2) == "HC" then
+            if AIP.Parsers.IsHeroicDungeonId(raidType) then
                 if Comp.TemplateKeyForRaid(raidType) == templateKey then
                     return raidType, info.defaultSize, true
                 end
@@ -5677,10 +5704,21 @@ function GUI.CreateAddGroupPopup()
         -- a size/heroic suffix (Parsers treats all WotLK 5-mans as heroic
         -- regardless of a stated difficulty, so there's no separate "normal"
         -- id to distinguish anyway).
-        if raidType:sub(1, 2) == "HC" then
+        if AIP.Parsers.IsHeroicDungeonId(raidType) then
             return raidType
         end
         local size = popup.raidSize or "25"
+        -- EoE/Ony popup ids don't share a literal prefix with their
+        -- Parsers.RaidHierarchy canonical ids (EOE10/EOE25, ONYXIA10/
+        -- ONYXIA25 - no heroic suffix, no separate normal/heroic split for
+        -- either) - map them explicitly so TreeBrowser/peers categorize
+        -- these listings correctly instead of silently falling into Other.
+        if raidType == "EoE" then
+            return "EOE" .. size
+        end
+        if raidType == "Ony" then
+            return "ONYXIA" .. size
+        end
         local heroic = popup.heroicCheck:GetChecked() and "H" or "N"
         if raidType == "TOC" and heroic == "H" then
             return "TOGC" .. size
@@ -5771,7 +5809,7 @@ function GUI.CreateAddGroupPopup()
         -- HC-prefixed dungeon ids are internal shorthand - show the friendly
         -- name from Parsers.RaidHierarchy instead of the raw id.
         local label = raidType
-        if raidType:sub(1, 2) == "HC" and AIP.Parsers and AIP.Parsers.GetRaidName then
+        if AIP.Parsers and AIP.Parsers.IsHeroicDungeonId(raidType) and AIP.Parsers.GetRaidName then
             label = AIP.Parsers.GetRaidName(raidType)
         end
         if isLocked then
@@ -5852,7 +5890,7 @@ function GUI.CreateAddGroupPopup()
                         -- GetRaidKey below) - show the friendly name from
                         -- Parsers.RaidHierarchy instead of the raw id.
                         local label = rt
-                        if rt:sub(1, 2) == "HC" and AIP.Parsers and AIP.Parsers.GetRaidName then
+                        if AIP.Parsers and AIP.Parsers.IsHeroicDungeonId(rt) and AIP.Parsers.GetRaidName then
                             label = AIP.Parsers.GetRaidName(rt)
                         end
                         if isLocked then
@@ -7511,10 +7549,21 @@ function GUI.CreateEnrollPopup()
         -- HC-prefixed dungeon ids (HCFOS, HCHOL, ...) already match
         -- Parsers.RaidHierarchy exactly - return as-is (see the Add-Group
         -- popup's GetRaidKey for the full explanation).
-        if raidType:sub(1, 2) == "HC" then
+        if AIP.Parsers.IsHeroicDungeonId(raidType) then
             return raidType
         end
         local size = popup.raidSize or "25"
+        -- EoE/Ony popup ids don't share a literal prefix with their
+        -- Parsers.RaidHierarchy canonical ids (EOE10/EOE25, ONYXIA10/
+        -- ONYXIA25 - no heroic suffix, no separate normal/heroic split for
+        -- either) - map them explicitly so TreeBrowser/peers categorize
+        -- these listings correctly instead of silently falling into Other.
+        if raidType == "EoE" then
+            return "EOE" .. size
+        end
+        if raidType == "Ony" then
+            return "ONYXIA" .. size
+        end
         local heroic = popup.heroicCheck:GetChecked() and "H" or "N"
         if raidType == "TOC" and heroic == "H" then
             return "TOGC" .. size
@@ -7636,7 +7685,7 @@ function GUI.CreateEnrollPopup()
         -- HC-prefixed dungeon ids are internal shorthand - show the friendly
         -- name from Parsers.RaidHierarchy instead of the raw id.
         local label = raidType
-        if raidType:sub(1, 2) == "HC" and AIP.Parsers and AIP.Parsers.GetRaidName then
+        if AIP.Parsers and AIP.Parsers.IsHeroicDungeonId(raidType) and AIP.Parsers.GetRaidName then
             label = AIP.Parsers.GetRaidName(raidType)
         end
         if isLocked then
@@ -7715,7 +7764,7 @@ function GUI.CreateEnrollPopup()
                         -- HC-prefixed dungeon ids are internal shorthand (see
                         -- GetRaidKey below) - show the friendly name instead.
                         local label = rt
-                        if rt:sub(1, 2) == "HC" and AIP.Parsers and AIP.Parsers.GetRaidName then
+                        if AIP.Parsers and AIP.Parsers.IsHeroicDungeonId(rt) and AIP.Parsers.GetRaidName then
                             label = AIP.Parsers.GetRaidName(rt)
                         end
                         if isLocked then

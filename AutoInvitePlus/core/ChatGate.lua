@@ -55,7 +55,6 @@ CG.State = {
     blackoutUntil = 0,     -- no public sends before this GetTime()
     sent = 0,              -- lifetime counters for /aip gate
     dropped = 0,
-    deferredNote = 0,      -- last time we told the user we're pacing
 }
 
 -- Compatibility surface: older UI code (broadcast status footer) reads these.
@@ -118,12 +117,16 @@ function CG.ResolveChannel(channelName)
     return nil
 end
 
--- Cooldown key for a record: channel name for CHANNEL, chat type otherwise
-local function channelKey(record)
-    if record.chatType == "CHANNEL" then
-        return "ch:" .. (record.channelName or ""):lower()
+-- Cooldown key: channel name for CHANNEL, chat type otherwise. Takes
+-- primitive (chatType, channelName) args rather than a record table so the
+-- two call sites that only have those two values loose (IsEligible,
+-- NextEligibleIn) can share this instead of re-inlining the same "ch:" ..
+-- lower() expression.
+local function channelKey(chatType, channelName)
+    if chatType == "CHANNEL" then
+        return "ch:" .. (channelName or ""):lower()
     end
-    return record.chatType
+    return chatType
 end
 
 -- ============================================================================
@@ -160,8 +163,7 @@ function CG.IsEligible(chatType, channelName)
         if now < CG.State.blackoutUntil then return false end
         if (now - CG.State.lastPublic) < publicGap then return false end
         if recentPublicCount(now) >= perMinute then return false end
-        local key = chatType == "CHANNEL" and ("ch:" .. (channelName or ""):lower()) or chatType
-        local last = CG.State.perChannel[key]
+        local last = CG.State.perChannel[channelKey(chatType, channelName)]
         if last and (now - last) < channelGap then return false end
         if chatType == "CHANNEL" and not CG.ResolveChannel(channelName) then return false end
         return true
@@ -178,8 +180,7 @@ function CG.NextEligibleIn(chatType, channelName)
     if isPublicType(chatType) then
         if now < CG.State.blackoutUntil then waits[#waits + 1] = CG.State.blackoutUntil - now end
         waits[#waits + 1] = publicGap - (now - CG.State.lastPublic)
-        local key = chatType == "CHANNEL" and ("ch:" .. (channelName or ""):lower()) or chatType
-        local last = CG.State.perChannel[key]
+        local last = CG.State.perChannel[channelKey(chatType, channelName)]
         if last then waits[#waits + 1] = channelGap - (now - last) end
     end
     local maxWait = 0
@@ -207,7 +208,7 @@ local function doSend(record)
 
     CG.State.lastAnySend = now
     CG.State.sent = CG.State.sent + 1
-    CG.State.perChannel[channelKey(record)] = now
+    CG.State.perChannel[channelKey(record.chatType, record.channelName)] = now
     if isPublicType(record.chatType) then
         CG.State.lastPublic = now
         local recent = CG.State.recent
@@ -396,7 +397,6 @@ end
 do
     local watcher = CreateFrame("Frame", "AIPChatGateWatcher", UIParent)
     watcher:RegisterEvent("CHAT_MSG_SYSTEM")
-    watcher.decayElapsed = 0
     watcher:SetScript("OnEvent", function(self, event, message)
         if not message then return end
         -- Only meaningful within 10s of one of OUR gated sends; otherwise it's
@@ -410,13 +410,17 @@ do
             end
         end
     end)
-    watcher:SetScript("OnUpdate", function(self, elapsed)
-        self.decayElapsed = self.decayElapsed + elapsed
-        if self.decayElapsed >= 30 then
-            self.decayElapsed = 0
+
+    -- 30s decay-check cadence, self-rescheduled via the shared one-shot
+    -- helper instead of a permanent per-frame OnUpdate (see CLAUDE.md: use
+    -- AIP.Utils.DelayedCall for delayed/periodic work, not raw OnUpdate).
+    local function scheduleDecayTick()
+        AIP.Utils.DelayedCall(30, function()
             decayTick()
-        end
-    end)
+            scheduleDecayTick()
+        end)
+    end
+    scheduleDecayTick()
 end
 
 -- ============================================================================
