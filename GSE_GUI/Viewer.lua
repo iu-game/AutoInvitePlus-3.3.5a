@@ -9,6 +9,8 @@ local libS = LibStub:GetLibrary("AceSerializer-3.0")
 local libC = LibStub:GetLibrary("LibCompress")
 local libCE = libC:GetAddonEncodeTable()
 local editkey = ""
+local lastRowClickKey, lastRowClickTime = nil, 0
+local DOUBLE_CLICK_SECONDS = 0.5
 
 
 local viewframe = AceGUI:Create("Frame")
@@ -160,12 +162,14 @@ function viewframe:clearpanels(widget, selected)
         viewframe.SequenceName = elements[2]
         viewframe.EditButton:SetDisabled(false)
         viewframe.ExportButton:SetDisabled(false)
+        viewframe:SetStatusText(string.format(L["Selected: %s. Press Edit, or double-click it, to open."], elements[2] or ""))
         editkey = k
       else
         viewframe.ClassID = 0
         viewframe.SequenceName = ""
         viewframe.EditButton:SetDisabled(true)
         viewframe.ExportButton:SetDisabled(true)
+        viewframe:SetStatusText(L["Select a macro, then press Edit (or double-click it)."])
         editkey = ""
       end
 
@@ -200,22 +204,47 @@ function GSE.GUICreateSequencePanels(frame, container, key)
   -- listing only ever showed ~1 entry at a time.
   local selpanel = AceGUI:Create("SelectablePanel")
   selpanel:SetKey(key)
+  selpanel:SetClicked(false) -- a pooled panel can come back with a stale highlight
   selpanel:SetFullWidth(true)
   selpanel:SetLayout("Flow")
   viewframe.panels[key] = selpanel
-  selpanel:SetCallback("OnClick", function(widget, _, selected, button)
+  -- Left click selects, double-click or right-click opens the editor.
+  local function onRowClick(widget, button)
     viewframe:clearpanels(widget, true)
-    if button == "RightButton" then
-      GSE.GUILoadEditor(widget:GetKey(), viewframe)
+    local now = GetTime()
+    local key = widget:GetKey()
+    if button == "RightButton" or (lastRowClickKey == key and (now - lastRowClickTime) <= DOUBLE_CLICK_SECONDS) then
+      lastRowClickKey = nil
+      GSE.GUILoadEditor(key, viewframe)
+    else
+      lastRowClickKey = key
+      lastRowClickTime = now
     end
+  end
+  selpanel:SetCallback("OnClick", function(widget, _, selected, button)
+    onRowClick(widget, button)
   end)
 
   -- Icon: fixed width, with an explicit drag cue so "drag this onto your
   -- action bar" doesn't require a guide to discover.
   local viewiconpicker = AceGUI:Create("Icon")
   viewiconpicker.frame:RegisterForDrag("LeftButton")
+  -- Icon is a plain Button that only reports left clicks: register right-click too, otherwise a
+  -- right-click over the icon is swallowed and never opens the editor.
+  viewiconpicker.frame:RegisterForClicks("LeftButtonUp", "RightButtonUp")
   viewiconpicker.frame:SetScript("OnDragStart", function()
     PickupMacro(sequencename)
+  end)
+  -- Icon frames are pooled (and shared with Editor's icon grid): drop the drag hook on release so a
+  -- reused Icon can't pick up this row's macro.
+  -- The icon covers part of the row and swallowed clicks, so clicking it did nothing: treat it as a row click.
+  viewiconpicker:SetCallback("OnClick", function(_, _, button)
+    onRowClick(selpanel, button)
+  end)
+  viewiconpicker:SetCallback("OnRelease", function(w)
+    w.frame:SetScript("OnDragStart", nil)
+    w.frame:RegisterForDrag()
+    w.frame:RegisterForClicks("LeftButtonUp")
   end)
   selpanel.Icon = viewiconpicker
   viewiconpicker:SetImage(GSE.GetMacroIcon(classid, sequencename))
@@ -266,6 +295,9 @@ function GSE.GUICreateSequencePanels(frame, container, key)
   talentslabel:SetWidth(260)
   talentslabel:SetFontObject(font)
   talentslabel.label:SetWordWrap(false)
+  -- Label widgets are pooled and OnAcquire doesn't restore wrapping: undo it on release so the
+  -- next Label to reuse this frame (help text, Editor/Options labels) wraps normally again.
+  talentslabel:SetCallback("OnRelease", function(w) w.label:SetWordWrap(true) end)
   row2:AddChild(talentslabel)
 
   -- Only show a Help URL field when this sequence actually has one - a
@@ -359,7 +391,7 @@ function GSE.GUIViewerToolbar(container)
 
   local tranbutton = AceGUI:Create("Button")
   tranbutton:SetText(L["Send"])
-  tranbutton:SetRelativeWidth(0.25)
+  tranbutton:SetRelativeWidth(0.20)
   tranbutton:SetCallback("OnClick", function() GSE.GUIShowTransmissionGui(viewframe.ClassID .. "," .. viewframe.SequenceName) end)
   attachTooltip(tranbutton, L["Send"], L["Sends the selected macro to another player directly over the addon channel."])
   buttonGroup:AddChild(tranbutton)
@@ -367,7 +399,8 @@ function GSE.GUIViewerToolbar(container)
   local disableSeqbutton = AceGUI:Create("Button")
   disableSeqbutton:SetDisabled(true)
   disableSeqbutton:SetText(L["Create Macro Button"])
-  disableSeqbutton:SetRelativeWidth(0.25)
+  -- wider than its neighbours: "Remove Macro Button" is the longest label in the toolbar and was cut off at 25%
+  disableSeqbutton:SetRelativeWidth(0.31)
   attachTooltip(disableSeqbutton, L["Create Macro Button"], L["Creates a real WoW macro for the selected macro, so it can be dragged onto an action bar. Select a macro from the list above first."])
 
 
@@ -375,15 +408,19 @@ function GSE.GUIViewerToolbar(container)
   viewframe.MacroIconButton = disableSeqbutton
   local eOptionsbutton = AceGUI:Create("Button")
   eOptionsbutton:SetText(L["Options"])
-  eOptionsbutton:SetRelativeWidth(0.25)
+  eOptionsbutton:SetRelativeWidth(0.20)
   eOptionsbutton:SetCallback("OnClick", function() GSE.OpenOptionsPanel() end)
   attachTooltip(eOptionsbutton, L["Options"], L["Opens the Gnome Sequencer options panel (colours, defaults, and other addon-wide settings)."])
   buttonGroup:AddChild(eOptionsbutton)
 
   local recordwindowbutton = AceGUI:Create("Button")
   recordwindowbutton:SetText(L["Record Macro"])
-  recordwindowbutton:SetRelativeWidth(0.25)
-  recordwindowbutton:SetCallback("OnClick", function() GSE.GUIViewFrame:Hide(); GSE.GUIRecordFrame:Show() end)
+  recordwindowbutton:SetRelativeWidth(0.28)
+  recordwindowbutton:SetCallback("OnClick", function()
+    GSE.GUIViewFrame:Hide()
+    GSE.GUIRecordFrame.reopenViewer = true -- the Recorder brings this window back when it is closed
+    GSE.GUIRecordFrame:Show()
+  end)
   attachTooltip(recordwindowbutton, L["Record Macro"], L["Opens the macro recorder, which captures your spell casts in real time to build a sequence automatically."])
   buttonGroup:AddChild(recordwindowbutton)
 
@@ -395,7 +432,7 @@ end
 
 
 function GSE.GUIViewerLayout(mcontainer)
-  mcontainer:SetStatusText(L["Gnome Sequencer: Sequence Viewer"])
+  mcontainer:SetStatusText(L["Select a macro, then press Edit (or double-click it)."])
   mcontainer:SetCallback("OnClose", function(widget) viewframe:Hide() end)
   mcontainer:SetLayout("List")
 
@@ -432,6 +469,12 @@ function GSE.GUIShowViewer()
   -- The widget this referenced belongs to the content just released above;
   -- GUIViewerLayout repopulates it fresh below.
   wipe(viewframe.heightReflow)
+  -- Same for the row panels and the selection: stale keys point at pooled panels that now belong to
+  -- other rows (clearpanels would un-highlight the wrong one), and the rebuilt buttons start disabled.
+  wipe(viewframe.panels)
+  viewframe.ClassID = 0
+  viewframe.SequenceName = ""
+  editkey = ""
   GSE.GUIViewerLayout(viewframe)
   local cclassid = -1
   for k,v in GSE.pairsByKeys(names) do
@@ -455,6 +498,15 @@ function GSE.GUIShowViewer()
       viewframe.ScrollContainer:AddChild(sectionspacer2)
     end
     GSE.GUICreateSequencePanels(viewframe,viewframe.ScrollContainer, k)
+  end
+  if next(names) == nil then
+    -- Empty library: a blank list gives a new player no clue what to do next.
+    local emptyhint = AceGUI:Create("Label")
+    emptyhint:SetFullWidth(true)
+    emptyhint:SetText(L["No macros yet. Press New to write one, Import to paste one, or Record Macro to capture your rotation. Type /gse loadsamples for ready-made examples."])
+    emptyhint:SetColor(GSE.GUIGetColour(GSEOptions.EmphasisColour))
+    viewframe.ScrollContainer:AddChild(emptyhint)
+    viewframe:SetStatusText(L["No macros yet."])
   end
   GSE.Skin.WalkAceContainer(viewframe)
   viewframe:Show()
@@ -483,6 +535,11 @@ function GSE.GUIConfigureMacroButton(button)
       -- macro via EditMacro) made the match silently fail, leaving the
       -- macro in place while GSE still printed a false success message.
       local sequenceName = GSE.GUIViewFrame.SequenceName
+      if InCombatLockdown() then
+        -- DeleteMacro is a protected API: it fails with "Interface action failed because of an AddOn" in combat
+        GSE.Print(L["You cannot do that while in combat."], GNOME)
+        return
+      end
       if GetMacroInfo(sequenceName) == sequenceName then
         DeleteMacro(sequenceName)
         GSE.Print(L[" Removed Macro Button for "] .. sequenceName, GNOME)
@@ -494,6 +551,11 @@ function GSE.GUIConfigureMacroButton(button)
     button:SetText(L["Create Macro Button"])
     attachTooltip(button, L["Create Macro Button"], L["Creates a real WoW macro for this sequence, so it can be dragged onto an action bar."])
     button:SetCallback("OnClick", function()
+      if InCombatLockdown() then
+        -- CreateMacro/EditMacro are protected APIs and fail in combat
+        GSE.Print(L["You cannot do that while in combat."], GNOME)
+        return
+      end
       GSE.OOCCheckMacroCreated(GSE.GUIViewFrame.SequenceName, true)
       GSE.GUIConfigureMacroButton(button)
       GSE.GUIViewFrame.panels[viewframe.ClassID .."," .. GSE.GUIViewFrame.SequenceName].Icon:SetImage(GSE.GetMacroIcon(tonumber(viewframe.ClassID), GSE.GUIViewFrame.SequenceName))
@@ -503,16 +565,17 @@ function GSE.GUIConfigureMacroButton(button)
     button:SetDisabled(true)
   else
     button:SetDisabled(false)
+    -- Buttons are only built for the player's own class and Global sequences, so a macro created
+    -- for another class's sequence would click a button that doesn't exist on this character.
+    local seqClass = tonumber(GSE.GUIViewFrame.ClassID)
+    if seqClass and seqClass ~= 0 and seqClass ~= GSE.GetCurrentClassID() and not GSE.OOCCheckMacroCreated(GSE.GUIViewFrame.SequenceName) then
+      button:SetDisabled(true)
+      attachTooltip(button, L["Create Macro Button"], L["This macro belongs to another class, so it can't run on this character. Log in on that class to create its macro button."])
+      -- a disabled AceGUI button never shows its tooltip, so say why in the status bar as well
+      GSE.GUIViewFrame:SetStatusText(L["Another class's macro: log in on that class to create its button."])
+    end
   end
-  -- ClassID == 0 means nothing is actually selected (clearpanels' deselected
-  -- branch sets it to 0), not a real "Global" category - keep disabling
-  -- there. The removed `or ClassID == GSE.GetCurrentClassID()` clause was
-  -- backwards: it disabled this button specifically when viewing a sequence
-  -- for the player's OWN class - the one case a macro button is obviously
-  -- wanted (to drag onto your own action bar) - making the button look
-  -- broken for the single most common browsing case.
-  if GSE.GUIViewFrame.ClassID == 0 then
-    button:SetDisabled(true)
-  end
-
+  -- ClassID 0 is the real "Global" library (shared sequences), not a "nothing selected"
+  -- marker: nothing-selected is already handled by the empty SequenceName check above, and
+  -- OOCCheckMacroCreated resolves class 0 fine, so Global sequences must be allowed a macro button.
 end

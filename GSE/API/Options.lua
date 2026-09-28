@@ -82,40 +82,13 @@ function GSE.GetOptionsTable()
             order = 301
           },
           overflowPersonalMacros = {
-            name = L["Use Global Account Macros"],
+            name = L["Overflow to Account Macros When Character Macros Are Full"],
             desc = L["When creating a macro, if there is not a personal character macro space, create an account wide macro."],
             type = "toggle",
             width = "full",
             set = function(info,val) GSEOptions.overflowPersonalMacros = val end,
             get = function(info) return GSEOptions.overflowPersonalMacros end,
             order = 302
-          },
-          autocreateclassstub = {
-            name = L["Auto Create Class Macro Stubs"],
-            desc = L["When loading or creating a sequence, if it is a macro of the same class automatically create the Macro Stub"],
-            type = "toggle",
-            width = "full",
-            set = function(info,val) GSEOptions.autoCreateMacroStubsClass = val end,
-            get = function(info) return GSEOptions.autoCreateMacroStubsClass end,
-            order = 303
-          },
-          autocreateglobalstub = {
-            name = L["Auto Create Global Macro Stubs"],
-            desc = L["When loading or creating a sequence, if it is a global or the macro has an unknown specID automatically create the Macro Stub in Account Macros"],
-            type = "toggle",
-            width = "full",
-            set = function(info,val) GSEOptions.autoCreateMacroStubsGlobal = val end,
-            get = function(info) return GSEOptions.autoCreateMacroStubsGlobal end,
-            order = 304
-          },
-          useQuestionMark = {
-            name = L["Set Default Icon QuestionMark"],
-            desc = L["By setting the default Icon for all macros to be the QuestionMark, the macro button on your toolbar will change every key hit."],
-            type = "toggle",
-            width = "full",
-            set = function(info,val) GSEOptions.setDefaultIconQuestionMark = val end,
-            get = function(info) return GSEOptions.setDefaultIconQuestionMark end,
-            order = 310
           },
           filtertitle1 = {
             type = "header",
@@ -174,7 +147,7 @@ function GSE.GetOptionsTable()
           },
           hideSoundErrors={
             name = L["Prevent Sound Errors"],
-            desc = L["This option hide error sounds like \"That is out of range\" from being played while you are hitting a GS Macro.  This is the equivalent of /console Sound_EnableErrorSpeech lines within a Sequence.  Turning this on will trigger a Scam warning about running custom scripts."],
+            desc = L["This option stops the error sounds (like \"That is out of range\") from being played while you hit a GSE macro. Other game sounds are not affected."],
             type = "toggle",
             width = "full",
             set = function(info,val) GSEOptions.hideSoundErrors = val GSE.ReloadSequences() end,
@@ -183,16 +156,21 @@ function GSE.GetOptionsTable()
           },
           hideUIErrors={
             name = L["Prevent UI Errors"],
-            desc = L["This option hides text error popups and dialogs and stack traces ingame.  This is the equivalent of /script UIErrorsFrame:Hide() in a KeyRelease.  Turning this on will trigger a Scam warning about running custom scripts."],
+            desc = L["This option stops the red error text (\"Out of range\", \"Not enough mana\") from flashing on screen while you hit a GSE macro. It hides the on-screen error display until you turn this option off."],
             type = "toggle",
             width = "full",
-            set = function(info,val) GSEOptions.hideUIErrors = val GSE.ReloadSequences() end,
+            set = function(info,val)
+              GSEOptions.hideUIErrors = val
+              -- the macro only ever calls Hide(): give the player their error display back when it is switched off
+              if not val and UIErrorsFrame then UIErrorsFrame:Show() end
+              GSE.ReloadSequences()
+            end,
             get = function(info) return GSEOptions.hideUIErrors end,
             order = 530
           },
           clearUIErrors={
             name = L["Clear Errors"],
-            desc = L["This option clears errors and stack traces ingame.  This is the equivalent of /run UIErrorsFrame:Clear() in a KeyRelease.  Turning this on will trigger a Scam warning about running custom scripts."],
+            desc = L["This option clears the on-screen error text each time you release a GSE macro key."],
             type = "toggle",
             width = "full",
             set = function(info,val) GSEOptions.clearUIErrors = val GSE.ReloadSequences() end,
@@ -294,7 +272,7 @@ function GSE.GetOptionsTable()
             type = "toggle",
             width = "full",
             get = function() return   GSEOptions.MacroResetModifiers["LeftButton"] end,
-            set = function(key, value)   GSEOptions.MacroResetModifiers["LeftButton"] = value end,
+            set = function(key, value)   GSEOptions.MacroResetModifiers["LeftButton"] = value GSE.ReloadSequences() end,
             order = 601
           },
           resetRightButton = {
@@ -302,7 +280,7 @@ function GSE.GetOptionsTable()
             type = "toggle",
             width = "full",
             get = function() return   GSEOptions.MacroResetModifiers["RightButton"] end,
-            set = function(key, value)   GSEOptions.MacroResetModifiers["RightButton"] = value end,
+            set = function(key, value)   GSEOptions.MacroResetModifiers["RightButton"] = value GSE.ReloadSequences() end,
             order = 602
           },
           resetMiddleButton = {
@@ -310,7 +288,7 @@ function GSE.GetOptionsTable()
             type = "toggle",
             width = "full",
             get = function() return   GSEOptions.MacroResetModifiers["MiddleButton"] end,
-            set = function(key, value)   GSEOptions.MacroResetModifiers["MiddleButton"] = value end,
+            set = function(key, value)   GSEOptions.MacroResetModifiers["MiddleButton"] = value GSE.ReloadSequences() end,
             order = 603
           },
           resetButton4 = {
@@ -318,7 +296,7 @@ function GSE.GetOptionsTable()
             type = "toggle",
             width = "full",
             get = function() return   GSEOptions.MacroResetModifiers["Button4"] end,
-            set = function(key, value)   GSEOptions.MacroResetModifiers["Button4"] = value end,
+            set = function(key, value)   GSEOptions.MacroResetModifiers["Button4"] = value GSE.ReloadSequences() end,
             order = 604
           },
           resetButton5 = {
@@ -326,7 +304,7 @@ function GSE.GetOptionsTable()
             type = "toggle",
             width = "full",
             get = function() return   GSEOptions.MacroResetModifiers["Button5"] end,
-            set = function(key, value)   GSEOptions.MacroResetModifiers["Button5"] = value end,
+            set = function(key, value)   GSEOptions.MacroResetModifiers["Button5"] = value GSE.ReloadSequences() end,
             order = 605
           },
           resetalttitle = {
@@ -339,7 +317,7 @@ function GSE.GetOptionsTable()
             type = "toggle",
             width = "full",
             get = function() return   GSEOptions.MacroResetModifiers["Alt"] end,
-            set = function(key, value)   GSEOptions.MacroResetModifiers["Alt"] = value end,
+            set = function(key, value)   GSEOptions.MacroResetModifiers["Alt"] = value GSE.ReloadSequences() end,
             order = 611
           },
           resetLeftAltKey = {
@@ -347,7 +325,7 @@ function GSE.GetOptionsTable()
             type = "toggle",
             width = "full",
             get = function() return   GSEOptions.MacroResetModifiers["LeftAlt"] end,
-            set = function(key, value)   GSEOptions.MacroResetModifiers["LeftAlt"] = value end,
+            set = function(key, value)   GSEOptions.MacroResetModifiers["LeftAlt"] = value GSE.ReloadSequences() end,
             order = 612
           },
           resetRightAltKey = {
@@ -355,7 +333,7 @@ function GSE.GetOptionsTable()
             type = "toggle",
             width = "full",
             get = function() return   GSEOptions.MacroResetModifiers["RightAlt"] end,
-            set = function(key, value)   GSEOptions.MacroResetModifiers["RightAlt"] = value end,
+            set = function(key, value)   GSEOptions.MacroResetModifiers["RightAlt"] = value GSE.ReloadSequences() end,
             order = 613
           },
           resetcontroltitle = {
@@ -368,7 +346,7 @@ function GSE.GetOptionsTable()
             type = "toggle",
             width = "full",
             get = function() return   GSEOptions.MacroResetModifiers["Control"] end,
-            set = function(key, value)   GSEOptions.MacroResetModifiers["Control"] = value end,
+            set = function(key, value)   GSEOptions.MacroResetModifiers["Control"] = value GSE.ReloadSequences() end,
             order = 621
           },
           resetLeftControlKey = {
@@ -376,7 +354,7 @@ function GSE.GetOptionsTable()
             type = "toggle",
             width = "full",
             get = function() return   GSEOptions.MacroResetModifiers["LeftControl"] end,
-            set = function(key, value)   GSEOptions.MacroResetModifiers["LeftControl"] = value end,
+            set = function(key, value)   GSEOptions.MacroResetModifiers["LeftControl"] = value GSE.ReloadSequences() end,
             order = 622
           },
           resetRightControlKey = {
@@ -384,7 +362,7 @@ function GSE.GetOptionsTable()
             type = "toggle",
             width = "full",
             get = function() return   GSEOptions.MacroResetModifiers["RightControl"] end,
-            set = function(key, value)   GSEOptions.MacroResetModifiers["RightControl"] = value end,
+            set = function(key, value)   GSEOptions.MacroResetModifiers["RightControl"] = value GSE.ReloadSequences() end,
             order = 623
           },
           resetshifttitle = {
@@ -397,7 +375,7 @@ function GSE.GetOptionsTable()
             type = "toggle",
             width = "full",
             get = function() return   GSEOptions.MacroResetModifiers["Shift"] end,
-            set = function(key, value)   GSEOptions.MacroResetModifiers["Shift"] = value end,
+            set = function(key, value)   GSEOptions.MacroResetModifiers["Shift"] = value GSE.ReloadSequences() end,
             order = 631
           },
           resetLeftShiftKey = {
@@ -405,7 +383,7 @@ function GSE.GetOptionsTable()
             type = "toggle",
             width = "full",
             get = function() return   GSEOptions.MacroResetModifiers["LeftShift"] end,
-            set = function(key, value)   GSEOptions.MacroResetModifiers["LeftShift"] = value end,
+            set = function(key, value)   GSEOptions.MacroResetModifiers["LeftShift"] = value GSE.ReloadSequences() end,
             order = 632
           },
           resetRightShiftKey = {
@@ -413,7 +391,7 @@ function GSE.GetOptionsTable()
             type = "toggle",
             width = "full",
             get = function() return   GSEOptions.MacroResetModifiers["RightShift"] end,
-            set = function(key, value)   GSEOptions.MacroResetModifiers["RightShift"] = value end,
+            set = function(key, value)   GSEOptions.MacroResetModifiers["RightShift"] = value GSE.ReloadSequences() end,
             order = 633
           },
 
@@ -427,7 +405,7 @@ function GSE.GetOptionsTable()
         args = {
           ctitle1 = {
             type = "header",
-            name = L["General Options"],
+            name = L["Addon Message Colours"],
             order = 100,
           },
           titleColour = {
@@ -673,7 +651,7 @@ function GSE.GetOptionsTable()
           },
           debug={
             name = L["Enable Mod Debug Mode"],
-            desc = L["This option dumps extra trace information to your chat window to help troubleshoot problems with the mod"],
+            desc = L["This option prints extra trace information to help troubleshoot problems. Also tick \"Display debug messages in Chat Window\" below to see it in your chat window."],
             type = "toggle",
             width = "full",
             set = function(info,val) GSEOptions.debug = val GSE.PrintDebugMessage("Debug Mode Enabled", GNOME) end,
@@ -728,7 +706,7 @@ function GSE.GetOptionsTable()
     ord = ord + 1
     OptionsTable.args.pluginsTab.args[v.Name] = {
       name = v.Name,
-      desc = string.format(L["Addin Version %s contained versions for the following macros:"], v.Name) .. string.format("\n%s", GSE.FormatSequenceNames(v.SequenceNames)),
+      desc = string.format(L["Addin Version %s contained versions for the following macros:"], tostring(v.Version)) .. string.format("\n%s", GSE.FormatSequenceNames(v.SequenceNames)),
       type = "execute",
       -- Without an explicit width these default-width (170px) buttons can
       -- end up packed onto the same row/slot as this tab's own title, since

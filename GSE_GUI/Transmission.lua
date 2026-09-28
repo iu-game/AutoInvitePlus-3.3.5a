@@ -62,28 +62,42 @@ transmissionFrame:SetLayout("List")
 -- Every child here was 250px, sized for the window's own old 290px width
 -- rather than for what any of them actually need to show (a macro name, a
 -- player-realm name, a button label) - shrunk to fit the content instead.
-transmissionFrame:SetWidth(230)
-transmissionFrame:SetHeight(190)
+transmissionFrame:SetWidth(270)
+transmissionFrame:SetHeight(220)
 transmissionFrame:Hide()
 
 
 local SequenceListbox = AceGUI:Create("Dropdown")
 --SequenceListbox:SetLabel(L["Load Sequence"])
-SequenceListbox:SetWidth(190)
+SequenceListbox:SetLabel(L["Macro to send"])
+SequenceListbox:SetWidth(230)
 SequenceListbox:SetCallback("OnValueChanged", function (obj,event,key) transSequencevalue = key end)
 transmissionFrame.SequenceListbox = SequenceListbox
 transmissionFrame:AddChild(SequenceListbox)
 
 local playereditbox = AceGUI:Create("EditBoxExampleAll")
-playereditbox:SetLabel(L["Send To"])
-playereditbox:SetWidth(190)
+playereditbox:SetLabel(L["Player name"])
+playereditbox:SetWidth(230)
 playereditbox:DisableButton(true)
 transmissionFrame:AddChild(playereditbox)
 
 local sendbutton = AceGUI:Create("Button")
 sendbutton:SetText(L["Send"])
-sendbutton:SetWidth(190)
-sendbutton:SetCallback("OnClick", function() GSE.TransmitSequence(transSequencevalue, "WHISPER", playereditbox:GetText()) end)
+sendbutton:SetWidth(230)
+sendbutton:SetCallback("OnClick", function()
+  -- The key is "classid,sequencename": an empty/stale selection made TransmitSequence concatenate a nil
+  -- name (or export a nil sequence) and throw, and a blank target was whispered as "".
+  local elements = GSE.split(transSequencevalue or "", ",")
+  if not elements[1] or not elements[2] or GSE.isEmpty(GSELibrary[tonumber(elements[1])]) or GSE.isEmpty(GSELibrary[tonumber(elements[1])][elements[2]]) then
+    GSE.GUITransmissionFrame:SetStatusText(L["Select a sequence to send first."])
+    return
+  end
+  if GSE.isEmpty(GSE.TrimWhiteSpace(playereditbox:GetText())) then
+    GSE.GUITransmissionFrame:SetStatusText(L["Enter a player name to send to."])
+    return
+  end
+  GSE.TransmitSequence(transSequencevalue, "WHISPER", GSE.TrimWhiteSpace(playereditbox:GetText()))
+end)
 transmissionFrame:AddChild(sendbutton)
 GSE.Skin.WalkAceContainer(transmissionFrame)
 

@@ -358,8 +358,19 @@ Statics.StringFormatEscapes = {
     ["|r"] = "", -- color end
     ["|H.-|h(.-)|h"] = "%1", -- links
     ["|T.-|t"] = "", -- textures
-    ["{.-}"] = "", -- raid target icons
 }
+-- Raid target icon markup only ({rt1}-{rt8} and the named icons), matched case-insensitively. Anything
+-- broader also stripped Lua table constructors such as {a} out of /run lines, and this result is
+-- written back to the saved library.
+do
+  local function anyCase(word)
+    return (string.gsub(word, "%a", function(c) return "[" .. string.lower(c) .. string.upper(c) .. "]" end))
+  end
+  Statics.StringFormatEscapes["{" .. anyCase("rt") .. "%d}"] = ""
+  for _, icon in ipairs({ "star", "circle", "diamond", "triangle", "moon", "square", "cross", "skull", "x" }) do
+    Statics.StringFormatEscapes["{" .. anyCase(icon) .. "}"] = ""
+  end
+end
 
 Statics.MacroResetSkeleton = [[
 if %s then

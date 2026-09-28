@@ -42,7 +42,12 @@ end
 
 
 
-function GSE:UNIT_FACTION()
+function GSE:UNIT_FACTION(event, unit)
+  -- UNIT_FACTION fires for every unit (targets, mouseover, party members, mobs); only the
+  -- player's own flag matters here, and each firing re-queues every sequence.
+  if unit and unit ~= "player" then
+    return
+  end
   --local pvpType, ffa, _ = GetZonePVPInfo()
   if UnitIsPVP("player") then
     GSE.PVPFlag = true
@@ -53,7 +58,11 @@ function GSE:UNIT_FACTION()
   GSE.ReloadSequences()
 end
 
+-- when PARTY_MEMBERS_CHANGED last ran (declared before both handlers that use it)
+local lastRosterUpdate = 0
+
 function GSE:PARTY_MEMBERS_CHANGED()
+  lastRosterUpdate = GetTime()
   if (InCombatLockdown()~=1) then
     -- Handle what GROUP_ROSTER_UPDATE did (doesn't exist in 3.3.5a)
     -- Serialisation stuff
@@ -110,8 +119,13 @@ local inInstance, instancetype = IsInInstance()
     GSE.inDungeon = false
   end
   
-  -- In 3.3.5a: 2=Heroic 5-man/25-man normal, 3=10-man Heroic, 4=25-man Heroic
-  if (difficulty == 2 or difficulty == 3 or difficulty == 4) then
+  -- In 3.3.5a the same number means different things per instance type:
+  -- 5-man: 1=Normal, 2=Heroic.  Raid: 1=10 Normal, 2=25 Normal, 3=10 Heroic, 4=25 Heroic.
+  -- (Testing difficulty alone flagged 25-man Normal raids and the open world as Heroic.)
+  -- Dynamic raids (ICC, RS...) only encode 10/25 in `difficulty`; heroic is reported via playerDifficulty.
+  if (type1 == "party" and difficulty == 2)
+      or (type1 == "raid" and (difficulty == 3 or difficulty == 4))
+      or (type1 == "raid" and (isDynamicInstance == true or isDynamicInstance == 1) and playerDifficulty == 1) then
     GSE.inHeroic = true
   else
     GSE.inHeroic = false
@@ -136,6 +150,12 @@ function GSE:PLAYER_ENTERING_WORLD()
 end
 
 function GSE:ADDON_LOADED(event, addon)
+  -- This is registered through AceEvent, so it fires for every addon that loads after GSE.
+  -- Only initialise once, when GSE itself has loaded (otherwise every later addon load
+  -- re-queues an update for each sequence and wipes the collected unfound-spell data).
+  if addon ~= GNOME then
+    return
+  end
   if GSE.isEmpty(GSELibrary) then
     GSELibrary = {}
   end
@@ -148,18 +168,28 @@ function GSE:ADDON_LOADED(event, addon)
 
   local counter = 0
 
+  -- Older saves may hold '' placeholder entries (a Replace under a name with spaces used to
+  -- leave one behind); they have no MacroVersions and would abort loading, so drop them.
   for k,v in pairs(GSELibrary[GSE.GetCurrentClassID()]) do
-    counter = counter + 1
-    for i,j in ipairs(v.MacroVersions) do
-      GSELibrary[GSE.GetCurrentClassID()][k].MacroVersions[tonumber(i)] = GSE.UnEscapeSequence(j)
+    if type(v) ~= "table" then
+      GSELibrary[GSE.GetCurrentClassID()][k] = nil
+    elseif type(v.MacroVersions) == "table" then
+      counter = counter + 1
+      for i,j in ipairs(v.MacroVersions) do
+        GSELibrary[GSE.GetCurrentClassID()][k].MacroVersions[tonumber(i)] = GSE.UnEscapeSequence(j)
+      end
     end
   end
   if not GSE.isEmpty(GSELibrary[0]) then
 
     for k,v in pairs(GSELibrary[0]) do
-      counter = counter + 1
-      for i,j in ipairs(v.MacroVersions) do
-        GSELibrary[0][k].MacroVersions[tonumber(i)] = GSE.UnEscapeSequence(j)
+      if type(v) ~= "table" then
+        GSELibrary[0][k] = nil
+      elseif type(v.MacroVersions) == "table" then
+        counter = counter + 1
+        for i,j in ipairs(v.MacroVersions) do
+          GSELibrary[0][k].MacroVersions[tonumber(i)] = GSE.UnEscapeSequence(j)
+        end
       end
     end
   end
@@ -170,6 +200,7 @@ function GSE:ADDON_LOADED(event, addon)
   GSEOptions.UnfoundSpells = {}
   GSEOptions.ErroneousSpellID = {}
   GSEOptions.UnfoundSpellIDs = {}
+
   GSE:ZONE_CHANGED_NEW_AREA()
   GSE:SendMessage(Statics.CoreLoadedMessage)
 
@@ -177,15 +208,11 @@ function GSE:ADDON_LOADED(event, addon)
   local seqnames = {}
   table.insert(seqnames, "Assorted Sample Macros")
   GSE.RegisterAddon("Samples", GSE.VersionString, seqnames)
-  
-  -- Load the documented sample macros if available
-  if GSE.LoadDocumentedSampleMacros then
-    GSE.LoadDocumentedSampleMacros()
-  end
 
   GSE:RegisterMessage(Statics.ReloadMessage, "processReload")
 
   LibStub("AceConfig-3.0"):RegisterOptionsTable("GSE", GSE.GetOptionsTable(), {"gseo"})
+  GSE.OptionsRegistered = true -- from now on GSE.RegisterAddon rebuilds this table when a pack registers
   if addon == GNOME then
     LibStub("AceConfigDialog-3.0"):AddToBlizOptions("GSE", "|cffff0000GSE:|r Gnome Sequencer Enhanced")
     if not GSEOptions.HideLoginMessage then
@@ -280,8 +307,12 @@ end
 -- Its functionality has been moved to PARTY_MEMBERS_CHANGED and RAID_ROSTER_UPDATE
 
 function GSE:RAID_ROSTER_UPDATE()
-  -- Handle raid roster changes
-  GSE:PARTY_MEMBERS_CHANGED()
+  -- Raid roster changes normally fire PARTY_MEMBERS_CHANGED as well; forwarding unconditionally made
+  -- every change run the version check and a full reload twice. Forward, but only when that other
+  -- event has not just handled it.
+  if (GetTime() - lastRosterUpdate) > 1 then
+    GSE:PARTY_MEMBERS_CHANGED()
+  end
 end
 
 
@@ -306,6 +337,7 @@ local function PrintGnomeHelp()
   GSE.Print(L["The command "] .. GSEOptions.CommandColour .. L["/gse cleanorphans|r will loop through your macros and delete any left over GS-E macros that no longer have a sequence to match them."], GNOME)
   GSE.Print(L["The command "] .. GSEOptions.CommandColour .. L["/gse checkmacrosforerrors|r will loop through your macros and check for corrupt macro versions.  This will then show how to correct these issues."], GNOME)
   GSE.Print(L["The command "] .. GSEOptions.CommandColour .. L["/gse loadsamples|r will load documented sample macros for your current class."], GNOME)
+  GSE.Print(L["The command "] .. GSEOptions.CommandColour .. L["/gse options|r opens the Options window (you can also type /gseo)."], GNOME)
 end
 
 GSE:RegisterChatCommand("gsse", "GSSlash")
@@ -317,10 +349,11 @@ GSE:RegisterChatCommand("gse", "GSSlash")
 --- Handle slash commands
 function GSE:GSSlash(input)
   if string.lower(input) == "showspec" then
-    local currentSpec = GSE.GetCurrentSpecID()
     local currentSpecID, specname, specicon = GSE.GetCurrentSpecID()
    -- local _, specname, specdescription, specicon, _, specrole, specclass = GetSpecializationInfoByID(currentSpecID)
-    GSE.Print(L["Your current Specialisation is "] .. currentSpecID .. ':' .. specname .. L["  The Alternative ClassID is "] .. currentclassId, GNOME)
+    -- currentclassId was never defined here (nil concat threw every time), and the spec id is
+    -- nil when the talent tab can't be matched to a known spec.
+    GSE.Print(L["Your current Specialisation is "] .. tostring(currentSpecID or "?") .. ':' .. tostring(specname or "?") .. L["  The Alternative ClassID is "] .. tostring(GSE.GetCurrentClassID()), GNOME)
   elseif string.lower(input) == "help" then
     PrintGnomeHelp()
   elseif string.lower(input) == "cleanorphans" or string.lower(input) == "clean" then
@@ -336,8 +369,27 @@ function GSE:GSSlash(input)
     -- OneOffEvents.lua's UpdateFrom735to801 migration), so the previous
     -- string.lower() here meant the lookup could never have matched even
     -- once the argument shape was fixed.
-    local exportName = string.upper(GSE.TrimWhiteSpace(string.sub(input, 8)))
-    local exportSequence = GSELibrary[GSE.GetCurrentClassID()] and GSELibrary[GSE.GetCurrentClassID()][exportName]
+    -- The UpdateFrom735to801 migration that uppercased names is never run, so names keep the case
+    -- they were saved with (e.g. "Frost_DPS"): match exactly first, then case-insensitively.
+    local exportName = GSE.TrimWhiteSpace(string.sub(input, 8))
+    local exportSequence
+    for _, classid in ipairs({GSE.GetCurrentClassID(), 0}) do
+      local library = GSELibrary[classid]
+      if library then
+        if type(library[exportName]) == "table" then
+          exportSequence = library[exportName]
+        else
+          for name, seq in pairs(library) do
+            if type(seq) == "table" and string.upper(name) == string.upper(exportName) then
+              exportName = name
+              exportSequence = seq
+              break
+            end
+          end
+        end
+      end
+      if exportSequence then break end
+    end
     if exportSequence then
       GSE.Print(GSE.ExportSequence(exportSequence, exportName))
     else
@@ -366,6 +418,12 @@ function GSE:GSSlash(input)
     GSE.ScanMacrosForErrors()
   elseif string.lower(input) == "compressstring" then
     GSE.GUICompressFrame:Show()
+  elseif string.lower(input) == "options" or string.lower(input) == "config" then
+    if GSE.OpenOptionsPanel then
+      GSE.OpenOptionsPanel()
+    else
+      LibStub("AceConfigDialog-3.0"):Open("GSE")
+    end
   elseif string.lower(input) == "loadsamples" then
     if GSE.LoadDocumentedSampleMacros then
       GSE.LoadDocumentedSampleMacros()
@@ -380,8 +438,12 @@ end
 
 function GSE:processReload(action, arg)
   if arg == "Samples" then
-    GSE.LoadSampleMacros(GSE.GetCurrentClassID())
-    GSE.Print(L["The Sample Macros have been reloaded."])
+    -- the same documented WotLK samples as /gse loadsamples (the old compressed set is retail-era, and
+    -- errored for classes without an entry)
+    if GSE.LoadDocumentedSampleMacros then
+      GSE.LoadDocumentedSampleMacros()
+    end
+    GSE.Print(L["Sample macros loaded. Macros you already have with the same name were left alone."])
   end
 end
 
@@ -428,10 +490,13 @@ function GSE:ProcessOOCQueue()
           if GSE.isEmpty(GSELibrary[v.classid]) then
             GSELibrary[v.classid] = {}
           end
-          
-          if GSELibrary[v.classid][v.sequencename]==nil then
-            GSELibrary[v.classid][v.sequencename]=''
-          end
+
+          -- OOCAddSequenceToCollection stores under the underscored name; normalise here too so
+          -- a name containing spaces/commas doesn't leave an '' placeholder entry behind.
+          v.sequencename = string.gsub(string.gsub(v.sequencename, " ", "_"), ",", "_")
+
+          -- (no '' placeholder: OOCAddSequenceToCollection may store under a re-derived class, which
+          -- left the placeholder behind as a junk entry)
           if (GSE.isEmpty(GSELibrary[v.classid][v.sequencename])) then
             GSE.OOCAddSequenceToCollection(v.sequencename, v.sequence, v.classid)
           else
@@ -474,7 +539,17 @@ function GSE.prepareTooltipOOCLine(tooltip, OOCEvent, row, oockey)
     -- stalling every queued entry after this one for the rest of the
     -- session. table.remove shifts subsequent entries down, keeping the
     -- array dense.
-    table.remove(GSE.OOCQueue, oockey)
+    -- Remove by reference, not by the index captured when the tooltip was built: after one removal every
+    -- later row's captured index is stale and would delete a different event (or nothing).
+    for index, queued in ipairs(GSE.OOCQueue) do
+      if queued == OOCEvent then
+        table.remove(GSE.OOCQueue, index)
+        break
+      end
+    end
+    -- gray out the row that was just dropped so it is clear it no longer applies
+    tooltip:SetCell(row, 1, L["Removed"], "LEFT", 1)
+    tooltip:SetCell(row, 3, "", "RIGHT", 1)
   end)
 end
 

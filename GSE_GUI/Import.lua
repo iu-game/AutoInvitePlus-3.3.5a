@@ -13,20 +13,20 @@ importframe:Hide()
 
 
 importframe:SetTitle(L["Gnome Sequencer: Import a Macro String."])
-importframe:SetStatusText(L["Import Macro from Forums"])
+importframe:SetStatusText(L["Paste a macro string above, then press Import."])
 importframe:SetCallback("OnClose", function(widget)  importframe:Hide(); GSE.GUIShowViewer() end)
 importframe:SetLayout("List")
 
 local importsequencebox = AceGUI:Create("MultiLineEditBox")
-importsequencebox:SetLabel(L["Macro Collection to Import."])
+importsequencebox:SetLabel(L["Paste a macro string here (from a forum post, a friend, or another player's Export)."])
 importsequencebox:SetNumLines(20)
 importsequencebox:DisableButton(true)
 importsequencebox:SetFullWidth(true)
 importframe:AddChild(importsequencebox)
 
 local createicondropdown = AceGUI:Create("CheckBox")
-createicondropdown:SetLabel(L["Automatically Create Macro Icon"])
-createicondropdown:SetWidth(250)
+createicondropdown:SetLabel(L["Create a macro button for each imported macro"])
+createicondropdown:SetWidth(330)
 createicondropdown:SetType("checkbox")
 createicondropdown:SetValue(true)
 createicondropdown:SetCallback("OnValueChanged", function (obj,event,key)
@@ -69,6 +69,11 @@ GSE.Skin.WalkAceContainer(importframe)
 function GSE.GUIImportSequence()
   local importstring = importsequencebox:GetText()
   importstring = GSE.TrimWhiteSpace(importstring)
+  if GSE.isEmpty(importstring) then
+    -- nothing pasted: say so instead of showing the generic "import failed" popup
+    importframe:SetStatusText(L["Paste a macro string above first."])
+    return
+  end
   if string.sub(importstring,1,9) == "Sequences" then
     local legacy = false
 

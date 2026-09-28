@@ -66,7 +66,8 @@ function GSE.UnEscapeTable(tab)
     -- print (k .. " " .. v)
     local cleanstring = GSE.UnEscapeString(v)
     if not GSE.isEmpty(cleanstring) then
-      newtab[k] = cleanstring
+      -- insert (not newtab[k]) so skipped blank lines don't leave holes that truncate ipairs consumers
+      table.insert(newtab, cleanstring)
     end
   end
   return newtab
@@ -148,6 +149,7 @@ function GSE.FixQuotes(source)
   source = string.gsub(source, "%‘", "'")
   source = string.gsub(source, "%’", "'")
   source = string.gsub(source, "%”", "\"")
+  source = string.gsub(source, "\226\128\156", "\"") -- opening curly double quote (U+201C)
   return source
 end
 
@@ -157,7 +159,13 @@ function GSE.CleanStrings(source)
     if source == v then
       source = ""
     else
-      source = string.gsub(source, v, "")
+      -- Entries ending in a digit ("/use 1") must not eat the front of a longer number
+      -- ("/use 15" -> "5"), so require the digit run to end there.
+      local pat = v
+      if string.find(v, "%d$") then
+        pat = v .. "%f[%D]"
+      end
+      source = string.gsub(source, pat, "")
     end
   end
   return source
@@ -215,8 +223,8 @@ function GSE.StripControlandExtendedCodes( str )
       s = s .. str:sub(i,i)
     elseif str:byte(i) == 194 and str:byte(i+1) == 160 then -- Fix for IE/Edge
       s = s .. " "
-    elseif str:byte(i) == 160 and str:byte(i-1) == 194 then -- Fix for IE/Edge
-      s = s .. " "
+    elseif str:byte(i) == 160 and str:byte(i-1) == 194 then -- second byte of the NBSP already emitted as one space above
+      -- (emitting a space here too turned every NBSP into two spaces)
     elseif str:byte(i) == 10 then -- leave line breaks unix style
       s = s .. str:sub(i,i)
     elseif str:byte(i) == 13 then -- leave line breaks windows style

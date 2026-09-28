@@ -141,7 +141,9 @@ function GSE.sendMessage(tab, channel, target)
   if tab.Command == "GS-E_TRANSMITSEQUENCE" then
     GSE.PrintDebugMessage(tab.SequenceName, Statics.SourceTransmission)
     GSE.PrintDebugMessage(GSE.isEmpty(tab.Sequence))
-    GSE.PrintDebugMessage(GSE.ExportSequence(tab.Sequence,tab.SequenceName), Statics.SourceTransmission)
+    if tab.Sequence then
+      GSE.PrintDebugMessage(GSE.ExportSequence(tab.Sequence,tab.SequenceName), Statics.SourceTransmission)
+    end
   end
   local transmission = GSE.EncodeMessage(tab)
   GSE.PrintDebugMessage("Transmission: \n" .. transmission, Statics.SourceTransmission)
@@ -166,11 +168,15 @@ function GSE.sendMessage(tab, channel, target)
 end
 
 function GSE.performVersionCheck(version)
-  if(tonumber(version) ~= nil and tonumber(version) > tonumber(GSE.VersionString)) then
+  -- VersionString is "2205-wotlk" (not a plain number), so compare only the leading digits of both sides;
+  -- tonumber() on it returned nil and made the comparison below throw for any purely numeric peer version.
+  local theirs = tonumber(string.match(tostring(version), "^%d+"))
+  local mine = tonumber(string.match(tostring(GSE.VersionString), "^%d+"))
+  if(theirs ~= nil and mine ~= nil and theirs > mine) then
     if not GSE.GSold then
-      GSE.Print(L["GSE is out of date. You can download the newest version from https://mods.curse.com/addons/wow/gnomesequencer-enhanced."], Statics.SourceTransmission)
+      GSE.Print(L["A newer version of GSE is available: https://github.com/iu-game/AutoInvitePlus-3.3.5a/releases"], Statics.SourceTransmission)
       GSE.GSold = true
-      if((tonumber(version) - tonumber(GSE.VersionString)) >= 5) then
+      if((theirs - mine) >= 5) then
         StaticPopup_Show('GSE_UPDATE_AVAILABLE')
       end
     end

@@ -2,16 +2,6 @@ local GSE = GSE
 local L = GSE.L
 local Statics = GSE.Static
 
---- List addons that GSE knows about that have been disabled
-function GSE.ListUnloadedAddons()
-  local returnVal = "";
-  for k,v in pairs(GSE.UnloadedAddInPacks) do
-    aname, atitle, anotes, _, _, _ = GetAddOnInfo(k)
-    returnVal = returnVal .. '|cffff0000' .. atitle .. ':|r '.. anotes .. '\n\n'
-  end
-  return returnVal
-end
-
 -- --- List addons that GSE knows about that have been enabled
 -- function GSE.ListAddons()
 --   local returnVal = "";
@@ -39,6 +29,16 @@ function GSE.RegisterAddon(name, version, sequencenames)
     GSEOptions.AddInPacks[name].Version = version
   end
   GSEOptions.AddInPacks[name].SequenceNames = sequencenames
+  -- The Plugins tab is built from AddInPacks when the options table is registered. Packs register after
+  -- GSE has loaded, so rebuild it now (GSE's ADDON_LOADED only registers it once) or a new/updated pack
+  -- would not show up until the next login.
+  if GSE.OptionsRegistered then
+    LibStub("AceConfig-3.0"):RegisterOptionsTable("GSE", GSE.GetOptionsTable(), {"gseo"})
+    local registry = LibStub("AceConfigRegistry-3.0", true)
+    if registry then
+      registry:NotifyChange("GSE")
+    end
+  end
   return updateflag
 end
 

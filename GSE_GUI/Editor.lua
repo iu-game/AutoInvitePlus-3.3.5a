@@ -143,7 +143,125 @@ editframe.Height = fheight
 
 editframe:SetTitle(L["Sequence Editor"])
 --editframe:SetStatusText(L["Gnome Sequencer: Sequence Editor."])
+--- Stable text form of a value (keys sorted), used to tell whether the editor holds unsaved edits.
+local function snapshotValue(value, out)
+  if type(value) == "table" then
+    local keys = {}
+    for k in pairs(value) do keys[#keys + 1] = k end
+    table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+    out[#out + 1] = "{"
+    for _, k in ipairs(keys) do
+      out[#out + 1] = tostring(k) .. "="
+      snapshotValue(value[k], out)
+      out[#out + 1] = ";"
+    end
+    out[#out + 1] = "}"
+  elseif type(value) == "string" then
+    -- The editor shows a colourised copy of every line (|cAARRGGBB ... |r) and only strips it again
+    -- on Save, so compare the text without those escapes or a plain view of a tab looks "modified".
+    out[#out + 1] = "string:" .. GSE.UnEscapeString(value)
+  else
+    out[#out + 1] = type(value) .. ":" .. tostring(value)
+  end
+  return out
+end
+
+local function editorSnapshot()
+  return table.concat(snapshotValue({ name = editframe.SequenceName, sequence = editframe.Sequence }, {}))
+end
+
+--- Call after loading or saving: whatever the editor holds now counts as "no unsaved changes".
+function GSE.GUIEditorMarkClean()
+  if editframe.Sequence then
+    editframe.cleanSnapshot = editorSnapshot()
+  end
+end
+
+function GSE.GUIEditorIsDirty()
+  return editframe.Sequence ~= nil and editframe.cleanSnapshot ~= nil and editorSnapshot() ~= editframe.cleanSnapshot
+end
+
+local function doEditorSave(name)
+  editframe.Sequence.ManualIntervention = true
+  editframe.SequenceName = name
+  GSE.GUIUpdateSequenceDefinition(editframe.ClassID, editframe.SequenceName, editframe.Sequence)
+  editframe.save = true
+  editframe.loadedName = editframe.SequenceName
+  GSE.GUIEditorMarkClean()
+  return true
+end
+
+StaticPopupDialogs["GSE-OverwriteSequenceDialog"] = {
+  text = L["A macro named %s already exists. Saving will overwrite it. Continue?"],
+  button1 = L["Overwrite"],
+  button2 = L["Cancel"],
+  OnAccept = function()
+    if editframe.pendingSaveName then
+      doEditorSave(editframe.pendingSaveName)
+      editframe.pendingSaveName = nil
+    end
+  end,
+  OnCancel = function()
+    editframe.pendingSaveName = nil
+  end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = true,
+  preferredIndex = 3,
+}
+
+--- Saves the open sequence. Returns false (and says why in the status bar) when it can't, or when it is
+--- waiting on the "overwrite another macro?" confirmation.
+function GSE.GUIEditorSave()
+  local name = editframe.nameeditbox and editframe.nameeditbox:GetText() or editframe.SequenceName
+  if GSE.isEmpty(GSE.TrimWhiteSpace(name or "")) then
+    editframe:SetStatusText(L["Please enter a sequence name before saving."])
+    return false
+  end
+  -- Renaming onto a name that already belongs to a different macro would silently replace that macro.
+  local cleanName = string.gsub(string.gsub(name, " ", "_"), ",", "_")
+  -- macro names are global to the character, so look in every class, not just the open one
+  if cleanName ~= editframe.loadedName and GSE.FindSequenceClassID(cleanName) then
+    editframe.pendingSaveName = name
+    StaticPopup_Show("GSE-OverwriteSequenceDialog", cleanName)
+    return false
+  end
+  return doEditorSave(name)
+end
+
+StaticPopupDialogs["GSE-UnsavedChangesDialog"] = {
+  text = L["You have unsaved changes to %s. Save them before closing?"],
+  button1 = L["Save"],
+  button2 = L["Keep Editing"],
+  button3 = L["Discard"],
+  OnAccept = function()
+    if GSE.GUIEditorSave() then
+      editframe:Hide()
+    end
+  end,
+  OnAlt = function()
+    GSE.GUIEditorMarkClean()
+    editframe:Hide()
+  end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = true,
+  preferredIndex = 3,
+}
+
 editframe:SetCallback("OnClose", function (self)
+  -- OnHide also fires when an ancestor is hidden (Alt+Z hides UIParent): the editor itself is still
+  -- "shown" then, so leave it alone instead of closing it or queueing a popup nobody can see.
+  if editframe.frame:IsShown() then
+    return
+  end
+  -- The Frame widget fires OnClose from its OnHide, i.e. after the window is already gone:
+  -- with unsaved edits, bring it back and ask instead of silently throwing the work away.
+  if GSE.GUIEditorIsDirty() then
+    editframe:Show()
+    StaticPopup_Show("GSE-UnsavedChangesDialog", editframe.SequenceName or "")
+    return
+  end
   editframe:Hide();
   if editframe.save then
     local event = {}
@@ -314,7 +432,26 @@ local specdropdownvalue = editframe.SpecID
 --- cursor-anchored tooltip on-screen on its own, regardless of window
 --- position, and this is the standard approach most WoW addons use for
 --- exactly this reason.
-local function attachTooltip(widget, title, body)
+--- Icon to show in the header: one picked in this editor session wins over the stored macro's
+--- current icon (which only changes after a save), so redraws/tab switches don't revert the pick.
+local function currentEditorIcon()
+  if editframe.pickedIconFor == editframe.Sequence and editframe.Sequence.Icon then
+    return editframe.Sequence.Icon
+  end
+  return GSE.GetMacroIcon(editframe.ClassID, editframe.SequenceName)
+end
+
+--- Text box content -> list of lines. An empty box must give an empty list, not {""}: setting a box's
+--- text in code fires OnTextChanged too, so just opening a version tab used to turn every empty
+--- PreMacro/PostMacro/KeyRelease into a phantom blank line (and made the editor look "modified").
+local function toLines(value)
+  if GSE.isEmpty(value) then
+    return {}
+  end
+  return GSE.SplitMeIntolines(value)
+end
+
+local function attachTooltip(widget, title, body, onLeave)
   widget:SetCallback("OnEnter", function(w)
     GameTooltip:SetOwner(w.frame, "ANCHOR_CURSOR")
     GameTooltip:SetText(title, 1, 1, 1)
@@ -323,6 +460,7 @@ local function attachTooltip(widget, title, body)
   end)
   widget:SetCallback("OnLeave", function()
     GameTooltip:Hide()
+    if onLeave then onLeave() end
   end)
 end
 
@@ -374,8 +512,29 @@ local ROW_ALIGNOFFSET_BY_TYPE = {
   EditBox = 18,
   MultiLineEditBox = 18,
 }
+--- Adds `fn` to a widget's OnRelease callback without replacing one that is already set
+--- (AceGUI keeps a single callback per event name). OnRelease fires before the widget goes
+--- back into the shared pool, which is the only chance to undo per-use changes.
+local function chainOnRelease(widget, fn)
+  local previous = widget.events and widget.events["OnRelease"]
+  widget:SetCallback("OnRelease", function(w, ...)
+    fn(w, ...)
+    if previous then previous(w, ...) end
+  end)
+end
+
+--- alignoffset is a plain field on the widget table, so it survived Release and rode along
+--- into whatever the pool handed the widget to next: a Button that had once been "Delete
+--- Version" (offset 0) rendered lower than its siblings in the bottom button row, and an
+--- EditBox lost its native offset. Put the original back when the widget is released.
+local function setAlignOffset(widget, offset)
+  local original = widget.alignoffset
+  widget.alignoffset = offset
+  chainOnRelease(widget, function(w) w.alignoffset = original end)
+end
+
 local function rowAlign(widget)
-  widget.alignoffset = ROW_ALIGNOFFSET_BY_TYPE[widget.type] or 0
+  setAlignOffset(widget, ROW_ALIGNOFFSET_BY_TYPE[widget.type] or 0)
   return widget
 end
 
@@ -391,10 +550,12 @@ end
 local function wrapFixed(widget, widgetWidth, pad)
   local wrapper = AceGUI:Create("SimpleGroup")
   wrapper:SetLayout("Flow")
-  wrapper:SetWidth(widgetWidth + (pad or 24))
+  -- UIDropDownMenuTemplate draws its box 15px left and 17px right of the widget frame (32px total),
+  -- so anything under ~32 makes neighbouring dropdowns overlap; 44 leaves a ~12px gap.
+  wrapper:SetWidth(widgetWidth + (pad or 44))
   widget:SetWidth(widgetWidth)
   wrapper:AddChild(widget)
-  wrapper.alignoffset = ROW_ALIGNOFFSET_BY_TYPE.Dropdown
+  setAlignOffset(wrapper, ROW_ALIGNOFFSET_BY_TYPE.Dropdown)
   return wrapper
 end
 
@@ -421,12 +582,12 @@ function GSE.GUICreateEditorTabs()
   }
   for k,v in ipairs(editframe.Sequence.MacroVersions) do
     local insline = {}
-    insline.text = tostring(k)
+    insline.text = string.format(L["Ver. %d"], k)
     insline.value = tostring(k)
     table.insert(tabl, insline)
   end
   table.insert(tabl,   {
-      text=L["New"],
+      text=L["+ New Version"],
       value="new"
     }  )
   return tabl
@@ -458,6 +619,12 @@ function GSE.GUIEditorPerformLayout(frame)
       PickupMacro(editframe.SequenceName)
     end
   end)
+  -- Icon frames are pooled: drop the drag hook on release so a reused Icon (e.g. in the icon
+  -- picker grid) can't pick up this sequence's macro.
+  iconpicker:SetCallback("OnRelease", function(w)
+    w.frame:SetScript("OnDragStart", nil)
+    w.frame:RegisterForDrag()
+  end)
   -- Click to choose a new icon. GSE.CreateMacroIcon (Storage.lua) already
   -- applies editframe.Sequence.Icon to the underlying macro on save/re-save
   -- - this click handler is the only piece that was actually missing.
@@ -465,7 +632,9 @@ function GSE.GUIEditorPerformLayout(frame)
     if GSE.GUIShowIconPicker then
       GSE.GUIShowIconPicker(function(chosenIcon)
         editframe.Sequence.Icon = chosenIcon
-        iconpicker:SetImage(chosenIcon)
+        editframe.pickedIconFor = editframe.Sequence
+        -- (not the captured `iconpicker`: the header is rebuilt on layout, which releases that widget)
+        if editframe.iconpicker then editframe.iconpicker:SetImage(chosenIcon) end
       end)
     end
   end)
@@ -535,13 +704,9 @@ function GSE.GUIEditorPerformLayout(frame)
   savebutton:SetText(L["Save"])
   savebutton:SetWidth(150)
   savebutton:SetCallback("OnClick", function()
-    editframe.Sequence.ManualIntervention = true
-    nameeditbox:SetText(nameeditbox:GetText())
-    editframe.SequenceName = nameeditbox:GetText()
-    GSE.GUIUpdateSequenceDefinition(editframe.ClassID, editframe.SequenceName, editframe.Sequence)
-    editframe.save = true
+    GSE.GUIEditorSave()
   end)
-  attachTooltip(savebutton, L["Save"], L["Saves this macro (all versions) and closes the editor."])
+  attachTooltip(savebutton, L["Save"], L["Saves this macro (all versions). The editor stays open; closing it with unsaved changes asks first."])
   editButtonGroup:AddChild(savebutton)
 
   local delbutton = AceGUI:Create("Button")
@@ -570,7 +735,7 @@ end
 function GSE:GUIDrawMetadataEditor(container)
   -- Default frame size = 700 w x 500 h
 
-  editframe.iconpicker:SetImage(GSE.GetMacroIcon(editframe.ClassID, editframe.SequenceName))
+  editframe.iconpicker:SetImage(currentEditorIcon())
 
 
   local scrollcontainer = AceGUI:Create("SimpleGroup") -- "InlineGroup" is also good
@@ -602,7 +767,7 @@ function GSE:GUIDrawMetadataEditor(container)
   metasimplegroup:SetFullWidth(true)
 
   local speciddropdown = AceGUI:Create("Dropdown")
-  speciddropdown:SetLabel(L["Specialisation / Class ID"])
+  speciddropdown:SetLabel(L["Class / Specialisation"])
   speciddropdown:SetList(GSE.GetSpecNames())
   speciddropdown:SetCallback("OnValueChanged", function (obj,event,key)
     local sid = Statics.SpecIDHashList[key]
@@ -616,7 +781,7 @@ function GSE:GUIDrawMetadataEditor(container)
       editframe.ClassID = tonumber(sid)
     end
   end)
-  metasimplegroup:AddChild(wrapFixed(speciddropdown, 200))
+  metasimplegroup:AddChild(wrapFixed(speciddropdown, 200, 24))
   speciddropdown:SetValue(Statics.wotlkSpecIDList[editframe.Sequence.SpecID])
   attachTooltip(speciddropdown, L["Specialisation / Class ID"], L["Which class and spec this macro is written for. Also determines the default archetype used elsewhere in this addon."])
 
@@ -650,8 +815,9 @@ function GSE:GUIDrawMetadataEditor(container)
   local defaultdropdown = AceGUI:Create("Dropdown")
   defaultdropdown:SetLabel(L["Default Version"])
   defaultdropdown:SetList(GSE.GetVersionList())
-  defaultdropdown:SetValue(tostring(editframe.Default))
-  defgroup1:AddChild(wrapFixed(defaultdropdown, 80))
+  defaultdropdown:SetValue(tostring(editframe.Sequence.Default or 1))
+  -- 120 wide: "Default Version" is longer than the other slot labels and was clipped at 80
+  defgroup1:AddChild(wrapFixed(defaultdropdown, 120))
   defaultdropdown:SetCallback("OnValueChanged", function (obj,event,key)
     editframe.Sequence.Default = tonumber(key)
     editframe.Default = tonumber(key)
@@ -659,15 +825,15 @@ function GSE:GUIDrawMetadataEditor(container)
   attachTooltip(defaultdropdown, L["Default Version"], L["The macro version used whenever none of the more specific overrides below apply."])
   contentcontainer:AddChild(defgroup1)
 
-  -- Dungeon/Heroic: same content, two difficulties - a natural pair.
-  local defgroup2 = AceGUI:Create("SimpleGroup")
-  defgroup2:SetLayout("Flow")
-  defgroup2:SetFullWidth(true)
+  -- Row 1 = Default + the 5-player/raid slots (Dungeon, Heroic, Raid); row 2 = Mythic, PVP, Party.
+  -- Seven slots used to be stacked in four rows that only filled the left third of the tab;
+  -- packing them into two rows uses the width and leaves room for Documentation without scrolling.
+  local defgroup2 = defgroup1
 
   local dungeondropdown = AceGUI:Create("Dropdown")
   dungeondropdown:SetLabel(L["Dungeon"])
   dungeondropdown:SetList(GSE.GetVersionList())
-  dungeondropdown:SetValue(tostring(editframe.Dungeon))
+  dungeondropdown:SetValue(tostring(editframe.Sequence.Dungeon or editframe.Sequence.Default or 1))
   defgroup2:AddChild(wrapFixed(dungeondropdown, 80))
   dungeondropdown:SetCallback("OnValueChanged", function (obj,event,key)
     if editframe.Sequence.Default == tonumber(key) then
@@ -677,12 +843,12 @@ function GSE:GUIDrawMetadataEditor(container)
       editframe.Dungeon = tonumber(key)
     end
   end)
-  attachTooltip(dungeondropdown, L["Dungeon"], L["Version used while inside a 5-player dungeon. Leave on the Default Version to not override it."])
+  attachTooltip(dungeondropdown, L["Dungeon"], L["Version used in any 5-player dungeon, Normal or Heroic. Takes priority over the Heroic slot. Leave on the Default Version to not override it."])
 
   local heroicdropdown = AceGUI:Create("Dropdown")
   heroicdropdown:SetLabel(L["Heroic"])
   heroicdropdown:SetList(GSE.GetVersionList())
-  heroicdropdown:SetValue(tostring(editframe.Heroic))
+  heroicdropdown:SetValue(tostring(editframe.Sequence.Heroic or editframe.Sequence.Default or 1))
   defgroup2:AddChild(wrapFixed(heroicdropdown, 80))
   heroicdropdown:SetCallback("OnValueChanged", function (obj,event,key)
     if editframe.Sequence.Default == tonumber(key) then
@@ -692,10 +858,8 @@ function GSE:GUIDrawMetadataEditor(container)
       editframe.Heroic = tonumber(key)
     end
   end)
-  attachTooltip(heroicdropdown, L["Heroic"], L["Version used while inside a Heroic-difficulty dungeon. Leave on the Default Version to not override it."])
-  contentcontainer:AddChild(defgroup2)
+  attachTooltip(heroicdropdown, L["Heroic"], L["Version used in Heroic content (dungeons and raids) when no more specific slot - PVP, Raid or Dungeon - applies. Leave on the Default Version to not override it."])
 
-  -- Raid/Mythic: both raid-tier content - the other natural pair.
   local defgroup3 = AceGUI:Create("SimpleGroup")
   defgroup3:SetLayout("Flow")
   defgroup3:SetFullWidth(true)
@@ -703,8 +867,8 @@ function GSE:GUIDrawMetadataEditor(container)
   local raiddropdown = AceGUI:Create("Dropdown")
   raiddropdown:SetLabel(L["Raid"])
   raiddropdown:SetList(GSE.GetVersionList())
-  raiddropdown:SetValue(tostring(editframe.Raid))
-  defgroup3:AddChild(wrapFixed(raiddropdown, 80))
+  raiddropdown:SetValue(tostring(editframe.Sequence.Raid or editframe.Sequence.Default or 1))
+  defgroup1:AddChild(wrapFixed(raiddropdown, 80))
   raiddropdown:SetCallback("OnValueChanged", function (obj,event,key)
     if editframe.Sequence.Default == tonumber(key) then
       editframe.Sequence.Raid = nil
@@ -713,33 +877,18 @@ function GSE:GUIDrawMetadataEditor(container)
       editframe.Raid = tonumber(key)
     end
   end)
-  attachTooltip(raiddropdown, L["Raid"], L["Version used while inside a raid instance. Leave on the Default Version to not override it."])
+  attachTooltip(raiddropdown, L["Raid"], L["Version used in any raid instance. Takes priority over the Heroic slot. Leave on the Default Version to not override it."])
 
-  local mythicdropdown = AceGUI:Create("Dropdown")
-  mythicdropdown:SetLabel(L["Mythic"])
-  mythicdropdown:SetList(GSE.GetVersionList())
-  mythicdropdown:SetValue(tostring(editframe.Mythic))
-  mythicdropdown:SetCallback("OnValueChanged", function (obj,event,key)
-    if editframe.Sequence.Default == tonumber(key) then
-      editframe.Sequence.Mythic = nil
-    else
-      editframe.Sequence.Mythic = tonumber(key)
-      editframe.Mythic = tonumber(key)
-    end
-  end)
-  defgroup3:AddChild(wrapFixed(mythicdropdown, 80))
-  attachTooltip(mythicdropdown, L["Mythic"], L["Version used for Mythic-difficulty content. Leave on the Default Version to not override it."])
+  -- (No Mythic dropdown: Mythic difficulty doesn't exist in WotLK 3.3.5a - GSE.inMythic is always
+  -- false here - so the control could never have any effect. Existing Mythic data is left untouched.)
   contentcontainer:AddChild(defgroup3)
 
-  -- PVP/Party: neither is PvE raid/dungeon content - the remaining pair.
-  local defgroup4 = AceGUI:Create("SimpleGroup")
-  defgroup4:SetLayout("Flow")
-  defgroup4:SetFullWidth(true)
+  local defgroup4 = defgroup3
 
   local pvpdropdown = AceGUI:Create("Dropdown")
   pvpdropdown:SetLabel(L["PVP"])
   pvpdropdown:SetList(GSE.GetVersionList())
-  pvpdropdown:SetValue(tostring(editframe.PVP))
+  pvpdropdown:SetValue(tostring(editframe.Sequence.PVP or editframe.Sequence.Default or 1))
   defgroup4:AddChild(wrapFixed(pvpdropdown, 80))
   pvpdropdown:SetCallback("OnValueChanged", function (obj,event,key)
     if editframe.Sequence.Default == tonumber(key) then
@@ -754,7 +903,7 @@ function GSE:GUIDrawMetadataEditor(container)
   local partydropdown = AceGUI:Create("Dropdown")
   partydropdown:SetLabel(L["Party"])
   partydropdown:SetList(GSE.GetVersionList())
-  partydropdown:SetValue(tostring(editframe.Party))
+  partydropdown:SetValue(tostring(editframe.Sequence.Party or editframe.Sequence.Default or 1))
   defgroup4:AddChild(wrapFixed(partydropdown, 80))
   partydropdown:SetCallback("OnValueChanged", function (obj,event,key)
     if editframe.Sequence.Default == tonumber(key) then
@@ -765,7 +914,6 @@ function GSE:GUIDrawMetadataEditor(container)
     end
   end)
   attachTooltip(partydropdown, L["Party"], L["Version used while in a normal party outside a dungeon. Leave on the Default Version to not override it."])
-  contentcontainer:AddChild(defgroup4)
 
   contentcontainer:AddChild(sectionHeading(L["Documentation"]))
 
@@ -850,6 +998,9 @@ function GSE:GUIDrawMacroEditor(container, version)
     editframe.Sequence.MacroVersions[version][1] = "/say Hello"
   end
 
+  -- Drawing normalises the stored text (translation, spacing, a default StepFunction). That is not a
+  -- user edit: remember whether the editor was already dirty and re-baseline afterwards if it wasn't.
+  local wasDirty = GSE.GUIEditorIsDirty()
   editframe.Sequence.MacroVersions[version] = GSE.TranslateSequence(editframe.Sequence.MacroVersions[version], "From Editor")
 
   local layoutcontainer = AceGUI:Create("SimpleGroup")
@@ -903,11 +1054,14 @@ function GSE:GUIDrawMacroEditor(container, version)
   if GSE.isEmpty(editframe.Sequence.MacroVersions[version].StepFunction) then
     editframe.Sequence.MacroVersions[version].StepFunction = "Sequential"
   end
+  if not wasDirty then
+    GSE.GUIEditorMarkClean()
+  end
   stepdropdown:SetValue(editframe.Sequence.MacroVersions[version].StepFunction)
   stepdropdown:SetCallback("OnValueChanged", function (sel, object, value)
       editframe.Sequence.MacroVersions[version].StepFunction = value
     end)
-  linegroup1:AddChild(wrapFixed(stepdropdown, 230))
+  linegroup1:AddChild(wrapFixed(stepdropdown, 230, 24))
   attachTooltip(stepdropdown, L["Step Function"], L["Controls the order spells in the Sequence box are cast: Sequential plays them 1, 2, 3... in order; Priority List re-checks from the top each time and casts the first one available; Random picks an available spell unpredictably."])
 
   local spacerlabel1 = AceGUI:Create("Label")
@@ -925,6 +1079,9 @@ function GSE:GUIDrawMacroEditor(container, version)
     looplimit:SetText(tonumber(editframe.Sequence.MacroVersions[version].LoopLimit))
   end
   looplimit.editbox:SetNumeric()
+  -- EditBox frames are pooled and OnAcquire never resets numeric mode: clear it on release so
+  -- the next EditBox to reuse this frame (Name, Talents, Help Link...) accepts letters again.
+  chainOnRelease(looplimit, function(w) w.editbox:SetNumeric(false) end)
   looplimit:SetCallback("OnTextChanged", function (sel, object, value)
     editframe.Sequence.MacroVersions[version].LoopLimit = value
   end)
@@ -941,7 +1098,7 @@ function GSE:GUIDrawMacroEditor(container, version)
   -- labels.
   local delversionbutton = AceGUI:Create("Button")
   delversionbutton:SetText(L["Delete Version"])
-  delversionbutton:SetWidth(150)
+  delversionbutton:SetWidth(130)
   delversionbutton:SetCallback("OnClick", function()
     GSE.GUIDeleteVersion(version)
   end)
@@ -955,15 +1112,15 @@ function GSE:GUIDrawMacroEditor(container, version)
   local RESET_TOOLTIP_BODY = L["Checked: always reset. Unchecked: never reset. Grey (default): use the global 'Reset Macro when out of combat' option."]
   local combatresetcheckbox = AceGUI:Create("CheckBox")
   combatresetcheckbox:SetType("checkbox")
-  combatresetcheckbox:SetWidth(90)
+  combatresetcheckbox:SetWidth(135)
   combatresetcheckbox:SetTriState(true)
-  combatresetcheckbox:SetLabel(L["Combat"])
+  combatresetcheckbox:SetLabel(L["Combat reset"])
   combatresetcheckbox:SetValue(editframe.Sequence.MacroVersions[version].Combat)
   combatresetcheckbox:SetCallback("OnValueChanged", function (sel, object, value)
     editframe.Sequence.MacroVersions[version].Combat = value
   end)
   rowAlign(combatresetcheckbox)
-  attachTooltip(combatresetcheckbox, L["Combat"],
+  attachTooltip(combatresetcheckbox, L["Combat reset"],
     L["Reset this macro version's sequence position when you leave combat."] .. "\n" .. RESET_TOOLTIP_BODY)
   linegroup1:AddChild(combatresetcheckbox)
 
@@ -992,15 +1149,14 @@ function GSE:GUIDrawMacroEditor(container, version)
   -- 1.0, so this pair's own right edge (PreMacro's) lines up with the
   -- full-width Sequence box's right edge below.
   KeyPressbox:SetRelativeWidth(0.49)
-  KeyPressbox.editBox:SetScript( "OnLeave",  function() GSE.GUIParseText(KeyPressbox) end)
   if not GSE.isEmpty(editframe.Sequence.MacroVersions[version].KeyPress) then
     KeyPressbox:SetText(table.concat(editframe.Sequence.MacroVersions[version].KeyPress, "\n"))
   end
   KeyPressbox:SetCallback("OnTextChanged", function (sel, object, value)
-    editframe.Sequence.MacroVersions[version].KeyPress = GSE.SplitMeIntolines(value)
+    editframe.Sequence.MacroVersions[version].KeyPress = toLines(value)
   end)
   linegroup2:AddChild(KeyPressbox)
-  attachTooltip(KeyPressbox, L["KeyPress"], L["Spells or commands cast once when the key is first pressed, before the main Sequence below. Most macros leave this empty."])
+  attachTooltip(KeyPressbox, L["KeyPress"], L["Spells or commands cast once when the key is first pressed, before the main Sequence below. Most macros leave this empty."], function() GSE.GUIParseText(KeyPressbox) end)
 
   -- Relative, not a fixed pixel width: AceGUI-3.0's Flow layout computes
   -- each "relative" child's width independently as fraction * row width, so
@@ -1017,15 +1173,14 @@ function GSE:GUIDrawMacroEditor(container, version)
   PreMacro:SetNumLines(6)
   PreMacro:DisableButton(true)
   PreMacro:SetRelativeWidth(0.49)
-  PreMacro.editBox:SetScript( "OnLeave",  function() GSE.GUIParseText(PreMacro) end)
   if not GSE.isEmpty(editframe.Sequence.MacroVersions[version].PreMacro) then
     PreMacro:SetText(table.concat(editframe.Sequence.MacroVersions[version].PreMacro, "\n"))
   end
   PreMacro:SetCallback("OnTextChanged", function (sel, object, value)
-    editframe.Sequence.MacroVersions[version].PreMacro = GSE.SplitMeIntolines(value)
+    editframe.Sequence.MacroVersions[version].PreMacro = toLines(value)
   end)
   linegroup2:AddChild(PreMacro)
-  attachTooltip(PreMacro, L["PreMacro"], L["Commands run once before every cast in the Sequence below, such as target checks. Rarely needed."])
+  attachTooltip(PreMacro, L["PreMacro"], L["Commands run once before every cast in the Sequence below, such as target checks. Rarely needed."], function() GSE.GUIParseText(PreMacro) end)
 
   contentcontainer:AddChild(linegroup2)
 
@@ -1041,7 +1196,6 @@ function GSE:GUIDrawMacroEditor(container, version)
   spellbox:SetNumLines(14)
   spellbox:DisableButton(true)
   spellbox:SetFullWidth(true)
-  spellbox.editBox:SetScript( "OnLeave",  function() GSE.GUIParseText(KeyPressbox) end)
   if not GSE.isEmpty(editframe.Sequence.MacroVersions[version]) then
     spellbox:SetText(table.concat(editframe.Sequence.MacroVersions[version], "\n"))
   end
@@ -1055,7 +1209,7 @@ function GSE:GUIDrawMacroEditor(container, version)
     end
   end)
   contentcontainer:AddChild(spellbox)
-  attachTooltip(spellbox, L["Sequence"], L["The macro's main spell rotation - one entry per line, played back in the order set by Step Function above. This is the core of the macro."])
+  attachTooltip(spellbox, L["Sequence"], L["The macro's main spell rotation - one entry per line, played back in the order set by Step Function above. This is the core of the macro."], function() GSE.GUIParseText(spellbox) end)
 
   local linegroup3 = AceGUI:Create("SimpleGroup")
   linegroup3:SetLayout("Flow")
@@ -1068,15 +1222,14 @@ function GSE:GUIDrawMacroEditor(container, version)
   KeyReleasebox:SetNumLines(6)
   KeyReleasebox:DisableButton(true)
   KeyReleasebox:SetRelativeWidth(0.49)
-  KeyReleasebox.editBox:SetScript( "OnLeave",  function() GSE.GUIParseText(KeyPressbox) end)
   if not GSE.isEmpty(editframe.Sequence.MacroVersions[version].KeyRelease) then
     KeyReleasebox:SetText(table.concat(editframe.Sequence.MacroVersions[version].KeyRelease, "\n"))
   end
   KeyReleasebox:SetCallback("OnTextChanged", function (sel, object, value)
-    editframe.Sequence.MacroVersions[version].KeyRelease = GSE.SplitMeIntolines(value)
+    editframe.Sequence.MacroVersions[version].KeyRelease = toLines(value)
   end)
   linegroup3:AddChild(KeyReleasebox)
-  attachTooltip(KeyReleasebox, L["KeyRelease"], L["Spells or commands cast when the key is released, such as trinkets or equipment swaps enabled by the checkboxes below. Most macros leave this empty."])
+  attachTooltip(KeyReleasebox, L["KeyRelease"], L["Spells or commands cast when the key is released, such as trinkets or equipment swaps enabled by the checkboxes below. Most macros leave this empty."], function() GSE.GUIParseText(KeyReleasebox) end)
 
   local spacerlabel3 = AceGUI:Create("Label")
   spacerlabel3:SetRelativeWidth(0.02)
@@ -1087,15 +1240,14 @@ function GSE:GUIDrawMacroEditor(container, version)
   PostMacro:SetNumLines(6)
   PostMacro:DisableButton(true)
   PostMacro:SetRelativeWidth(0.49)
-  PostMacro.editBox:SetScript( "OnLeave",  function() GSE.GUIParseText(PostMacro) end)
   linegroup3:AddChild(PostMacro)
   if not GSE.isEmpty(editframe.Sequence.MacroVersions[version].PostMacro) then
     PostMacro:SetText(table.concat(editframe.Sequence.MacroVersions[version].PostMacro, "\n"))
   end
   PostMacro:SetCallback("OnTextChanged", function (sel, object, value)
-    editframe.Sequence.MacroVersions[version].PostMacro = GSE.SplitMeIntolines(value)
+    editframe.Sequence.MacroVersions[version].PostMacro = toLines(value)
   end)
-  attachTooltip(PostMacro, L["PostMacro"], L["Commands run once after every cast in the Sequence above. Rarely needed."])
+  attachTooltip(PostMacro, L["PostMacro"], L["Commands run once after every cast in the Sequence above. Rarely needed."], function() GSE.GUIParseText(PostMacro) end)
   contentcontainer:AddChild(linegroup3)
 
   -- These checkboxes control which equipment slots get folded into the
@@ -1232,13 +1384,16 @@ function GSE.GUISelectEditorTab(container, event, group)
   wipe(editframe.heightReflow)
   editframe.SelectedTab = group
   editframe.nameeditbox:SetText(GSE.GUIEditFrame.SequenceName)
-  editframe.iconpicker:SetImage(GSE.GetMacroIcon(editframe.ClassID, editframe.SequenceName))
+  editframe.iconpicker:SetImage(currentEditorIcon())
   if group == "config" then
     GSE:GUIDrawMetadataEditor(container)
   elseif group == "new" then
 	  if(GSE.isNewFirstTimeCreated) then
-		GSE.GUIUpdateSequenceDefinition(editframe.ClassID, editframe.SequenceName, editframe.Sequence)
-		editframe.save = true
+		-- same path as the Save button: it skips an empty name (nothing to create), and records the
+		-- name the sequence now lives under so a later Save doesn't ask to "overwrite" itself
+		if not GSE.isEmpty(GSE.TrimWhiteSpace(editframe.SequenceName or "")) then
+		  doEditorSave(editframe.SequenceName)
+		end
 		-- One-shot: only the sequence's very first "New" (add version) tab
 		-- visit needs this auto-save (it's what actually creates the brand
 		-- new sequence in GSELibrary in the first place). Never clearing
@@ -1247,10 +1402,15 @@ function GSE.GUISelectEditorTab(container, event, group)
 		GSE.isNewFirstTimeCreated = false
 	  end
     -- Copy the Default to a new version
-    table.insert(editframe.Sequence.MacroVersions, GSE.CloneMacroVersion(editframe.Sequence.MacroVersions[editframe.Sequence.Default]))
+    table.insert(editframe.Sequence.MacroVersions, GSE.CloneMacroVersion(editframe.Sequence.MacroVersions[editframe.Sequence.Default], true))
 
+    -- PerformLayout releases the current tab group (this `container`) and builds a brand new one,
+    -- so drawing into `container` afterwards used a released/pooled widget (and left the new
+    -- group's Config tab highlighted). Select the new version's tab on the NEW group instead;
+    -- that fires OnGroupSelected -> GUISelectEditorTab, which draws and skins it.
     GSE.GUIEditorPerformLayout(editframe)
-    GSE.GUISelectEditorTab(container, event, table.getn(editframe.Sequence.MacroVersions))
+    editframe.ContentContainer:SelectTab(tostring(table.getn(editframe.Sequence.MacroVersions)))
+    return
   else
     GSE:GUIDrawMacroEditor(container, group)
   end

@@ -17,110 +17,112 @@ StaticPopupDialogs["GSE_ConfirmReloadUIDialog"] = {
 }
 
 StaticPopupDialogs["GS-DebugOutput"] = {
-  text = "Dump of GS Debug messages",
+  text = L["Dump of GSE debug messages"],
   button1 = L["Update"],
   button2 = L["Close"],
   OnAccept = function(self, data)
       self.editBox:SetText(GSE.DebugOutput)
+      -- returning true keeps the dialog open; "Update" is a refresh, not a confirmation
+      return true
   end,
-	OnShow = function (self, data)
+  OnShow = function (self, data)
     self.editBox:SetText(GSE.DebugOutput)
   end,
   timeout = 0,
   whileDead = true,
   hideOnEscape = true,
   preferredIndex = 3,  -- avoid some UI taint, see http://www.wowace.com/announcements/how-to-avoid-some-ui-taint/
-	hasEditBox = true,
+  hasEditBox = true,
 }
 
+-- Both link dialogs below reuse Blizzard's shared StaticPopup edit boxes. They used to shrink the edit box
+-- and then reset it to a made-up 50px width, leaving other dialogs' edit boxes (add friend, guild MOTD...)
+-- too narrow until a reload: remember the real width and put exactly that back.
+local function rememberEditBoxWidth(editBox)
+  if not editBox.gseOriginalWidth then
+    editBox.gseOriginalWidth = editBox:GetWidth()
+  end
+end
+
+local function restoreEditBoxWidth(editBox)
+  if editBox.gseOriginalWidth then
+    editBox:SetWidth(editBox.gseOriginalWidth)
+  end
+end
+
+local UPDATE_URL = "https://github.com/iu-game/AutoInvitePlus-3.3.5a/releases"
+
 StaticPopupDialogs['GSE_UPDATE_AVAILABLE'] = {
-	text = L["GSE is out of date. You can download the newest version from https://mods.curse.com/addons/wow/gnomesequencer-enhanced."],
-	hasEditBox = 1,
-	OnShow = function(self)
-		self.editBox:SetAutoFocus(false)
-		self.editBox:SetWidth(220)
-		self.editBox:SetText("https://mods.curse.com/addons/wow/gnomesequencer-enhanced")
-		self.editBox:HighlightText()
-		ChatEdit_FocusActiveWindow();
-	end,
-	OnHide = function(self)
-		self.editBox:SetWidth(self.editBox.width or 50)
-	end,
-	hideOnEscape = 1,
-	button1 = OKAY,
-	EditBoxOnEnterPressed = function(self)
-		ChatEdit_FocusActiveWindow();
-		self:GetParent():Hide();
-	end,
-	EditBoxOnEscapePressed = function(self)
-		ChatEdit_FocusActiveWindow();
-		self:GetParent():Hide();
-	end,
-	EditBoxOnTextChanged = function(self)
-		if(self:GetText() ~= "https://mods.curse.com/addons/wow/gnomesequencer-enhanced") then
-			self:SetText("https://mods.curse.com/addons/wow/gnomesequencer-enhanced")
-		end
-		self:HighlightText()
-		self:ClearFocus()
-		ChatEdit_FocusActiveWindow();
-	end,
-	OnEditFocusGained = function(self)
-		self:HighlightText()
-	end,
-	showAlert = 1,
+  text = L["A newer version of GSE is available: https://github.com/iu-game/AutoInvitePlus-3.3.5a/releases"],
+  hasEditBox = 1,
+  OnShow = function(self)
+    rememberEditBoxWidth(self.editBox)
+    self.editBox:SetAutoFocus(false)
+    self.editBox:SetWidth(220)
+    self.editBox:SetText(UPDATE_URL)
+    self.editBox:HighlightText()
+    ChatEdit_FocusActiveWindow();
+  end,
+  OnHide = function(self)
+    restoreEditBoxWidth(self.editBox)
+  end,
+  timeout = 0,
+  whileDead = true,
+  hideOnEscape = 1,
+  button1 = OKAY,
+  EditBoxOnEnterPressed = function(self)
+    ChatEdit_FocusActiveWindow();
+    self:GetParent():Hide();
+  end,
+  EditBoxOnEscapePressed = function(self)
+    ChatEdit_FocusActiveWindow();
+    self:GetParent():Hide();
+  end,
+  EditBoxOnTextChanged = function(self)
+    if(self:GetText() ~= UPDATE_URL) then
+      self:SetText(UPDATE_URL)
+    end
+    self:HighlightText()
+    self:ClearFocus()
+    ChatEdit_FocusActiveWindow();
+  end,
 }
 
 StaticPopupDialogs['GSE_SEQUENCEHELP'] = {
-	text = L["Copy this link and open it in a Browser."],
-	hasEditBox = 1,
+  text = L["Copy this link and open it in a Browser."],
+  hasEditBox = 1,
   url = "http://www.wowlazymacros.com",
-	OnShow = function(self)
-		self.editBox:SetAutoFocus(false)
-		self.editBox.width = self.editBox:GetWidth()
-		self.editBox:SetWidth(220)
-		self.editBox:SetText(StaticPopupDialogs['GSE_SEQUENCEHELP'].url)
-		self.editBox:HighlightText()
-		ChatEdit_FocusActiveWindow();
-	end,
-	OnHide = function(self)
-		self.editBox:SetWidth(50)
-		self.editBox.width = nil
-	end,
-	hideOnEscape = 1,
-	button1 = OKAY,
-	EditBoxOnEnterPressed = function(self)
-		ChatEdit_FocusActiveWindow();
-		self:GetParent():Hide();
-	end,
-	EditBoxOnEscapePressed = function(self)
-		ChatEdit_FocusActiveWindow();
-		self:GetParent():Hide();
-	end,
-	EditBoxOnTextChanged = function(self)
-		if(self~=nil and self:GetText() ~= StaticPopupDialogs['GSE_SEQUENCEHELP'].url) then
-			self:SetText(StaticPopupDialogs['GSE_SEQUENCEHELP'].url)
-		end
-		self:HighlightText()
-		self:ClearFocus()
-		ChatEdit_FocusActiveWindow();
-	end,
-	OnEditFocusGained = function(self)
-		self:HighlightText()
-	end,
-	showAlert = 1,
-}
-
-StaticPopupDialogs["GSE-SampleMacroDialog"] = {
-  text = L["There are No Macros Loaded for this class.  Would you like to load the Sample Macro?"],
-  button1 = L["Load"],
-  button2 = L["Close"],
-  OnAccept = function(self, data)
-      --GSE.LoadSampleMacros(GSE.GetCurrentClassID())
+  OnShow = function(self)
+    rememberEditBoxWidth(self.editBox)
+    self.editBox:SetAutoFocus(false)
+    self.editBox:SetWidth(220)
+    self.editBox:SetText(StaticPopupDialogs['GSE_SEQUENCEHELP'].url)
+    self.editBox:HighlightText()
+    ChatEdit_FocusActiveWindow();
   end,
-  timeout = 1,
+  OnHide = function(self)
+    restoreEditBoxWidth(self.editBox)
+  end,
+  timeout = 0,
   whileDead = true,
-  hideOnEscape = true,
-  preferredIndex = 3,  -- avoid some UI taint, see http://www.wowace.com/announcements/how-to-avoid-some-ui-taint/
+  hideOnEscape = 1,
+  button1 = OKAY,
+  EditBoxOnEnterPressed = function(self)
+    ChatEdit_FocusActiveWindow();
+    self:GetParent():Hide();
+  end,
+  EditBoxOnEscapePressed = function(self)
+    ChatEdit_FocusActiveWindow();
+    self:GetParent():Hide();
+  end,
+  EditBoxOnTextChanged = function(self)
+    if(self~=nil and self:GetText() ~= StaticPopupDialogs['GSE_SEQUENCEHELP'].url) then
+      self:SetText(StaticPopupDialogs['GSE_SEQUENCEHELP'].url)
+    end
+    self:HighlightText()
+    self:ClearFocus()
+    ChatEdit_FocusActiveWindow();
+  end,
 }
 
 StaticPopupDialogs["GSE-MacroImportSuccess"] = {

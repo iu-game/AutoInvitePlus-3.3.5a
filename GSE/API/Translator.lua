@@ -20,7 +20,7 @@ if GetLocale() ~= "enUS" then
       if spellname then
         GSE.TranslatorLanguageTables[Statics.TranslationKey][GetLocale()][k] = spellname
         GSE.TranslatorLanguageTables[Statics.TranslationHash][GetLocale()][spellname] = k
-        GSE.TranslatorLanguageTables[Statics.TranslationShadow][GetLocale()][spellname] = string.lower(k)
+        GSE.TranslatorLanguageTables[Statics.TranslationShadow][GetLocale()][string.lower(spellname)] = k
       end
       i = i + 1
     end
@@ -29,8 +29,8 @@ if GetLocale() ~= "enUS" then
 end
 
 function GSE.ListCachedLanguages()
-  t = {}
-  i = 1
+  local t = {}
+  local i = 1
   for name, _ in pairs(GSE.TranslatorLanguageTables[Statics.TranslationKey]) do
     t[i] = name
     GSE.PrintDebugMessage("found " .. name, GNOME)
@@ -101,11 +101,19 @@ function GSE.TranslateSequenceFromTo(sequence, fromLocale, toLocale, sequenceNam
     GSE.PrintDebugMessage("empty Keypress in translate", GNOME)
   end
 
-  -- check for blanks
-  for i, v in ipairs(sequence) do
-    if v == "" then
-      sequence[i] = nil
+  -- check for blanks: compact the array. Setting sequence[i] = nil left holes, so every ipairs
+  -- consumer downstream stopped at the first blank line and silently dropped the rest of the macro.
+  local kept = {}
+  for _, v in ipairs(sequence) do
+    if v ~= "" then
+      table.insert(kept, v)
     end
+  end
+  for i = #sequence, 1, -1 do
+    sequence[i] = nil
+  end
+  for i, v in ipairs(kept) do
+    sequence[i] = v
   end
   return sequence
 end
@@ -207,6 +215,7 @@ function GSE.TranslateSpell(str, fromLocale, toLocale, cleanNewLines)
   if string.match(str, ";") then
     GSE.PrintDebugMessage("GSE.TranslateSpell found ; in " .. str .. " about to do recursive call.", GNOME)
     for _, w in ipairs(GSE.split(str,";")) do
+      local returnval
       found, returnval = GSE.TranslateSpell((cleanNewLines and w or string.match(w, "^%s*(.-)%s*$")), fromLocale, toLocale, (cleanNewLines and cleanNewLines or false))
       output = output ..  GSEOptions.KEYWORD .. returnval .. Statics.StringReset .. "; "
     end
@@ -223,7 +232,13 @@ function GSE.TranslateSpell(str, fromLocale, toLocale, cleanNewLines)
     if not cleanNewLines then
       etc = string.match(etc, "^%s*(.-)%s*$")
     end
-    etc = string.gsub (etc, "!", "")
+    -- keep a leading "!" (e.g. "/cast [nocombat] !Prowl"): it was stripped here, so every save
+    -- silently removed the toggle marker whenever a conditional came before the spell name
+    local bang = ""
+    if string.sub(etc, 1, 1) == "!" then
+      bang = "!"
+      etc = string.sub(etc, 2)
+    end
     local foundspell = GSE.TranslatorLanguageTables[Statics.TranslationHash][fromLocale][etc]
     if GSE.isEmpty(GSE.TranslatorLanguageTables[Statics.TranslationKey][toLocale][foundspell]) then
       foundspell = false
@@ -231,22 +246,23 @@ function GSE.TranslateSpell(str, fromLocale, toLocale, cleanNewLines)
     if foundspell then
       GSE.PrintDebugMessage("Translating Spell ID : " .. foundspell , GNOME )
       GSE.PrintDebugMessage(" to " .. (GSE.isEmpty(GSE.TranslatorLanguageTables[Statics.TranslationKey][toLocale][foundspell]) and " but its not in [Statics.TranslationKey][" .. toLocale .. "]" or GSE.TranslatorLanguageTables[Statics.TranslationKey][toLocale][foundspell]) , GNOME)
-      output = output .. GSEOptions.KEYWORD .. GSE.TranslatorLanguageTables[Statics.TranslationKey][toLocale][foundspell] .. Statics.StringReset
+      output = output .. bang .. GSEOptions.KEYWORD .. GSE.TranslatorLanguageTables[Statics.TranslationKey][toLocale][foundspell] .. Statics.StringReset
       found = true
     else
       GSE.PrintDebugMessage("Did not find : " .. etc .. " in " .. fromLocale .. " Hash table checking shadow table", GNOME)
       -- try the shadow table
       local nfoundspell = GSE.TranslatorLanguageTables[Statics.TranslationShadow][fromLocale][string.lower(etc)]
-      if not nfoundspell or GSE.isEmpty(GSE.TranslatorLanguageTables[Statics.TranslationShadow][toLocale][nfoundspell]) then
+      -- the shadow table maps lower-cased name -> spell ID, so the ID is looked up in the Key table
+      if not nfoundspell or GSE.isEmpty(GSE.TranslatorLanguageTables[Statics.TranslationKey][toLocale][nfoundspell]) then
         nfoundspell = false
       end
       if nfoundspell then
         GSE.PrintDebugMessage("Translating from the shadow table for  Spell ID : " .. nfoundspell .. " to " .. GSE.TranslatorLanguageTables[Statics.TranslationKey][toLocale][nfoundspell], GNOME)
-        output = output  .. GSEOptions.KEYWORD .. GSE.TranslatorLanguageTables[Statics.TranslationKey][toLocale][nfoundspell] .. Statics.StringReset
+        output = output  .. bang .. GSEOptions.KEYWORD .. GSE.TranslatorLanguageTables[Statics.TranslationKey][toLocale][nfoundspell] .. Statics.StringReset
         found = true
       else
         GSE.PrintDebugMessage("Did not find : " .. etc .. " in " .. fromLocale, GNOME)
-        output = output  .. GSEOptions.UNKNOWN .. etc .. Statics.StringReset
+        output = output  .. bang .. GSEOptions.UNKNOWN .. etc .. Statics.StringReset
         if GSE.isEmpty(GSEOptions.UnfoundSpells) then
           GSEOptions.UnfoundSpells = {}
         end
@@ -326,13 +342,15 @@ function GSE.ReportUnfoundSpells()
   for classid, macroset in pairs(GSELibrary) do
     for name, version in pairs(macroset) do
       for v, sequence in ipairs(version.MacroVersions) do
-        GSE.TranslateSequenceFromTo(sequence, "enUS", "enUS", name)
+        -- translate a copy: this is a reporting pass and must not rewrite the saved library in place
+        GSE.TranslateSequenceFromTo(GSE.CloneMacroVersion(sequence, true), "enUS", "enUS", name)
       end
     end
   end
   GSEOptions.UnfoundSpellIDs = {}
 
-  for _,spell in pairs(GSEOptions.UnfoundSpells) do
+  -- UnfoundSpells is [name] = true, so the spell name is the key
+  for spell in pairs(GSEOptions.UnfoundSpells) do
     GSEOptions.UnfoundSpellIDs[spell] = GetSpellInfo(spell)
   end
 

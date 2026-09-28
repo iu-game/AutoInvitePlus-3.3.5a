@@ -19,8 +19,25 @@ function GSE.GUIShowDebugWindow()
 end
 
 
+-- The output box grows every second while enabled; keep only the most recent text so a long
+-- session can't make the window (and every timer tick) slower and slower.
+local MAX_DEBUG_CHARS = 30000
+
 function GSE.GUIUpdateOutput()
-  GSE.GUIDebugFrame.DebugOutputTextbox:SetText(GSE.GUIDebugFrame.DebugOutputTextbox:GetText() .. GSE.DebugOutput)
+  -- Nothing new: leave the box alone (rewriting it every tick also snapped the scroll position).
+  if GSE.isEmpty(GSE.DebugOutput) then
+    return
+  end
+  local text = GSE.GUIDebugFrame.DebugOutputTextbox:GetText() .. GSE.DebugOutput
+  if string.len(text) > MAX_DEBUG_CHARS then
+    text = string.sub(text, string.len(text) - MAX_DEBUG_CHARS + 1)
+    -- start on a whole line
+    local firstBreak = string.find(text, "\n", 1, true)
+    if firstBreak then
+      text = string.sub(text, firstBreak + 1)
+    end
+  end
+  GSE.GUIDebugFrame.DebugOutputTextbox:SetText(text)
   GSE.DebugOutput = ""
 end
 
@@ -31,7 +48,8 @@ function GSE.GUIEnableDebugView()
     GSE.GUIDebugFrame.DebugEnableViewButton:SetText(L["Enable"])
     GSE.GUIDebugFrame.DebugPauseViewButton:SetText(L["Pause"])
     GSE.GUIDebugFrame.DebugPauseViewButton:SetDisabled(true)
-    GSE:CancelTimer(GSE.GUIUpdateTimer)
+    -- silent: after Pause the timer is already cancelled and a non-silent CancelTimer raises an error
+    GSE:CancelTimer(GSE.GUIUpdateTimer, true)
     onpause = false
   else
     --enable
@@ -55,8 +73,8 @@ function GSE.GUIPauseDebugView()
 end
 
 DebugFrame:SetTitle(L["Sequence Debugger"])
-local _, GCD_Timer = GetSpellCooldown(61304)
-DebugFrame:SetStatusText(L["Gnome Sequencer: Sequence Debugger. Monitor the Execution of your Macro"] .. "   GCD: " .. GCD_Timer)
+-- (The old "GCD: n" here was read once at load and never updated, so it only ever showed a stale number.)
+DebugFrame:SetStatusText(L["Press Enable, then press one of your GSE macros to see each step it runs."])
 DebugFrame:SetCallback("OnClose", function(widget) DebugFrame:Hide()  end)
 DebugFrame:SetLayout("List")
 DebugFrame:Hide()

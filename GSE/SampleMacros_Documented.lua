@@ -551,7 +551,8 @@ function GSE.LoadDocumentedSampleMacros()
             end
             
             local existing = GSELibrary[currentClassID][sequenceName]
-            if GSE.isEmpty(existing) or not existing._GSEVersion then
+            -- never overwrite an existing entry: a same-named sequence without _GSEVersion is the user's own
+            if GSE.isEmpty(existing) then
                 GSELibrary[currentClassID][sequenceName] = sequence
                 GSELibrary[currentClassID][sequenceName]._GSEVersion = 1
                 GSE.Print("Sample macro loaded: " .. sequenceName, "GSE")

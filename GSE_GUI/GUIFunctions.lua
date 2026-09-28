@@ -1,15 +1,30 @@
 local GSE = GSE
 local L = GSE.L
-function myUpdateFix()
+local function myUpdateFix()
   GSE:ProcessOOCQueue()
   GSE.ReloadSequences()
-  
+
 end
 --- This function pops up a confirmation dialog.
 function GSE.GUIDeleteSequence(currentSeq, iconWidget)
-  StaticPopupDialogs["GSE-DeleteMacroDialog"].text = string.format(L["Are you sure you want to delete %s?  This will delete the macro and all versions.  This action cannot be undone."], GSE.GUIEditFrame.SequenceName)
+  if InCombatLockdown() then
+    -- deleting removes the protected macro too; in combat the library entry would go but the macro stay orphaned
+    GSE.Print(L["You cannot do that while in combat."])
+    return
+  end
+  -- Capture now: OnAccept fires later, and the editor may have been switched to another sequence
+  -- by then (Accept would delete the wrong one).
+  -- Delete what is actually saved (the name the sequence was opened under), not whatever has since been
+  -- typed into the name box - typing another macro's name there and pressing Delete removed that one.
+  local classid = GSE.GUIEditFrame.ClassID
+  local sequenceName = GSE.GUIEditFrame.loadedName or GSE.GUIEditFrame.SequenceName
+  if GSE.FindSequenceClassID(sequenceName) then
+    classid = GSE.FindSequenceClassID(sequenceName)
+  end
+  -- StaticPopup runs the text through a format again, so a literal % in a name must be doubled
+  StaticPopupDialogs["GSE-DeleteMacroDialog"].text = string.gsub(string.format(L["Are you sure you want to delete %s?  This will delete the macro and all versions.  This action cannot be undone."], sequenceName), "%%", "%%%%")
   StaticPopupDialogs["GSE-DeleteMacroDialog"].OnAccept = function(self, data)
-      GSE.GUIConfirmDeleteSequence(GSE.GUIEditFrame.ClassID, GSE.GUIEditFrame.SequenceName)
+      GSE.GUIConfirmDeleteSequence(classid, sequenceName)
   end
   StaticPopup_Show ("GSE-DeleteMacroDialog")
   
@@ -17,7 +32,14 @@ end
 
 --- This function then deletes the macro
 function GSE.GUIConfirmDeleteSequence(classid, sequenceName)
+  if InCombatLockdown() then
+    -- the popup can be accepted after combat started; DeleteMacro is protected
+    GSE.Print(L["You cannot do that while in combat."])
+    return
+  end
   GSE.GUIViewFrame:Hide()
+  -- deleting must not trigger the "unsaved changes" prompt for the sequence that is going away
+  GSE.GUIEditorMarkClean()
   GSE.GUIEditFrame:Hide()
   GSE.DeleteSequence(classid, sequenceName)
   GSE.GUIShowViewer()
@@ -30,11 +52,23 @@ function GSE.GUIParseText(editbox)
     local text = GSE.UnEscapeString(editbox:GetText())
     local returntext = GSE.TranslateString(text , GetLocale(), GetLocale(), true)
     editbox:SetText(returntext)
-    editbox:SetCursorPosition(string.len(returntext)+2)
+    -- editbox is an AceGUI MultiLineEditBox widget; the native cursor API lives on .editBox
+    if editbox.editBox then
+      editbox.editBox:SetCursorPosition(string.len(returntext)+2)
+    end
+    -- SetText doesn't fire OnTextChanged, so push the reformatted text back into the data model
+    editbox:Fire("OnTextChanged", returntext)
   end
 end
 
 function GSE.GUILoadEditor(key, incomingframe, recordedstring)
+  -- Never replace an editor that holds unsaved edits: /gse or the minimap button can bring the Viewer up
+  -- over it, and Edit/New from there used to overwrite the open work without asking.
+  if GSE.GUIEditFrame:IsShown() and GSE.GUIEditorIsDirty and GSE.GUIEditorIsDirty() then
+    GSE.Print(L["The open editor has unsaved changes. Save or close it first."])
+    GSE.GUIEditFrame.frame:Raise()
+    return
+  end
   local classid
   local sequenceName
   local sequence
@@ -95,6 +129,8 @@ function GSE.GUILoadEditor(key, incomingframe, recordedstring)
   -- Viewer just never reappearing.
   GSE.GUIEditFrame.save = false
   GSE.GUIEditFrame.SequenceName = sequenceName
+  -- the name this sequence was opened under; renaming onto another existing name asks before overwriting
+  GSE.GUIEditFrame.loadedName = (not GSE.isNewFirstTimeCreated) and sequenceName or nil
   GSE.GUIEditFrame.Sequence = sequence
   GSE.GUIEditFrame.ClassID = classid
   GSE.GUIEditFrame.Default = sequence.Default
@@ -106,6 +142,13 @@ function GSE.GUILoadEditor(key, incomingframe, recordedstring)
   GSE.GUIEditFrame.Party = sequence.Party or sequence.Default
   GSE.GUIEditorPerformLayout(GSE.GUIEditFrame)
   GSE.GUIEditFrame.ContentContainer:SelectTab("config")
+  -- What was just loaded is the baseline for "unsaved changes" - except a freshly recorded rotation,
+  -- which exists nowhere else yet: leave it marked unsaved so closing the editor asks before it is lost.
+  if GSE.isEmpty(key) and not GSE.isEmpty(recordedstring) then
+    GSE.GUIEditFrame.cleanSnapshot = ""
+  else
+    GSE.GUIEditorMarkClean()
+  end
   incomingframe:Hide()
   -- Show()/Hide() on this plain AceGUI frame isn't a protected action, so it
   -- doesn't need the combat guard - only myUpdateFix()'s queue/reload work
@@ -113,60 +156,32 @@ function GSE.GUILoadEditor(key, incomingframe, recordedstring)
   -- on InCombatLockdown(), which meant clicking Edit while in combat (e.g.
   -- fighting a training dummy) hid the Viewer and silently never opened the
   -- Editor - no error, no message, just a window that appeared to vanish.
+  -- Show the editor first: an error inside myUpdateFix (queue/reload) used to leave the user with the
+  -- Viewer hidden and no editor at all.
+  GSE.GUIEditFrame:Show()
   if not InCombatLockdown() then
 	myUpdateFix()
   end
-  GSE.GUIEditFrame:Show()
 
 end
 
+--- Friendly default name for a brand-new macro: "<Spec>_<n>", e.g. Blood_1, Blood_2. Short (WoW macro names
+--- are limited to 16 characters), free of spaces and unique across every class. It used to be built from
+--- the spec, a count and GetTime(), giving names like "newblood1325584 197" - unreadable, with a space
+--- that later broke the library key - and it rewrote every Global sequence as a side effect.
 function GSE.getSequenceName()
-  
-  local names1 = GSE.GetSequenceNames()
-  local numberOfSeqs = 0
-  local currentSpecID, specname, specicon = GSE.GetCurrentSpecID()
-  local newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters("New"..specname))
-  local newSeqName = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters("New"..specname))
-  local newSeqNumber=numberOfSeqs+1
-  if not GSE.isEmpty(GSELibrary[0]) then
-    numberOfSeqs = 0
-    for k,v in pairs(GSELibrary[0]) do
-      numberOfSeqs = numberOfSeqs + 1
-      for i,j in ipairs(v.MacroVersions) do
-        GSELibrary[0][k].MacroVersions[tonumber(i)] = GSE.UnEscapeSequence(j)
-      end
-    end
+  local _, specname = GSE.GetCurrentSpecID()
+  local base = string.sub((string.gsub(specname or "", "[^%w]", "")), 1, 8)
+  -- the spec name comes back in capitals: "Blood", not "BLOOD"
+  base = string.upper(string.sub(base, 1, 1)) .. string.lower(string.sub(base, 2))
+  if GSE.isEmpty(base) then
+    base = "Macro"
   end
-  if numberOfSeqs <= 0 then
-    if not GSE.isEmpty(GSELibrary[GSE.GetCurrentClassID()]) then
-      for k,v in GSE.pairsByKeys(names1) do
-        numberOfSeqs = numberOfSeqs + 1 
-      end
-    end
+  local n = 1
+  while GSE.FindSequenceClassID(base .. "_" .. n) or GetMacroIndexByName(base .. "_" .. n) > 0 do
+    n = n + 1
   end
-  newSeqNumber=numberOfSeqs+1
-  newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters("New"..specname..newSeqNumber..GetTime()))
-  newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters(newSeqNameTemp))
-  for k,v in GSE.pairsByKeys(names1) do
-    local elements = GSE.split(k, ",")
-    local classid = tonumber(elements[1])
-    local sequencename = elements[2]
-	if newSeqNameTemp == sequencename then
-	  newSeqNumber=numberOfSeqs+1
-	  newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters("New"..specname..newSeqNumber..GetTime()))
-	  newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters(newSeqNameTemp))
-	end
-  end
-  for name, sequence in pairs(GSELibrary[GSE.GetCurrentClassID()]) do
-    if newSeqNameTemp == name then
-	  newSeqNumber = numberOfSeqs+1
-	  newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters("New"..specname..newSeqNumber..GetTime()))
-	  newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters(newSeqNameTemp))
-	end
-  end
-  newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters(newSeqNameTemp))
-  newSeqName =  GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters(newSeqNameTemp))
-  return newSeqName
+  return base .. "_" .. n
 end
 
 function GSE.GUIUpdateSequenceList()
@@ -201,10 +216,22 @@ function GSE.GUIUpdateSequenceDefinition(classid, SequenceName, sequence)
       classid = GSE.GetCurrentClassID()
     end
     if not GSE.isEmpty(SequenceName) then
+      -- Library keys never contain spaces/commas; keep the open editor pointing at the real key
+      local cleanName = string.gsub(string.gsub(SequenceName, " ", "_"), ",", "_")
+      if cleanName ~= SequenceName then
+        SequenceName = cleanName
+        if GSE.GUIEditFrame then
+          GSE.GUIEditFrame.SequenceName = cleanName
+          if GSE.GUIEditFrame.nameeditbox then
+            GSE.GUIEditFrame.nameeditbox:SetText(cleanName)
+          end
+        end
+      end
       local vals = {}
       vals.action = "Replace"
       vals.sequencename = SequenceName
-      vals.sequence = sequence
+      -- Queue a copy so later unsaved edits in the editor don't mutate the live library entry
+      vals.sequence = GSE.CloneSequence(sequence, true) or sequence
       vals.classid = classid
       table.insert(GSE.OOCQueue, vals)
       GSE.GUIEditFrame:SetStatusText(string.format(L["Sequence %s saved."], SequenceName))

@@ -33,6 +33,118 @@ local function accentColor()
   return 0.35, 0.65, 1
 end
 
+-- AceGUI recycles released widgets through ONE shared pool (the library is a LibStub singleton), so a
+-- widget GSE skinned can be handed to any other addon's window afterwards. Everything below therefore
+-- snapshots what it is about to change and puts it back when the widget is released, keeping the flat
+-- look inside GSE's own windows. (ElvUI's Handle* calls are not reversible; ElvUI skins AceGUI itself.)
+local currentWidget -- the AceGUI widget whose skin pass is running
+
+--- Runs `capture` once per (target, kind) per widget acquisition - before the first change is made - and
+--- arranges for the returned restore function to run when the widget is released.
+local function guard(target, kind, capture)
+  local w = currentWidget
+  if not w or not target or type(w.SetCallback) ~= "function" then return end
+  local list = w.gseSkinRestores
+  if not list then
+    list = { seen = {} }
+    w.gseSkinRestores = list
+    local previous = w.events and w.events["OnRelease"]
+    w:SetCallback("OnRelease", function(widget, ...)
+      local pending = widget.gseSkinRestores
+      widget.gseSkinRestores = nil
+      if pending then
+        for i = #pending, 1, -1 do pcall(pending[i]) end
+      end
+      if previous then previous(widget, ...) end
+    end)
+  end
+  list.seen[target] = list.seen[target] or {}
+  if list.seen[target][kind] then return end
+  list.seen[target][kind] = true
+  local ok, restore = pcall(capture)
+  if ok and type(restore) == "function" then
+    list[#list + 1] = restore
+  end
+end
+
+local function captureBackdrop(frame)
+  return function()
+    if not frame.GetBackdrop then return nil end
+    local backdrop = frame:GetBackdrop()
+    local bg = { frame:GetBackdropColor() }
+    local border = { frame:GetBackdropBorderColor() }
+    return function()
+      frame:SetBackdrop(backdrop)
+      if backdrop then
+        if bg[1] then frame:SetBackdropColor(unpack(bg)) end
+        if border[1] then frame:SetBackdropBorderColor(unpack(border)) end
+      end
+    end
+  end
+end
+
+local BUTTON_TEXTURES = { "Normal", "Pushed", "Disabled", "Highlight" }
+local function captureButton(button)
+  return function()
+    local snap = {}
+    for _, kind in ipairs(BUTTON_TEXTURES) do
+      local getter = button["Get" .. kind .. "Texture"]
+      local tex = getter and getter(button)
+      if tex then
+        snap[kind] = { path = tex:GetTexture(), coords = { tex:GetTexCoord() }, blend = tex:GetBlendMode() }
+      end
+    end
+    return function()
+      for _, kind in ipairs(BUTTON_TEXTURES) do
+        local saved = snap[kind]
+        local setter = button["Set" .. kind .. "Texture"]
+        if setter then
+          if saved and saved.path then
+            if kind == "Highlight" then setter(button, saved.path, saved.blend) else setter(button, saved.path) end
+            local tex = button["Get" .. kind .. "Texture"](button)
+            if tex then
+              if #saved.coords >= 4 then tex:SetTexCoord(unpack(saved.coords)) end
+              tex:SetVertexColor(1, 1, 1, 1)
+            end
+          else
+            setter(button, "")
+          end
+        end
+      end
+    end
+  end
+end
+
+local function capturePieces(frame, parts)
+  return function()
+    local name = frame:GetName()
+    local saved = {}
+    if name then
+      for _, part in ipairs(parts) do
+        local tex = _G[name .. part]
+        if tex and tex.GetAlpha then saved[part] = { tex, tex:GetAlpha() } end
+      end
+    end
+    return function()
+      for _, entry in pairs(saved) do entry[1]:SetAlpha(entry[2]) end
+    end
+  end
+end
+
+local function captureTexture(tex)
+  return function()
+    if not tex or not tex.GetTexture then return nil end
+    local path = tex:GetTexture()
+    local coords = { tex:GetTexCoord() }
+    local r, g, b, a = tex:GetVertexColor()
+    return function()
+      if path then tex:SetTexture(path) end
+      if #coords >= 4 then tex:SetTexCoord(unpack(coords)) end
+      tex:SetVertexColor(r or 1, g or 1, b or 1, a or 1)
+    end
+  end
+end
+
 local flatBackdropTable = {
   bgFile = FLAT_TEXTURE,
   edgeFile = FLAT_TEXTURE,
@@ -42,6 +154,7 @@ local flatBackdropTable = {
 
 local function applyFlatBackdrop(frame)
   if not frame or not frame.SetBackdrop then return end
+  guard(frame, "backdrop", captureBackdrop(frame))
   frame:SetBackdrop(flatBackdropTable)
   frame:SetBackdropColor(0.06, 0.06, 0.06, 0.95)
   frame:SetBackdropBorderColor(0, 0, 0, 1)
@@ -55,6 +168,7 @@ end
 --- instead of blending into the window background.
 local function applyInputBackdrop(frame)
   if not frame or not frame.SetBackdrop then return end
+  guard(frame, "backdrop", captureBackdrop(frame))
   frame:SetBackdrop(flatBackdropTable)
   frame:SetBackdropColor(0.1, 0.1, 0.1, 1)
   frame:SetBackdropBorderColor(0.32, 0.32, 0.32, 1)
@@ -66,6 +180,7 @@ end
 
 function Skin.FlatButton(button)
   if not button then return end
+  guard(button, "button", captureButton(button))
   if button.SetNormalTexture then button:SetNormalTexture("") end
   if button.SetPushedTexture then button:SetPushedTexture("") end
   if button.SetDisabledTexture then button:SetDisabledTexture("") end
@@ -88,6 +203,7 @@ local function hideNamedPieces(frame, parts)
   if not frame or not frame.GetName then return end
   local name = frame:GetName()
   if not name then return end
+  guard(frame, "pieces", capturePieces(frame, parts))
   for _, part in ipairs(parts) do
     local tex = _G[name .. part]
     if tex and tex.SetAlpha then tex:SetAlpha(0) end
@@ -112,6 +228,8 @@ end
 --- always the flat/accent recolour, with or without ElvUI installed.
 function Skin.FlatCheckBox(checkbg, check)
   if not checkbg or not checkbg.SetTexture then return end
+  guard(checkbg, "texture", captureTexture(checkbg))
+  if check then guard(check, "texture", captureTexture(check)) end
   checkbg:SetTexture(FLAT_TEXTURE)
   checkbg:SetVertexColor(0.12, 0.12, 0.12, 1)
   if check and check.SetVertexColor then
@@ -143,6 +261,10 @@ local function skinFrameChrome(frame)
         if region.GetObjectType and region:GetObjectType() == "Texture" then
           local tex = region.GetTexture and region:GetTexture()
           if tex == TITLE_HEADER_TEXTURE then
+            guard(region, "alpha", function()
+              local alpha = region:GetAlpha()
+              return function() region:SetAlpha(alpha) end
+            end)
             region:SetAlpha(0)
           end
         end
@@ -211,7 +333,21 @@ function Skin.FlatTab(tab)
   if not tab or not tab.GetName then return end
   local name = tab:GetName()
   if not name then return end
-  for _, part in ipairs({ "Left", "Middle", "Right", "LeftDisabled", "MiddleDisabled", "RightDisabled" }) do
+  local parts = { "Left", "Middle", "Right", "LeftDisabled", "MiddleDisabled", "RightDisabled" }
+  guard(tab, "tint", function()
+    local saved = {}
+    for _, part in ipairs(parts) do
+      local tex = _G[name .. part]
+      if tex and tex.GetVertexColor then saved[part] = { tex, { tex:GetVertexColor() } } end
+    end
+    return function()
+      for _, entry in pairs(saved) do
+        local c = entry[2]
+        entry[1]:SetVertexColor(c[1] or 1, c[2] or 1, c[3] or 1, c[4] or 1)
+      end
+    end
+  end)
+  for _, part in ipairs(parts) do
     local tex = _G[name .. part]
     if tex and tex.SetVertexColor then tex:SetVertexColor(0.35, 0.35, 0.35) end
   end
@@ -229,8 +365,7 @@ end
 --- Skins a single AceGUI widget instance based on its known internal shape.
 --- Errors from any one widget are swallowed (via pcall further up the chain)
 --- so a mismatched widget can't break the rest of the skin pass.
-local function skinWidget(widget)
-  if type(widget) ~= "table" then return end
+local function skinWidgetInner(widget)
   local wtype = widget.type
 
   if wtype == "Button" then
@@ -260,6 +395,14 @@ local function skinWidget(widget)
     -- AceGUI-3.0-Completing-EditBox) not recognised by exact type above.
     Skin.EditBox(widget.editbox)
   end
+end
+
+local function skinWidget(widget)
+  if type(widget) ~= "table" then return end
+  currentWidget = widget
+  local ok, err = pcall(skinWidgetInner, widget)
+  currentWidget = nil
+  if not ok then error(err, 0) end
 end
 
 --- Recursively walks an AceGUI container tree - as built via :AddChild /

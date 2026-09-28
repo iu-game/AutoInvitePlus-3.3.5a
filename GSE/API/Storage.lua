@@ -11,7 +11,9 @@ local MAX_ACCOUNT_MACROS = MAX_ACCOUNT_MACROS or 120
 --- Delete a sequence starting with the macro and then the sequence from the library
 function GSE.DeleteSequence(classid, sequenceName)
   GSE.DeleteMacroStub(sequenceName, L[" Deleted Macro "])
-  GSELibrary[classid][sequenceName] = nil
+  if GSELibrary[classid] then
+    GSELibrary[classid][sequenceName] = nil
+  end
 end
 
 function GSE.CloneSequence(sequence, keepcomments)
@@ -58,15 +60,9 @@ function GSE.CloneMacroVersion(macroversion, keepcomments)
   for k,v in pairs(macroversion) do
     GSE.PrintDebugMessage(string.format("Processing Key: %s KeyType: %s valuetype: %s", k, type(k), type(v)), "Storage")
     if type(k) == "string" and type(v) == "string" then
-      if GSE.isEmpty(string.find(v, '--', 1, true)) then
-        retseq[k] = v
-      else
-        if not GSE.isEmpty(keepcomments) then
-          table.insert(retseq, v)
-        else
-          GSE.PrintDebugMessage(string.format("comment found %s", v), "Storage")
-        end
-      end
+      -- string-keyed values (e.g. a custom StepFunction body) are settings, not macro lines:
+      -- always copy them under their own key, never comment-filter or append them to the array
+      retseq[k] = v
     elseif type(k) == "string" and type(v) == "boolean" then
       retseq[k] = v
     elseif type(k) == "string" and type(v) == "number" then
@@ -114,12 +110,19 @@ function GSE.OOCAddSequenceToCollection(sequenceName, sequence, classid)
 
   -- CHeck for colissions
   local found = false
+  local suppliedClassID = classid
   if (GSE.isEmpty(classid) or classid == 0) and not GSE.isEmpty(sequence.SpecID) then
     classid = tonumber(GSE.GetClassIDforSpec(sequence.SpecID))
   elseif GSE.isEmpty(sequence.SpecID) then
 	local sidy=GSE.GetCurrentSpecID()
     sequence.SpecID = sidy
     classid = tonumber(GSE.GetClassIDforSpec(sequence.SpecID))
+  end
+  -- Spec lookup can fail (unmatched talent tab / non-enUS client): fall back to the player's class
+  -- instead of throwing on GSELibrary[nil] inside the OOC queue's pcall (silently losing the save).
+  if GSE.isEmpty(classid) then
+    -- keep the class the caller asked for (e.g. Global) over guessing the player's own
+    classid = (not GSE.isEmpty(suppliedClassID)) and tonumber(suppliedClassID) or GSE.GetCurrentClassID()
   end
   if GSE.isEmpty(GSELibrary[classid]) then
     GSELibrary[classid] = {}
@@ -128,7 +131,14 @@ function GSE.OOCAddSequenceToCollection(sequenceName, sequence, classid)
       found = true
   end
   if found then
-    if GSE.isEmpty(GSELibrary[classid][sequenceName].ManualIntervention) then --- Added by me
+    -- Re-importing over an existing sequence keeps the existing data, but should still adopt the icon
+    -- the import carries when the existing entry never had one (otherwise the macro keeps its "?").
+    if GSE.isEmpty(GSELibrary[classid][sequenceName].Icon) and not GSE.isEmpty(sequence.Icon) then
+      GSELibrary[classid][sequenceName].Icon = sequence.Icon
+    end
+    -- ManualIntervention is a boolean (false after import, true once edited by hand); isEmpty(false)
+    -- is false, so test truthiness or the merge below is skipped after the very first import.
+    if not GSELibrary[classid][sequenceName].ManualIntervention then --- Added by me
 		  -- Macro hasnt been touched.
 		  GSE.PrintDebugMessage(L["No changes were made to "].. sequenceName, "Storage")
 		
@@ -175,6 +185,8 @@ function GSE.OOCAddSequenceToCollection(sequenceName, sequence, classid)
 
     GSELibrary[classid][sequenceName] = {}
     GSELibrary[classid][sequenceName] = sequence
+    --- Added by me: a freshly imported sequence hasn't been hand-edited yet
+    GSELibrary[classid][sequenceName].ManualIntervention = false
   end
   if not GSE.isEmpty(confirmationtext) then
     GSE.Print(GSEOptions.EmphasisColour .. sequenceName .. "|r" .. L[" was imported with the following errors."] .. " " .. confirmationtext, GNOME)
@@ -182,8 +194,6 @@ function GSE.OOCAddSequenceToCollection(sequenceName, sequence, classid)
   if classid == GSE.GetCurrentClassID() or classid == 0 then
      GSE.UpdateSequence(sequenceName, sequence.MacroVersions[sequence.Default])
   end
-  --- Added by me
-  GSELibrary[classid][sequenceName].ManualIntervention = false
 end
 
 --- Load a collection of Sequences
@@ -261,11 +271,14 @@ end
 --- Load a serialised Sequence
 function GSE.ImportSerialisedSequence(importstring, createicon)
   local decompresssuccess, actiontable = GSE.DecodeMessage(importstring)
-  GSE.PrintDebugMessage (string.format("Decomsuccess: %s  tablerows: %s   type cell1 %s cell2 %s" , tostring(decompresssuccess), table.getn(actiontable), type(actiontable[1]), type(actiontable[2])), Statics.SourceTransmission)
-  if (decompresssuccess) and (table.getn(actiontable) == 2) and (type(actiontable[1]) == "string") and (type(actiontable[2]) == "table") then
+  -- DecodeMessage returns nothing on a bad decode, so actiontable can be nil here
+  if (decompresssuccess) and type(actiontable) == "table" then
+    GSE.PrintDebugMessage (string.format("Decomsuccess: %s  tablerows: %s   type cell1 %s cell2 %s" , tostring(decompresssuccess), table.getn(actiontable), type(actiontable[1]), type(actiontable[2])), Statics.SourceTransmission)
+  end
+  if (decompresssuccess) and type(actiontable) == "table" and (table.getn(actiontable) == 2) and (type(actiontable[1]) == "string") and (type(actiontable[2]) == "table") then
     GSE.AddSequenceToCollection(actiontable[1], actiontable[2])
     if createicon then
-      GSE.CheckMacroCreated(actiontable[1], true)
+      GSE.CheckMacroCreated((string.gsub(string.gsub(actiontable[1], " ", "_"), ",", "_")), true)
     end
   else
     GSE.Print(L["Unable to interpret sequence."] , GNOME)
@@ -292,7 +305,12 @@ function GSE.ImportSequence(importStr, legacy, createicon)
     -- Make the compiled function see this table as its "globals"
     setfenv (func, fake_globals)
 
-    local TempSequences = assert(func())
+    -- pasted import text can raise at runtime; report it instead of throwing out of the Import handler
+    local ran, TempSequences = pcall(func)
+    if not ran then
+      GSE.Print(tostring(TempSequences), GNOME)
+      return false, tostring(TempSequences)
+    end
     if not GSE.isEmpty(TempSequences) then
       local newkey = ""
       for k,v in pairs(TempSequences) do
@@ -305,9 +323,10 @@ function GSE.ImportSequence(importStr, legacy, createicon)
           v.Icon = GSE.GetDefaultIcon()
         end
         newkey = k
-      end
-      if createicon then
-        GSE.CheckMacroCreated(newkey, true)
+        if createicon then
+          -- one macro per imported sequence, under the same underscored name OOCAddSequenceToCollection stores it as
+          GSE.CheckMacroCreated((string.gsub(string.gsub(k, " ", "_"), ",", "_")), true)
+        end
       end
       success = true
     end
@@ -322,12 +341,16 @@ end
 function GSE.ReloadSequences()
   GSE.PrintDebugMessage("Reloading Sequences")
   for name, sequence in pairs(GSELibrary[GSE.GetCurrentClassID()]) do
-    GSE.UpdateSequence(name, sequence.MacroVersions[GSE.GetActiveSequenceVersion(name)])
+    if type(sequence) == "table" and type(sequence.MacroVersions) == "table" then
+      GSE.UpdateSequence(name, sequence.MacroVersions[GSE.GetActiveSequenceVersion(name)])
+    end
   end
   if GSEOptions.CreateGlobalButtons then
     if not GSE.isEmpty(GSELibrary[0]) then
       for name, sequence in pairs(GSELibrary[0]) do
-        GSE.UpdateSequence(name, sequence.MacroVersions[GSE.GetActiveSequenceVersion(name)])
+        if type(sequence) == "table" and type(sequence.MacroVersions) == "table" then
+          GSE.UpdateSequence(name, sequence.MacroVersions[GSE.GetActiveSequenceVersion(name)])
+        end
       end
     end
   end
@@ -671,9 +694,8 @@ function GSE.OOCUpdateSequence(name,sequence)
       gsebutton:SetAttribute("combatreset", false)
     end
     gsebutton:WrapScript(gsebutton, 'OnClick', GSE.PrepareOnClickImplementation(sequence))
-    if not GSE.isEmpty(sequence.LoopLimit) then
-      gsebutton:SetAttribute('looplimit', sequence.LoopLimit)
-    end
+    -- Always set it: removing the Inner Loop Limit in the editor must not leave the old limit on a live button
+    gsebutton:SetAttribute('looplimit', tonumber(sequence.LoopLimit) or 0)
   else
     GSE.Print(string.format(L["There is an issue with sequence %s.  It has not been loaded to prevent the mod from failing."], name))
   end
@@ -877,10 +899,30 @@ function GSE.CheckMacroCreated(SequenceName, create)
 end
 
 --- Check if a macro has been created and if the create flag is true and the macro hasnt been created then create it.
+--- Finds which library class holds a sequence: the player's own class first, then Global, then any
+--- other class. Returns classid, sequence (nil, nil when unknown).
+function GSE.FindSequenceClassID(sequenceName)
+  local order = { GSE.GetCurrentClassID(), 0 }
+  for classid in pairs(GSELibrary) do
+    if classid ~= order[1] and classid ~= 0 then
+      order[#order + 1] = classid
+    end
+  end
+  for _, classid in ipairs(order) do
+    local entry = GSELibrary[classid] and GSELibrary[classid][sequenceName]
+    if type(entry) == "table" then
+      return classid, entry
+    end
+  end
+  return nil, nil
+end
+
 function GSE.OOCCheckMacroCreated(SequenceName, create)
   local found = false
-  local classid = GSE.GetCurrentClassID()
-  if GSE.isEmpty(GSELibrary[GSE.GetCurrentClassID()][SequenceName]) then
+  -- The sequence can live in any class (the Viewer lists all of them), not only the player's own or
+  -- Global: looking only there lost the sequence's icon (EditMacro/CreateMacro got nil) for the rest.
+  local classid = GSE.FindSequenceClassID(SequenceName)
+  if classid == nil then
     classid = 0
   end
   local macroIndex = GetMacroIndexByName(SequenceName)
@@ -889,8 +931,9 @@ function GSE.OOCCheckMacroCreated(SequenceName, create)
     if create then
       -- Also re-apply the icon (not just the command body): the user may
       -- have picked a new one in the Editor since this macro was created.
-      local icon = not GSE.isEmpty(GSELibrary[classid][SequenceName]) and GSELibrary[classid][SequenceName].Icon
-      EditMacro(macroIndex, icon or nil, nil,  GSE.CreateMacroString(SequenceName))
+      local icon = GSELibrary[classid] and not GSE.isEmpty(GSELibrary[classid][SequenceName]) and GSELibrary[classid][SequenceName].Icon
+      -- 3.3.5a signature is EditMacro(index, name, icon, body): icon is the 3rd arg and must be numeric
+      EditMacro(macroIndex, nil, icon and GSE.ResolveMacroIconIndex(icon, true) or nil,  GSE.CreateMacroString(SequenceName))
     end
   else
     if create then
@@ -909,7 +952,7 @@ function GSE.OOCCheckMacroCreated(SequenceName, create)
       -- iconIndex, body, perCharacter)" on every sequence without a
       -- manually-picked icon. Leaving this nil when unset lets that
       -- fallback apply the correct type.
-      local entry = GSELibrary[classid][SequenceName]
+      local entry = GSELibrary[classid] and GSELibrary[classid][SequenceName]
       local icon = not GSE.isEmpty(entry) and not GSE.isEmpty(entry.Icon) and entry.Icon or nil
       GSE.CreateMacroIcon(SequenceName, icon)
       found = true
@@ -1033,17 +1076,37 @@ end
 --- perCharacter)" when handed a string. Resolves either shape to a valid
 --- numeric index, falling back to 1 (the default question-mark icon) if
 --- empty or no match is found.
-function GSE.ResolveMacroIconIndex(icon)
+--- Normalises an icon texture name/path for comparison: the client reports macro icons in its own case
+--- (and may include the "Interface\Icons\\" folder) while sequences store e.g. "Spell_Nature_StarFall".
+local function iconKey(name)
+  return (string.gsub(string.lower(tostring(name)), "^interface[\\/]icons[\\/]", ""))
+end
+
+--- Turns a sequence's Icon (texture name, or already an index) into the numeric index the macro APIs need.
+--- With noFallback, returns nil when the icon can't be found instead of the default index 1 ("?"), so
+--- callers that only want to update an existing macro's icon can leave it alone.
+function GSE.ResolveMacroIconIndex(icon, noFallback)
   if type(icon) == "number" then
     return icon
   end
   if type(icon) == "string" and icon ~= "" then
+    local want = iconKey(icon)
+    -- exact match first: a substring pass alone picked "INV_Misc_Bag_10" for "INV_Misc_Bag_1"
     for i = 1, GetNumMacroIcons() do
       local path = GetMacroIconInfo(i)
-      if path and (path == icon or path:find(icon, 1, true)) then
+      if path and iconKey(path) == want then
         return i
       end
     end
+    for i = 1, GetNumMacroIcons() do
+      local path = GetMacroIconInfo(i)
+      if path and string.find(iconKey(path), want, 1, true) then
+        return i
+      end
+    end
+  end
+  if noFallback then
+    return nil
   end
   return 1
 end
@@ -1178,10 +1241,10 @@ function GSE.PrepareKeyPress(sequence)
   end
 
   if GSEOptions.hideSoundErrors then
-    -- potentially change this to SetCVar("Sound_EnableSFX", 0)
-    table.insert(tab,"/run sfx=GetCVar(\"Sound_EnableSFX\");")
-    table.insert(tab, "/run ers=GetCVar(\"Sound_EnableErrorSpeech\");")
-    table.insert(tab, "/console Sound_EnableSFX 0")
+    -- Mute ONLY the error speech ("That is out of range"), as the option says - this also muted every
+    -- sound effect. Remember the player's setting only if it isn't already remembered: when two key
+    -- presses overlapped, the second one recorded the already-muted value and left sound off for good.
+    table.insert(tab, "/run if not GSE_ers then GSE_ers=GetCVar(\"Sound_EnableErrorSpeech\") end")
     table.insert(tab, "/console Sound_EnableErrorSpeech 0")
   end
   if not GSE.isEmpty(sequence.KeyPress) then
@@ -1226,9 +1289,7 @@ function GSE.PrepareKeyRelease(sequence)
     table.insert(tab, "/use [combat] 6")
   end
   if GSEOptions.hideSoundErrors then
-    -- potentially change this to SetCVar("Sound_EnableSFX", 1)
-    table.insert(tab, "/run SetCVar(\"Sound_EnableSFX\",sfx);")
-    table.insert(tab, "/run SetCVar(\"Sound_EnableErrorSpeech\",ers);")
+    table.insert(tab, "/run if GSE_ers then SetCVar(\"Sound_EnableErrorSpeech\",GSE_ers) GSE_ers=nil end")
   end
   if GSEOptions.hideUIErrors then
     table.insert(tab, "/script UIErrorsFrame:Hide();")
@@ -1356,12 +1417,16 @@ function GSE.CompressSequenceFromString(importstring)
     -- Make the compiled function see this table as its "globals"
     setfenv (func, fake_globals)
 
-    local TempSequences = assert(func())
-    if not GSE.isEmpty(TempSequences) then
+    local ran, TempSequences = pcall(func)
+    if not ran then
+      GSE.Print(tostring(TempSequences), GNOME)
+    elseif not GSE.isEmpty(TempSequences) then
       for k,v in pairs(TempSequences) do
         returnstr = GSE.ExportSequence(v, k, true)
       end
     end
+  else
+    GSE.Print(tostring(err), GNOME)
   end
   return returnstr
 end

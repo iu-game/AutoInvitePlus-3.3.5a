@@ -47,12 +47,20 @@ end
 	else
 		name1 = ""
 	end
+  -- The 3.3.5a Druid feral tab is "Feral Combat"; the spec list stores "Feral - Druid"
+  if name1 == "FERAL COMBAT" then
+    name1 = "FERAL"
+  end
   local specid;
+  if name1 == "" then
+    -- talents not loaded yet: "" would match every spec entry and pick an arbitrary one
+    return nil,name1,icon
+  end
 
 	  for k,v in pairs(Statics.wotlkSpecIDList) do
 
 		local searchStr = v and string.upper(v) or ""
-		local st,ed=string.find(searchStr,name1)
+		local st,ed=string.find(searchStr,name1,1,true)
 		local isClass,isClass1=UnitClass("player")
 		isClass = isClass and string.upper(isClass) or ""
 		isClass1 = isClass1 and string.upper(isClass1) or ""
@@ -101,15 +109,17 @@ function GSE.GetClassIDforSpec(specid)
   for k,v in pairs(Statics.wotlkSpecIDList) do
 	if (k==specid) then 
 		--value=Statics.wotlkSpecIDList[specID]
-		local idx=string.find(v," - ")
+		-- plain find: as a pattern " - " matches the first space ("Beast Mastery - Hunter" -> wrong split)
+		local idx=string.find(v," - ",1,true)
 		if(idx~=nil) then
 			class=string.sub(v,idx+3)
 		end
 		--print(v,last,last[#last])
 	    --local class=string.upper(last[#last])
 		for k1,v1 in pairs(Statics.wotlkClassIDList) do
-			if (string.upper(v1)==string.upper(class)) then 
-			classid=k1  
+			-- class-level ids (0-11) have no " - Class" suffix, so class is nil (classid already set above)
+			if class and (string.upper(v1)==string.upper(class)) then
+			classid=k1
 			end
 		end
 	end
@@ -206,15 +216,19 @@ function GSE.GetCharacterName()
 end
 
 --- Returns the current Talent Selections as a string
+--- The player's talent build as the usual WotLK point spread, e.g. "51/20/0". This used to be a
+--- placeholder ("?,?,?,?,?,?,?,") that got saved into every new macro's Talents field.
 function GSE.GetCurrentTalents()
-  local talents = ""
-    for talentTier = 1, 7 do
-  --for talentTier = 1, MAX_TALENT_TIERS do
-    --local available, selected = GetTalentTierInfo(talentTier, 1)
-   -- talents = talents .. (available and selected or "?" .. ",")
-   talents = talents .. ("?" .. ",")
+  local spread = {}
+  local activeGroup = GetActiveTalentGroup and GetActiveTalentGroup() or 1
+  for tab = 1, (GetNumTalentTabs and GetNumTalentTabs() or 0) do
+    local _, _, points = GetTalentTabInfo(tab, false, false, activeGroup)
+    spread[#spread + 1] = tostring(points or 0)
   end
-  return talents
+  if #spread == 0 then
+    return "?"
+  end
+  return table.concat(spread, "/")
 end
 
 

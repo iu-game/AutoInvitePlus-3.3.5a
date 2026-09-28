@@ -37,7 +37,7 @@ Lib\LibCompress\lib.xml
 Lib\LibStub\LibStub.lua
 Lib\CallbackHandler-1.0\CallbackHandler-1.0.xml
 Lib\LibDataBroker-1.1\LibDataBroker-1.1.lua
-Lib\LibParse\load.xml
+Lib\LibParse\Load.xml
 
 #Setup Localisation
 Localization\ModL_enUS.lua
