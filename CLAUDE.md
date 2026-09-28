@@ -41,7 +41,7 @@ The intended structure is:
   - Matchmaking loop: LFMFormat, FitEngine, Applications (listing format, fit verdicts, Apply protocol)
   - Queue, Waitlist, Blacklist, Promote, RosterManager, RaidSessionManager, Integrations, Updater
   - RaidTools and its split files (RaidToolsRoll, RaidToolsUI, RaidToolsEvents) for roll/loot/announcement features — one logical module split across four .toc entries sharing state via AIP.RaidTools; RaidTools.lua must load first
-  - DBMBridge, ThreatCoach, Readiness, GearAdvisor, GearHooks, UpgradePath, SpecAdvisor, PostPull, Rotation, LFGWatch, CharacterCard, TestData
+  - DBMBridge, ThreatCoach, Readiness, GearAdvisor, GearHooks, UpgradePath, SpecAdvisor, PostPull, Rotation, LFGWatch, CharacterCard, TankCast, RaidGroups, TestData
 - ui/ — presentation layer
   - UIFactory.lua for reusable widgets
   - CentralGUI.lua as the main window controller (the largest file in the addon)

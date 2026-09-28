@@ -4,7 +4,7 @@
 -- Refactored with DRY principle and OOP patterns
 
 local ADDON_NAME = "AutoInvitePlus"
-local VERSION = "6.7.4"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
+local VERSION = "6.8.0"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
 local DB_VERSION = 5  -- Increment when saved variables structure changes (5.5: raid sessions, 5.4: mdps/rdps split, 4: loot history retention)
 
 -- Create main addon namespace (may already exist from Utils.lua)
@@ -193,6 +193,31 @@ local defaults = {
     floatingBarEnabled = false,     -- Show the floating announcement bar
     floatingBarPos = nil,           -- {point, relPoint, x, y}
     floatingBarSize = nil,          -- {w, h} user-resized size of the announcement bar
+
+    -- Tank Cast window (AIP.TankCast). `tanks` ({ {name, picks}, ... }, [1] = MT) is
+    -- deliberately NOT a default: TK.Cfg() creates it, migrating any legacy
+    -- mt/ots/spell keys first - a pre-created empty table would block that.
+    tankCast = {
+        shown = false,              -- window visible (persisted across reloads)
+        locked = false,             -- window position locked (title-bar padlock)
+        pos = nil,                  -- {point, relPoint, x, y}
+    },
+    -- Raid Groups window (AIP.RaidGroups): position/lock only - the roster itself
+    -- is read live from the game, never persisted.
+    -- `notes`/`quickCast` (private, per-character - RG.charCfg()) are deliberately
+    -- NOT here: they live in db.raidGroupsByChar, which RaidGroups.lua creates
+    -- itself, migrating any old account-wide notes/quickCast to the first
+    -- character that loads - a pre-created empty table here would block that.
+    raidGroups = {
+        shown = false,
+        locked = false,             -- window position locked
+        groupLocked = false,        -- group positions locked (manager safety toggle)
+        pos = nil,                  -- {point, relPoint, x, y}
+    },
+    -- Auto-open the Tank Cast and Raid Groups windows the moment you form or
+    -- join a group (solo -> party/raid). Toggle with /aip autoshow.
+    autoShowOnGroup = true,
+
     rollDuration = 10,              -- Roll countdown seconds
 
     -- Self debuff/curse announcer: /say important raid debuffs on you (with stacks)
@@ -1485,6 +1510,13 @@ local function SlashHandler(msg)
         if AIP.RaidTools then AIP.RaidTools.AnnounceReserved() end
     elseif cmd == "bar" or cmd == "announcebar" then
         if AIP.RaidTools then AIP.RaidTools.ToggleBar() end
+    elseif cmd == "tanks" or cmd == "tank" then
+        if AIP.TankCast and AIP.TankCast.SlashHandler then AIP.TankCast.SlashHandler(rest) end
+    elseif cmd == "groups" or cmd == "raidgroups" then
+        if AIP.RaidGroups and AIP.RaidGroups.SlashHandler then AIP.RaidGroups.SlashHandler(rest) end
+    elseif cmd == "autoshow" then
+        AIP.db.autoShowOnGroup = not AIP.db.autoShowOnGroup
+        Print("Auto-open Tank Cast/Raid Groups on joining a group: " .. (AIP.db.autoShowOnGroup and "ON" or "OFF"))
     elseif cmd == "readycheck" or cmd == "rc" then
         if AIP.RaidTools then AIP.RaidTools.StartReadyCheck() end
     elseif cmd == "buffs" or cmd == "delegate" then
@@ -1854,6 +1886,11 @@ local function SlashHandler(msg)
         Print("  /aip roster waitlist - Legacy roster waitlist (separate from the Queue panel's Waitlist tab)")
         Print("|cFFFFFF00Raid Tools:|r")
         Print("  /aip bar - Toggle the floating announcement bar")
+        Print("  /aip tanks - Toggle the Tank Cast window (tanks + per-tank spell/item picks)")
+        Print("  /aip tanks mt|ot [name] | addot | pick|unpick <mt|otN> <name> | spell <name> | clear | reset | lock | sync | push | list")
+        Print("  /aip groups - Toggle the Raid Groups window (right-click a name or the title bar for options)")
+        Print("  /aip groups lock | unlock")
+        Print("  /aip autoshow - Toggle auto-opening Tanks/Groups when you join a group")
         Print("  /aip roll [item] - Start a roll / toggle roll window")
         Print("  /aip rw - Announce reserved loot")
         Print("  /aip rc - Start a ready check")

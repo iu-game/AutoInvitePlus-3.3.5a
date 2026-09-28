@@ -42,7 +42,7 @@ function GUI.CreateAddToQueuePopup()
     title:SetText("Add to Queue")
     title:SetTextColor(1, 0.82, 0)
 
-    local closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
+    local closeBtn = AIP.UI.CloseButton(popup, function() popup:Hide() end)
     closeBtn:SetPoint("TOPRIGHT", -5, -5)
 
     -- Player name
@@ -64,11 +64,7 @@ function GUI.CreateAddToQueuePopup()
     popup.noteInput = noteInput
 
     -- Buttons
-    local addBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-    addBtn:SetSize(80, 24)
-    addBtn:SetPoint("BOTTOMLEFT", 50, 15)
-    addBtn:SetText("Add")
-    addBtn:SetScript("OnClick", function()
+    local addBtn = AIP.UI.FlatButton(popup, "Add", 80, 24, function()
         local name = popup.nameInput:GetText():trim()
         if name == "" then
             AIP.Print("Please enter a player name")
@@ -92,12 +88,10 @@ function GUI.CreateAddToQueuePopup()
             popup:Hide()
         end
     end)
+    addBtn:SetPoint("BOTTOMLEFT", 50, 15)
 
-    local cancelBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-    cancelBtn:SetSize(80, 24)
+    local cancelBtn = AIP.UI.FlatButton(popup, "Cancel", 80, 24, function() popup:Hide() end)
     cancelBtn:SetPoint("LEFT", addBtn, "RIGHT", 20, 0)
-    cancelBtn:SetText("Cancel")
-    cancelBtn:SetScript("OnClick", function() popup:Hide() end)
 
     -- Enter key submits
     popup.nameInput:SetScript("OnEnterPressed", function() addBtn:Click() end)
@@ -140,7 +134,7 @@ function GUI.CreateAddToWaitlistPopup()
     title:SetText("Add to Waitlist")
     title:SetTextColor(1, 0.82, 0)
 
-    local closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
+    local closeBtn = AIP.UI.CloseButton(popup, function() popup:Hide() end)
     closeBtn:SetPoint("TOPRIGHT", -5, -5)
 
     -- Player name
@@ -187,11 +181,7 @@ function GUI.CreateAddToWaitlistPopup()
     popup.noteInput = noteInput
 
     -- Buttons
-    local addBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-    addBtn:SetSize(80, 24)
-    addBtn:SetPoint("BOTTOMLEFT", 60, 15)
-    addBtn:SetText("Add")
-    addBtn:SetScript("OnClick", function()
+    local addBtn = AIP.UI.FlatButton(popup, "Add", 80, 24, function()
         local name = popup.nameInput:GetText():trim()
         if name == "" then
             AIP.Print("Please enter a player name")
@@ -214,12 +204,10 @@ function GUI.CreateAddToWaitlistPopup()
             popup:Hide()
         end
     end)
+    addBtn:SetPoint("BOTTOMLEFT", 60, 15)
 
-    local cancelBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-    cancelBtn:SetSize(80, 24)
+    local cancelBtn = AIP.UI.FlatButton(popup, "Cancel", 80, 24, function() popup:Hide() end)
     cancelBtn:SetPoint("LEFT", addBtn, "RIGHT", 20, 0)
-    cancelBtn:SetText("Cancel")
-    cancelBtn:SetScript("OnClick", function() popup:Hide() end)
 
     -- Enter key submits
     popup.nameInput:SetScript("OnEnterPressed", function() addBtn:Click() end)

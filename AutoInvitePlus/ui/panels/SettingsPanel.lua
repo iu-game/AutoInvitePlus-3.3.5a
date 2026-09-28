@@ -134,14 +134,9 @@ local function CreateStyledEditBox(parent, width, height, isNumeric)
     frame:SetSize(width + 10, height + 8)
 
     -- Background using WotLK-compatible textures
-    frame:SetBackdrop({
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 14,
-        insets = {left = 3, right = 3, top = 3, bottom = 3}
-    })
-    frame:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
-    frame:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
+    frame:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+    frame:SetBackdropColor(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 0.95)
+    frame:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
 
     local editBox = CreateFrame("EditBox", nil, frame)
     editBox:SetSize(width, height)
@@ -169,7 +164,7 @@ local function CreateStyledEditBox(parent, width, height, isNumeric)
         frame:SetBackdropBorderColor(0.8, 0.8, 0.3, 1)
     end)
     editBox:SetScript("OnEditFocusLost", function(self)
-        frame:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
+        frame:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
     end)
 
     -- Store reference to container for positioning
@@ -269,7 +264,14 @@ function SP.Create(parent)
     scrollFrame:SetPoint("BOTTOMRIGHT", -28, 5)
 
     local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetHeight(1822)  -- Height for all sections including test mode
+    -- Deliberately generous fixed height: real content today ends ~70-90px
+    -- short of this. A runtime auto-measure pass was tried here and
+    -- reverted - it destabilized the scroll child's height live (visible
+    -- row overlap in this panel), most likely from a non-content child
+    -- skewing the measured extent. A static, documented height is safer
+    -- than a live measurement that can't be fully verified against every
+    -- child this panel ever creates.
+    content:SetHeight(1822)
     scrollFrame:SetScrollChild(content)
 
     -- Dynamic width - initially set and updated on resize
@@ -309,14 +311,11 @@ function SP.Create(parent)
     updVer:SetText("Installed: |cFFFFFFFFv" .. CurrentVersion() .. "|r")
     frame.updateVer = updVer
 
-    local checkBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    checkBtn:SetSize(90, 20)
-    checkBtn:SetPoint("LEFT", updVer, "RIGHT", 14, 0)
-    checkBtn:SetText("Check Now")
-    checkBtn:SetScript("OnClick", function()
+    local checkBtn = AIP.UI.FlatButton(content, "Check Now", 90, 20, function()
         if AIP.Updater then AIP.Updater.CheckNow() end
         SP.RefreshUpdateStatus()
     end)
+    checkBtn:SetPoint("LEFT", updVer, "RIGHT", 14, 0)
     y = y - 22
 
     local updStatus = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -800,21 +799,15 @@ function SP.Create(parent)
     y = y - 28
 
     -- Spam buttons
-    local spamOnceBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    spamOnceBtn:SetSize(100, 24)
-    spamOnceBtn:SetPoint("TOPLEFT", 15, y)
-    spamOnceBtn:SetText("Broadcast Now")
-    spamOnceBtn:SetScript("OnClick", function()
+    local spamOnceBtn = AIP.UI.FlatButton(content, "Broadcast Now", 100, 24, function()
         if AIP.SpamInvite then AIP.SpamInvite() end
     end)
+    spamOnceBtn:SetPoint("TOPLEFT", 15, y)
 
-    local autoSpamBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    autoSpamBtn:SetSize(120, 24)
-    autoSpamBtn:SetPoint("LEFT", spamOnceBtn, "RIGHT", 10, 0)
-    autoSpamBtn:SetText("Start Auto-Spam")
-    autoSpamBtn:SetScript("OnClick", function()
+    local autoSpamBtn = AIP.UI.FlatButton(content, "Start Auto-Spam", 120, 24, function()
         SP.ToggleAutoSpam()
     end)
+    autoSpamBtn:SetPoint("LEFT", spamOnceBtn, "RIGHT", 10, 0)
     frame.autoSpamBtn = autoSpamBtn
 
     local intervalLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -909,11 +902,7 @@ function SP.Create(parent)
     cacheSuffix:SetPoint("LEFT", cacheContainer, "RIGHT", 5, 0)
     cacheSuffix:SetText("minutes")
 
-    local clearCacheBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    clearCacheBtn:SetSize(100, 20)
-    clearCacheBtn:SetPoint("LEFT", cacheSuffix, "RIGHT", 20, 0)
-    clearCacheBtn:SetText("Clear Cache")
-    clearCacheBtn:SetScript("OnClick", function()
+    local clearCacheBtn = AIP.UI.FlatButton(content, "Clear Cache", 100, 20, function()
         -- GroupTracker/LFMBrowser expose ClearAll (=CS.ClearGroups/ClearPlayers);
         -- there is no ClearCache. Clear both stores and refresh the browser.
         if AIP.GroupTracker and AIP.GroupTracker.ClearAll then AIP.GroupTracker.ClearAll() end
@@ -923,6 +912,7 @@ function SP.Create(parent)
             AIP.CentralGUI.RefreshBrowserTab("lfm")
         end
     end)
+    clearCacheBtn:SetPoint("LEFT", cacheSuffix, "RIGHT", 20, 0)
     y = y - 26
 
     -- (The former "Tree View Timeout" control was removed: the Cache Duration
@@ -1218,11 +1208,7 @@ function SP.Create(parent)
     local debugTooltip = CreateTooltipButton(content, "debugMode")
     debugTooltip:SetPoint("LEFT", debugLabel, "RIGHT", 2, 0)
 
-    local clearDataBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    clearDataBtn:SetSize(100, 22)
-    clearDataBtn:SetPoint("LEFT", debugCheck, "RIGHT", 170, 0)
-    clearDataBtn:SetText("Clear All Data")
-    clearDataBtn:SetScript("OnClick", function()
+    local clearDataBtn = AIP.UI.FlatButton(content, "Clear All Data", 100, 22, function()
         StaticPopupDialogs["AIP_CLEAR_DATA"] = {
             text = "FULL RESET: Clear ALL AutoInvite+ data?\n\n|cFFFF4444This will remove:|r\n- All settings\n- Blacklist\n- Favorites\n- Queue & Waitlist\n- Loot history\n- Raid sessions\n- Saved templates\n\nThe addon will reload as if freshly installed.",
             button1 = "Reset",
@@ -1256,12 +1242,9 @@ function SP.Create(parent)
         }
         StaticPopup_Show("AIP_CLEAR_DATA")
     end)
+    clearDataBtn:SetPoint("LEFT", debugCheck, "RIGHT", 170, 0)
 
-    local resetBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    resetBtn:SetSize(110, 22)
-    resetBtn:SetPoint("LEFT", clearDataBtn, "RIGHT", 10, 0)
-    resetBtn:SetText("Reset to Defaults")
-    resetBtn:SetScript("OnClick", function()
+    local resetBtn = AIP.UI.FlatButton(content, "Reset to Defaults", 110, 22, function()
         StaticPopupDialogs["AIP_RESET_DEFAULTS"] = {
             text = "Reset settings to defaults?\n\n|cFF00FF00This keeps:|r Blacklist, Favorites, Loot History\n|cFFFFFF00This resets:|r All settings to default values",
             button1 = "Yes",
@@ -1301,6 +1284,7 @@ function SP.Create(parent)
         }
         StaticPopup_Show("AIP_RESET_DEFAULTS")
     end)
+    resetBtn:SetPoint("LEFT", clearDataBtn, "RIGHT", 10, 0)
     -- Persistent debug logging toggle (writes to db.debugLog; read with /aip log)
     local logCheck, logLabel = CreateCheckbox(content, 15, y - 26, "debugLogging", "Write debug log to file (/reload after enabling)")
     frame.checks.debugLogging = logCheck
@@ -1382,21 +1366,15 @@ function SP.Create(parent)
     local quickTooltip = CreateTooltipButton(content, "quickActions")
     quickTooltip:SetPoint("LEFT", quickLabel, "RIGHT", 2, 0)
 
-    local invGuildBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    invGuildBtn:SetSize(90, 22)
-    invGuildBtn:SetPoint("LEFT", quickTooltip, "RIGHT", 5, 0)
-    invGuildBtn:SetText("Invite Guild")
-    invGuildBtn:SetScript("OnClick", function()
+    local invGuildBtn = AIP.UI.FlatButton(content, "Invite Guild", 90, 22, function()
         if AIP.InviteGuild then AIP.InviteGuild() end
     end)
+    invGuildBtn:SetPoint("LEFT", quickTooltip, "RIGHT", 5, 0)
 
-    local invFriendsBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    invFriendsBtn:SetSize(100, 22)
-    invFriendsBtn:SetPoint("LEFT", invGuildBtn, "RIGHT", 10, 0)
-    invFriendsBtn:SetText("Invite Friends")
-    invFriendsBtn:SetScript("OnClick", function()
+    local invFriendsBtn = AIP.UI.FlatButton(content, "Invite Friends", 100, 22, function()
         if AIP.InviteFriends then AIP.InviteFriends() end
     end)
+    invFriendsBtn:SetPoint("LEFT", invGuildBtn, "RIGHT", 10, 0)
     y = y - 40
 
     -- ========================================================================
@@ -1413,11 +1391,7 @@ function SP.Create(parent)
     testModeInfo:SetTextColor(0.6, 0.6, 0.6)
     y = y - 22
 
-    local populateTestBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    populateTestBtn:SetSize(140, 22)
-    populateTestBtn:SetPoint("TOPLEFT", 15, y)
-    populateTestBtn:SetText("Populate Test Data")
-    populateTestBtn:SetScript("OnClick", function()
+    local populateTestBtn = AIP.UI.FlatButton(content, "Populate Test Data", 140, 22, function()
         -- Use the same comprehensive generator as /aip testdata (all tabs).
         if AIP.TestData and AIP.TestData.LoadTestData then
             AIP.TestData.LoadTestData()
@@ -1425,12 +1399,9 @@ function SP.Create(parent)
             SP.PopulateTestData()
         end
     end)
+    populateTestBtn:SetPoint("TOPLEFT", 15, y)
 
-    local clearTestBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    clearTestBtn:SetSize(120, 22)
-    clearTestBtn:SetPoint("LEFT", populateTestBtn, "RIGHT", 10, 0)
-    clearTestBtn:SetText("Clear Test Data")
-    clearTestBtn:SetScript("OnClick", function()
+    local clearTestBtn = AIP.UI.FlatButton(content, "Clear Test Data", 120, 22, function()
         -- Use the same clear path as /aip cleartest (all tabs).
         if AIP.TestData and AIP.TestData.ClearTestData then
             AIP.TestData.ClearTestData()
@@ -1438,6 +1409,7 @@ function SP.Create(parent)
             SP.ClearTestData()
         end
     end)
+    clearTestBtn:SetPoint("LEFT", populateTestBtn, "RIGHT", 10, 0)
 
     SP.Frame = frame
     return frame

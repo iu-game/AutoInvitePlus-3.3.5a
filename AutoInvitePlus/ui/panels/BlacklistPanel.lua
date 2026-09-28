@@ -241,11 +241,7 @@ function BP.Create(parent)
     FixDropdownStrata(filterDropdown)
 
     -- Clear History button
-    local clearHistoryBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    clearHistoryBtn:SetSize(85, 20)
-    clearHistoryBtn:SetPoint("TOPRIGHT", -10, y)
-    clearHistoryBtn:SetText("Clear History")
-    clearHistoryBtn:SetScript("OnClick", function()
+    local clearHistoryBtn = AIP.UI.FlatButton(frame, "Clear History", 85, 20, function()
         StaticPopupDialogs["AIP_CLEAR_BL_HISTORY"] = {
             text = "Clear entire blacklist?",
             button1 = "Yes",
@@ -260,6 +256,7 @@ function BP.Create(parent)
         }
         StaticPopup_Show("AIP_CLEAR_BL_HISTORY")
     end)
+    clearHistoryBtn:SetPoint("TOPRIGHT", -10, y)
     y = y - 30
 
     -- Add new player row
@@ -305,11 +302,7 @@ function BP.Create(parent)
         end
     end)
 
-    local addBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    addBtn:SetSize(100, 20)
-    addBtn:SetPoint("LEFT", reasonInput, "RIGHT", 5, 0)
-    addBtn:SetText("Add to Blacklist")
-    addBtn:SetScript("OnClick", function()
+    local addBtn = AIP.UI.FlatButton(frame, "Add to Blacklist", 100, 20, function()
         local name = nameInput:GetText():trim()
         local reason = reasonInput:GetText():trim()
         if name ~= "" then
@@ -322,6 +315,7 @@ function BP.Create(parent)
             BP.Update()
         end
     end)
+    addBtn:SetPoint("LEFT", reasonInput, "RIGHT", 5, 0)
 
     nameInput:SetScript("OnEnterPressed", function(self)
         reasonInput:SetFocus()
@@ -441,24 +435,17 @@ function BP.Create(parent)
         row.sourceText = sourceText
 
         -- Edit button
-        local editBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        editBtn:SetSize(35, 18)
-        editBtn:SetPoint("LEFT", 485, 0)
-        editBtn:SetText("Edit")
-        editBtn.index = i
-        editBtn:SetScript("OnClick", function(self)
+        local editBtn = AIP.UI.FlatButton(row, "Edit", 35, 18, function(self)
             if row.playerName then
                 BP.ShowEditDialog(row.playerName)
             end
         end)
+        editBtn:SetPoint("LEFT", 485, 0)
+        editBtn.index = i
         row.editBtn = editBtn
 
         -- Remove button
-        local remBtn = CreateFrame("Button", nil, row, "UIPanelCloseButton")
-        remBtn:SetSize(20, 20)
-        remBtn:SetPoint("LEFT", editBtn, "RIGHT", 3, 0)
-        remBtn.index = i
-        remBtn:SetScript("OnClick", function(self)
+        local remBtn = AIP.UI.CloseButton(row, function(self)
             if row.playerName then
                 StaticPopupDialogs["AIP_REMOVE_BL_" .. i] = {
                     text = "Remove " .. row.playerName .. " from blacklist?",
@@ -474,7 +461,9 @@ function BP.Create(parent)
                 }
                 StaticPopup_Show("AIP_REMOVE_BL_" .. i)
             end
-        end)
+        end, 20)
+        remBtn:SetPoint("LEFT", editBtn, "RIGHT", 3, 0)
+        remBtn.index = i
         row.remBtn = remBtn
 
         row:Hide()
@@ -507,11 +496,7 @@ function BP.Create(parent)
     frame.statusText = statusText
 
     -- Share button (broadcast your blacklist to AIP addon peers, on demand)
-    local shareBtn = CreateFrame("Button", nil, statusFrame, "UIPanelButtonTemplate")
-    shareBtn:SetSize(60, 20)
-    shareBtn:SetPoint("RIGHT", -205, 0)
-    shareBtn:SetText("Share")
-    shareBtn:SetScript("OnClick", function()
+    local shareBtn = AIP.UI.FlatButton(statusFrame, "Share", 60, 20, function()
         StaticPopupDialogs["AIP_SHARE_BL_PANEL"] = {
             text = "Share your blacklist with AIP addon peers?\nThey'll each be prompted to merge it (nothing is forced).",
             button1 = "Share", button2 = "Cancel",
@@ -520,38 +505,35 @@ function BP.Create(parent)
         }
         StaticPopup_Show("AIP_SHARE_BL_PANEL")
     end)
+    shareBtn:SetPoint("RIGHT", -205, 0)
     shareBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.95, 0.76, 0.12, 1)
+        self:SetBackdropColor(0.16, 0.15, 0.10, 0.98)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Share blacklist", 1, 1, 1)
         GameTooltip:AddLine("Broadcast your blacklist to AIP peers; each peer chooses whether to merge it (/aip bl accept).", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
-    shareBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    shareBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.24, 0.26, 0.34, 1)
+        self:SetBackdropColor(0.10, 0.11, 0.16, 0.95)
+        GameTooltip:Hide()
+    end)
 
     -- Export button
-    local exportBtn = CreateFrame("Button", nil, statusFrame, "UIPanelButtonTemplate")
-    exportBtn:SetSize(60, 20)
-    exportBtn:SetPoint("RIGHT", -140, 0)
-    exportBtn:SetText("Export")
-    exportBtn:SetScript("OnClick", function()
+    local exportBtn = AIP.UI.FlatButton(statusFrame, "Export", 60, 20, function()
         BP.ShowExportPopup()
     end)
+    exportBtn:SetPoint("RIGHT", -140, 0)
 
     -- Import button
-    local importBtn = CreateFrame("Button", nil, statusFrame, "UIPanelButtonTemplate")
-    importBtn:SetSize(60, 20)
-    importBtn:SetPoint("RIGHT", -75, 0)
-    importBtn:SetText("Import")
-    importBtn:SetScript("OnClick", function()
+    local importBtn = AIP.UI.FlatButton(statusFrame, "Import", 60, 20, function()
         BP.ShowImportPopup()
     end)
+    importBtn:SetPoint("RIGHT", -75, 0)
 
     -- Clear button
-    local clearBtn = CreateFrame("Button", nil, statusFrame, "UIPanelButtonTemplate")
-    clearBtn:SetSize(60, 20)
-    clearBtn:SetPoint("RIGHT", -10, 0)
-    clearBtn:SetText("Clear")
-    clearBtn:SetScript("OnClick", function()
+    local clearBtn = AIP.UI.FlatButton(statusFrame, "Clear", 60, 20, function()
         StaticPopupDialogs["AIP_CLEAR_BL_PANEL"] = {
             text = "Clear entire blacklist?",
             button1 = "Yes",
@@ -566,6 +548,7 @@ function BP.Create(parent)
         }
         StaticPopup_Show("AIP_CLEAR_BL_PANEL")
     end)
+    clearBtn:SetPoint("RIGHT", -10, 0)
 
     BP.Frame = frame
     return frame
@@ -736,12 +719,9 @@ function BP.ShowExportPopup()
         popup:SetScript("OnDragStart", popup.StartMoving)
         popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
 
-        popup:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-            tile = true, tileSize = 32, edgeSize = 32,
-            insets = { left = 11, right = 12, top = 12, bottom = 11 }
-        })
+        popup:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+        popup:SetBackdropColor(unpack(AIP.UI.Colors.bgRGB))
+        popup:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
 
         -- Title
         local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -750,7 +730,7 @@ function BP.ShowExportPopup()
         title:SetTextColor(1, 0.82, 0)
 
         -- Close button
-        local closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
+        local closeBtn = AIP.UI.CloseButton(popup, function() popup:Hide() end)
         closeBtn:SetPoint("TOPRIGHT", -5, -5)
 
         -- Stats
@@ -811,21 +791,15 @@ function BP.ShowExportPopup()
         popup.editBox = editBox
 
         -- Copy All button
-        local copyBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-        copyBtn:SetSize(100, 24)
-        copyBtn:SetPoint("BOTTOMLEFT", 100, 15)
-        copyBtn:SetText("Select All")
-        copyBtn:SetScript("OnClick", function()
+        local copyBtn = AIP.UI.FlatButton(popup, "Select All", 100, 24, function()
             editBox:SetFocus()
             editBox:HighlightText()
         end)
+        copyBtn:SetPoint("BOTTOMLEFT", 100, 15)
 
         -- Close button
-        local closeBtn2 = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-        closeBtn2:SetSize(80, 24)
+        local closeBtn2 = AIP.UI.FlatButton(popup, "Close", 80, 24, function() popup:Hide() end)
         closeBtn2:SetPoint("BOTTOMRIGHT", -100, 15)
-        closeBtn2:SetText("Close")
-        closeBtn2:SetScript("OnClick", function() popup:Hide() end)
 
         -- Instructions
         local instrText = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -883,12 +857,9 @@ function BP.ShowImportPopup()
         popup:SetScript("OnDragStart", popup.StartMoving)
         popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
 
-        popup:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-            tile = true, tileSize = 32, edgeSize = 32,
-            insets = { left = 11, right = 12, top = 12, bottom = 11 }
-        })
+        popup:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+        popup:SetBackdropColor(unpack(AIP.UI.Colors.bgRGB))
+        popup:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
 
         -- Title
         local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -897,7 +868,7 @@ function BP.ShowImportPopup()
         title:SetTextColor(1, 0.82, 0)
 
         -- Close button
-        local closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
+        local closeBtn = AIP.UI.CloseButton(popup, function() popup:Hide() end)
         closeBtn:SetPoint("TOPRIGHT", -5, -5)
 
         -- Instructions
@@ -982,11 +953,7 @@ function BP.ShowImportPopup()
         end)
 
         -- Import button
-        local importBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-        importBtn:SetSize(100, 24)
-        importBtn:SetPoint("BOTTOMLEFT", 120, 15)
-        importBtn:SetText("Import")
-        importBtn:SetScript("OnClick", function()
+        local importBtn = AIP.UI.FlatButton(popup, "Import", 100, 24, function()
             local data = editBox:GetText()
             if data and data:trim() ~= "" then
                 local mode = replaceCheck:GetChecked() and "replace" or "merge"
@@ -1013,13 +980,11 @@ function BP.ShowImportPopup()
                 end
             end
         end)
+        importBtn:SetPoint("BOTTOMLEFT", 120, 15)
 
         -- Cancel button
-        local cancelBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-        cancelBtn:SetSize(80, 24)
+        local cancelBtn = AIP.UI.FlatButton(popup, "Cancel", 80, 24, function() popup:Hide() end)
         cancelBtn:SetPoint("BOTTOMRIGHT", -120, 15)
-        cancelBtn:SetText("Cancel")
-        cancelBtn:SetScript("OnClick", function() popup:Hide() end)
 
         tinsert(UISpecialFrames, popup:GetName())
         importPopup = popup

@@ -853,7 +853,15 @@ function RM.Create(parent)
     scrollFrame:SetPoint("BOTTOMRIGHT", -28, 5)
 
     local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetHeight(1450)  -- extended for the Raid Tools section
+    -- Deliberately generous fixed height: real content today ends well
+    -- above this (~900px), leaving headroom for the Raid Tools section to
+    -- grow. A runtime auto-measure pass was tried here and reverted - it
+    -- destabilized the scroll child's height live (visible row overlap),
+    -- most likely from a non-content child (e.g. an always-"shown" pooled
+    -- or template frame) skewing the measured extent. A static, documented
+    -- floor is safer than a live measurement that can't be fully verified
+    -- against every child this panel ever creates.
+    content:SetHeight(1450)
     scrollFrame:SetScrollChild(content)
 
     -- Dynamic width tracking
@@ -911,14 +919,9 @@ function RM.Create(parent)
     listBg:SetPoint("TOPLEFT", 10, y)
     listBg:SetSize(150, 130)
     content.listBg = listBg
-    listBg:SetBackdrop({
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 12,
-        insets = {left = 3, right = 3, top = 3, bottom = 3}
-    })
-    listBg:SetBackdropColor(0.045, 0.05, 0.072, 0.92)
-    listBg:SetBackdropBorderColor(0.34, 0.37, 0.46)
+    listBg:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+    listBg:SetBackdropColor(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 0.92)
+    listBg:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
 
     local listScroll = CreateFrame("ScrollFrame", "AIPRMTemplateScroll", listBg, "FauxScrollFrameTemplate")
     listScroll:SetPoint("TOPLEFT", 5, -5)
@@ -981,14 +984,9 @@ function RM.Create(parent)
     local msgInputBg = CreateFrame("Frame", nil, content)
     msgInputBg:SetSize(180, 50)
     msgInputBg:SetPoint("TOPLEFT", editorX, y - 54)
-    msgInputBg:SetBackdrop({
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 10,
-        insets = {left = 3, right = 3, top = 3, bottom = 3}
-    })
-    msgInputBg:SetBackdropColor(0.045, 0.05, 0.072, 0.92)
-    msgInputBg:SetBackdropBorderColor(0.34, 0.37, 0.46)
+    msgInputBg:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+    msgInputBg:SetBackdropColor(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 0.92)
+    msgInputBg:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
     content.msgInputBg = msgInputBg
 
     local msgInput = CreateFrame("EditBox", nil, msgInputBg)
@@ -1002,11 +1000,7 @@ function RM.Create(parent)
 
     -- Template buttons
     local btnY = y - 110
-    local sendBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    sendBtn:SetSize(65, 20)
-    sendBtn:SetPoint("TOPLEFT", editorX, btnY)
-    sendBtn:SetText("Send RW")
-    sendBtn:SetScript("OnClick", function()
+    local sendBtn = AIP.UI.FlatButton(content, "Send RW", 65, 20, function()
         local msg = content.msgInput:GetText()
         if msg and msg ~= "" then
             -- Route through RT.Send (matches the Reserved Items "Announce"
@@ -1023,13 +1017,10 @@ function RM.Create(parent)
             AIP.Print("Raid warning sent!")
         end
     end)
+    sendBtn:SetPoint("TOPLEFT", editorX, btnY)
     content.sendBtn = sendBtn
 
-    local saveBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    saveBtn:SetSize(50, 20)
-    saveBtn:SetPoint("LEFT", sendBtn, "RIGHT", 5, 0)
-    saveBtn:SetText("Save")
-    saveBtn:SetScript("OnClick", function()
+    local saveBtn = AIP.UI.FlatButton(content, "Save", 50, 20, function()
         local name = content.nameInput:GetText()
         local msg = content.msgInput:GetText()
         if name and name ~= "" and msg and msg ~= "" then
@@ -1038,12 +1029,9 @@ function RM.Create(parent)
             AIP.Print("Template saved: " .. name)
         end
     end)
+    saveBtn:SetPoint("LEFT", sendBtn, "RIGHT", 5, 0)
 
-    local deleteBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    deleteBtn:SetSize(50, 20)
-    deleteBtn:SetPoint("LEFT", saveBtn, "RIGHT", 5, 0)
-    deleteBtn:SetText("Delete")
-    deleteBtn:SetScript("OnClick", function()
+    local deleteBtn = AIP.UI.FlatButton(content, "Delete", 50, 20, function()
         if RM.SelectedTemplate then
             RM.DeleteTemplate(RM.SelectedTemplate.name)
             RM.SelectedTemplate = nil
@@ -1052,6 +1040,7 @@ function RM.Create(parent)
             RM.RefreshTemplateList(content, listScroll)
         end
     end)
+    deleteBtn:SetPoint("LEFT", saveBtn, "RIGHT", 5, 0)
 
     -- === RIGHT SIDE: Reserved Items & Loot Bans ===
 
@@ -1065,14 +1054,9 @@ function RM.Create(parent)
     local reservedFrame = CreateFrame("Frame", nil, content)
     reservedFrame:SetSize(150, 80)
     reservedFrame:SetPoint("TOPLEFT", 480, y - 16)  -- Will be repositioned by UpdateLayout
-    reservedFrame:SetBackdrop({
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 10,
-        insets = {left = 3, right = 3, top = 3, bottom = 3}
-    })
-    reservedFrame:SetBackdropColor(0.045, 0.05, 0.072, 0.92)
-    reservedFrame:SetBackdropBorderColor(0.34, 0.37, 0.46)
+    reservedFrame:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+    reservedFrame:SetBackdropColor(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 0.92)
+    reservedFrame:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
     content.reservedFrame = reservedFrame
 
     local reservedScroll = CreateFrame("ScrollFrame", "AIPRMReservedScroll", reservedFrame, "UIPanelScrollFrameTemplate")
@@ -1103,11 +1087,7 @@ function RM.Create(parent)
     reservedScroll:SetScrollChild(reservedInput)
     content.reservedInput = reservedInput
 
-    local announceResBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    announceResBtn:SetSize(70, 18)
-    announceResBtn:SetPoint("TOPLEFT", 480, y - 100)  -- Will be repositioned by UpdateLayout
-    announceResBtn:SetText("Announce")
-    announceResBtn:SetScript("OnClick", function()
+    local announceResBtn = AIP.UI.FlatButton(content, "Announce", 70, 18, function()
         local items = content.reservedInput:GetText()
         if items and items ~= "" then
             local send = (AIP.RaidTools and AIP.RaidTools.Send)
@@ -1130,22 +1110,25 @@ function RM.Create(parent)
             end
         end
     end)
+    announceResBtn:SetPoint("TOPLEFT", 480, y - 100)  -- Will be repositioned by UpdateLayout
     content.announceResBtn = announceResBtn
 
     -- Loot database browser (AIP.LootDB): pick boss drops straight into the
     -- reserved list, Atlas-style
-    local browseLootBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    browseLootBtn:SetSize(60, 18)
-    browseLootBtn:SetPoint("LEFT", announceResBtn, "RIGHT", 4, 0)
-    browseLootBtn:SetText("Browse")
-    browseLootBtn:SetScript("OnClick", function()
+    local browseLootBtn = AIP.UI.FlatButton(content, "Browse", 60, 18, function()
         if not (AIP.LootDB and AIP.LootDB.Instances) then
             AIP.Print("Loot database not loaded (log out and back in after updating).")
             return
         end
         RM.ShowLootBrowser()
     end)
+    browseLootBtn:SetPoint("LEFT", announceResBtn, "RIGHT", 4, 0)
+    -- Multi-line tooltip: kept as manual SetScript (per spec §2.1 hover-clobber
+    -- guard), re-applying UI.FlatButton's own hover recolor at the top of each
+    -- handler so it isn't silently lost by this replace-not-stack SetScript.
     browseLootBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.95, 0.76, 0.12, 1)
+        self:SetBackdropColor(0.16, 0.15, 0.10, 0.98)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Browse Boss Loot")
         GameTooltip:AddLine("Atlas-style drop lists per raid and boss.", 1, 1, 1)
@@ -1153,7 +1136,11 @@ function RM.Create(parent)
         GameTooltip:AddLine("shift-click links it into chat.", 1, 1, 1)
         GameTooltip:Show()
     end)
-    browseLootBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    browseLootBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.24, 0.26, 0.34, 1)
+        self:SetBackdropColor(0.10, 0.11, 0.16, 0.95)
+        GameTooltip:Hide()
+    end)
     content.browseLootBtn = browseLootBtn
 
     -- Loot Bans (right of reserved items)
@@ -1166,14 +1153,9 @@ function RM.Create(parent)
     local lootBanFrame = CreateFrame("Frame", nil, content)
     lootBanFrame:SetSize(180, 80)
     lootBanFrame:SetPoint("TOPLEFT", 640, y - 16)  -- Will be repositioned by UpdateLayout
-    lootBanFrame:SetBackdrop({
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 10,
-        insets = {left = 3, right = 3, top = 3, bottom = 3}
-    })
-    lootBanFrame:SetBackdropColor(0.045, 0.05, 0.072, 0.92)
-    lootBanFrame:SetBackdropBorderColor(0.34, 0.37, 0.46)
+    lootBanFrame:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+    lootBanFrame:SetBackdropColor(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 0.92)
+    lootBanFrame:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
     content.lootBanFrame = lootBanFrame
 
     -- Only a few rows fit in the fixed-height box, so allow wheel paging through
@@ -1229,25 +1211,19 @@ function RM.Create(parent)
     end
 
     -- Loot ban buttons
-    local addLootBanBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    addLootBanBtn:SetSize(40, 18)
-    addLootBanBtn:SetPoint("TOPLEFT", lootBanFrame, "BOTTOMLEFT", 0, -4)
-    addLootBanBtn:SetText("Add")
-    addLootBanBtn:SetScript("OnClick", function()
+    local addLootBanBtn = AIP.UI.FlatButton(content, "Add", 40, 18, function()
         RM.ShowLootBanAddPopup()
     end)
+    addLootBanBtn:SetPoint("TOPLEFT", lootBanFrame, "BOTTOMLEFT", 0, -4)
     content.addLootBanBtn = addLootBanBtn
 
-    local clearLootBanBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    clearLootBanBtn:SetSize(45, 18)
-    clearLootBanBtn:SetPoint("LEFT", addLootBanBtn, "RIGHT", 4, 0)
-    clearLootBanBtn:SetText("Clear")
-    clearLootBanBtn:SetScript("OnClick", function()
+    local clearLootBanBtn = AIP.UI.FlatButton(content, "Clear", 45, 18, function()
         if AIP.db then
             AIP.db.lootBans = {}
             RM.RefreshLootBanDisplay(content)
         end
     end)
+    clearLootBanBtn:SetPoint("LEFT", addLootBanBtn, "RIGHT", 4, 0)
 
     y = y - 145
 
@@ -1258,18 +1234,14 @@ function RM.Create(parent)
     header3:SetPoint("TOPLEFT", 10, y)
     header3:SetText("Raid Buff Checker")
     header3:SetTextColor(1, 0.82, 0)
-    local header3Line = content:CreateTexture(nil, "ARTWORK")
-    header3Line:SetSize(160, 1)
-    header3Line:SetPoint("LEFT", header3, "RIGHT", 8, 0)
-    header3Line:SetTexture("Interface\\Buttons\\WHITE8X8")
-    header3Line:SetVertexColor(0.34, 0.37, 0.46, 1)
+    -- The decorative rule (unlike header1/header2/rtHeader, which have their
+    -- row to themselves) can't start right after the header text here - this
+    -- row also has buttons starting at that same +8/+20 offset, so a fixed
+    -- 160px line drawn there sat behind/under them (reported live,
+    -- 2026-09-27). Anchored below, after the LAST button, once it exists.
 
     -- Buttons
-    local checkAllBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    checkAllBtn:SetSize(80, 20)
-    checkAllBtn:SetPoint("LEFT", header3, "RIGHT", 20, 0)
-    checkAllBtn:SetText("Check All")
-    checkAllBtn:SetScript("OnClick", function()
+    local checkAllBtn = AIP.UI.FlatButton(content, "Check All", 80, 20, function()
         local data = RM.CheckAllRaidBuffs()
         RM.RefreshBuffTable(RM.Content)
         -- Count available buff types
@@ -1281,22 +1253,27 @@ function RM.Create(parent)
         end
         AIP.Print("Buff check: " .. #data .. " players, " .. buffTypeCount .. " buff types available.")
     end)
+    checkAllBtn:SetPoint("LEFT", header3, "RIGHT", 20, 0)
 
-    local announceBuffBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    announceBuffBtn:SetSize(120, 20)
-    announceBuffBtn:SetPoint("LEFT", checkAllBtn, "RIGHT", 10, 0)
-    announceBuffBtn:SetText("Announce Missing")
-    announceBuffBtn:SetScript("OnClick", function()
+    local announceBuffBtn = AIP.UI.FlatButton(content, "Announce Missing", 120, 20, function()
         RM.AnnounceMissingBuffsSmart()
     end)
+    announceBuffBtn:SetPoint("LEFT", checkAllBtn, "RIGHT", 10, 0)
 
-    local readyCheckBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    readyCheckBtn:SetSize(90, 20)
-    readyCheckBtn:SetPoint("LEFT", announceBuffBtn, "RIGHT", 10, 0)
-    readyCheckBtn:SetText("Ready Check")
-    readyCheckBtn:SetScript("OnClick", function()
+    local readyCheckBtn = AIP.UI.FlatButton(content, "Ready Check", 90, 20, function()
         DoReadyCheck()
     end)
+    readyCheckBtn:SetPoint("LEFT", announceBuffBtn, "RIGHT", 10, 0)
+
+    -- Rule fills the row's remaining width, starting after the last button
+    -- (not the header text) - this is what keeps it from running under the
+    -- buttons the way the original fixed-160px-from-the-header version did.
+    local header3Line = content:CreateTexture(nil, "ARTWORK")
+    header3Line:SetHeight(1)
+    header3Line:SetPoint("LEFT", readyCheckBtn, "RIGHT", 10, 0)
+    header3Line:SetPoint("RIGHT", content, "RIGHT", -10, 0)
+    header3Line:SetTexture("Interface\\Buttons\\WHITE8X8")
+    header3Line:SetVertexColor(0.34, 0.37, 0.46, 1)
 
     y = y - 25
 
@@ -1305,14 +1282,9 @@ function RM.Create(parent)
     buffTableBg:SetPoint("TOPLEFT", 10, y)
     buffTableBg:SetPoint("RIGHT", content, "RIGHT", -10, 0)
     buffTableBg:SetHeight(200)
-    buffTableBg:SetBackdrop({
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 12,
-        insets = {left = 3, right = 3, top = 3, bottom = 3}
-    })
-    buffTableBg:SetBackdropColor(0.045, 0.05, 0.072, 0.92)
-    buffTableBg:SetBackdropBorderColor(0.34, 0.37, 0.46)
+    buffTableBg:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+    buffTableBg:SetBackdropColor(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 0.92)
+    buffTableBg:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
     content.buffTableBg = buffTableBg
 
     -- Reflow buff columns whenever the (elastic) table width changes.
@@ -1422,18 +1394,14 @@ function RM.Create(parent)
     header4:SetPoint("TOPLEFT", 10, y)
     header4:SetText("MS/OS Tracking")
     header4:SetTextColor(1, 0.82, 0)
-    local header4Line = content:CreateTexture(nil, "ARTWORK")
-    header4Line:SetSize(160, 1)
-    header4Line:SetPoint("LEFT", header4, "RIGHT", 8, 0)
-    header4Line:SetTexture("Interface\\Buttons\\WHITE8X8")
-    header4Line:SetVertexColor(0.34, 0.37, 0.46, 1)
+    -- No decorative header-line texture here (unlike header1/header2/rtHeader,
+    -- which have the row to themselves) - this row's buttons start right
+    -- after the header text at the same +8/+20 anchor offsets the other
+    -- headers use for their line, so the two visibly overlapped (reported
+    -- live, 2026-09-27). The buttons already carry the row visually.
 
     -- MS/OS buttons
-    local refreshMSBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    refreshMSBtn:SetSize(100, 20)
-    refreshMSBtn:SetPoint("LEFT", header4, "RIGHT", 20, 0)
-    refreshMSBtn:SetText("Scan Raid")
-    refreshMSBtn:SetScript("OnClick", function()
+    local refreshMSBtn = AIP.UI.FlatButton(content, "Scan Raid", 100, 20, function()
         RM.UpdateMSOSFromRaid()
         RM.RefreshMSTable(RM.Content)
         -- Count players in tracking
@@ -1443,30 +1411,36 @@ function RM.Create(parent)
         end
         AIP.Print("MS/OS scan complete: " .. count .. " players tracked.")
     end)
+    refreshMSBtn:SetPoint("LEFT", header4, "RIGHT", 20, 0)
 
-    local clearMSBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    clearMSBtn:SetSize(70, 20)
-    clearMSBtn:SetPoint("LEFT", refreshMSBtn, "RIGHT", 10, 0)
-    clearMSBtn:SetText("Clear All")
-    clearMSBtn:SetScript("OnClick", function()
+    local clearMSBtn = AIP.UI.FlatButton(content, "Clear All", 70, 20, function()
         if AIP.db then
             AIP.db.msTracking = {}
             RM.RefreshMSTable(RM.Content)
             AIP.Print("MS/OS tracking data cleared.")
         end
     end)
+    clearMSBtn:SetPoint("LEFT", refreshMSBtn, "RIGHT", 10, 0)
 
-    local announceMSBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    announceMSBtn:SetSize(80, 20)
-    announceMSBtn:SetPoint("LEFT", clearMSBtn, "RIGHT", 10, 0)
-    announceMSBtn:SetText("Announce")
-    announceMSBtn:SetScript("OnClick", function()
+    local announceMSBtn = AIP.UI.FlatButton(content, "Announce", 80, 20, function()
         RM.AnnounceMSOS()
     end)
+    announceMSBtn:SetPoint("LEFT", clearMSBtn, "RIGHT", 10, 0)
 
     local msInfo = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     msInfo:SetPoint("LEFT", announceMSBtn, "RIGHT", 15, 0)
     msInfo:SetText("|cFF888888Players can whisper 'ms <spec>' or 'os <spec>' to register|r")
+
+    -- Rule fills whatever's left of the row after the info text (not the
+    -- header text) - starting it at the header, like header1/header2/
+    -- rtHeader do, ran it under the Scan Raid/Clear All/Announce buttons
+    -- instead (reported live, 2026-09-27).
+    local header4Line = content:CreateTexture(nil, "ARTWORK")
+    header4Line:SetHeight(1)
+    header4Line:SetPoint("LEFT", msInfo, "RIGHT", 10, 0)
+    header4Line:SetPoint("RIGHT", content, "RIGHT", -10, 0)
+    header4Line:SetTexture("Interface\\Buttons\\WHITE8X8")
+    header4Line:SetVertexColor(0.34, 0.37, 0.46, 1)
 
     y = y - 25
 
@@ -1475,14 +1449,9 @@ function RM.Create(parent)
     msTableBg:SetPoint("TOPLEFT", 10, y)
     msTableBg:SetPoint("RIGHT", content, "RIGHT", -10, 0)
     msTableBg:SetHeight(200)
-    msTableBg:SetBackdrop({
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 12,
-        insets = {left = 3, right = 3, top = 3, bottom = 3}
-    })
-    msTableBg:SetBackdropColor(0.045, 0.05, 0.072, 0.92)
-    msTableBg:SetBackdropBorderColor(0.34, 0.37, 0.46)
+    msTableBg:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+    msTableBg:SetBackdropColor(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 0.92)
+    msTableBg:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
     content.msTableBg = msTableBg
 
     -- Reflow MS/OS columns whenever the (elastic) table width changes.
@@ -1609,21 +1578,27 @@ function RM.Create(parent)
     end)
 
     -- Loot roll: open the dedicated roll window (item list, capture, winners)
-    local rollWinBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    rollWinBtn:SetSize(150, 22)
-    rollWinBtn:SetPoint("TOPLEFT", barCheck, "BOTTOMLEFT", 2, -12)
-    rollWinBtn:SetText("Open Roll Window")
-    rollWinBtn:SetScript("OnClick", function()
+    local rollWinBtn = AIP.UI.FlatButton(content, "Open Roll Window", 150, 22, function()
         if AIP.RaidTools and AIP.RaidTools.ToggleRollWindow then AIP.RaidTools.ToggleRollWindow() end
     end)
+    rollWinBtn:SetPoint("TOPLEFT", barCheck, "BOTTOMLEFT", 2, -12)
+    -- Multi-line tooltip: kept as manual SetScript (per spec §2.1 hover-clobber
+    -- guard), re-applying UI.FlatButton's own hover recolor at the top of each
+    -- handler so it isn't silently lost by this replace-not-stack SetScript.
     rollWinBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.95, 0.76, 0.12, 1)
+        self:SetBackdropColor(0.16, 0.15, 0.10, 0.98)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:AddLine("Loot Roll Window", 1, 0.82, 0)
         GameTooltip:AddLine("Lists items dropped in the current raid, runs /roll", 1, 1, 1, true)
         GameTooltip:AddLine("with a countdown, captures rolls, shows winners.", 1, 1, 1, true)
         GameTooltip:Show()
     end)
-    rollWinBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    rollWinBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.24, 0.26, 0.34, 1)
+        self:SetBackdropColor(0.10, 0.11, 0.16, 0.95)
+        GameTooltip:Hide()
+    end)
 
     local durLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     durLabel:SetPoint("LEFT", rollWinBtn, "RIGHT", 14, 0)
@@ -1642,36 +1617,36 @@ function RM.Create(parent)
     if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(rollDurInput) end
 
     -- /RW reserved announce
-    local rwBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    rwBtn:SetSize(150, 22)
-    rwBtn:SetPoint("TOPLEFT", rollWinBtn, "BOTTOMLEFT", 0, -10)
-    rwBtn:SetText("/RW Reserved Items")
-    rwBtn:SetScript("OnClick", function()
+    local rwBtn = AIP.UI.FlatButton(content, "/RW Reserved Items", 150, 22, function()
         if AIP.RaidTools then AIP.RaidTools.AnnounceReserved() end
     end)
+    rwBtn:SetPoint("TOPLEFT", rollWinBtn, "BOTTOMLEFT", 0, -10)
 
     -- Floating-bar buttons: friendly row editor (opens a dedicated window)
     local annLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     annLabel:SetPoint("TOPLEFT", rwBtn, "BOTTOMLEFT", 0, -14)
     annLabel:SetText("Floating bar buttons:")
 
-    local cfgBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    cfgBtn:SetSize(180, 22)
-    cfgBtn:SetPoint("LEFT", annLabel, "RIGHT", 10, 0)
-    cfgBtn:SetText("Configure Bar Buttons...")
-    cfgBtn:SetScript("OnClick", function()
+    local cfgBtn = AIP.UI.FlatButton(content, "Configure Bar Buttons...", 180, 22, function()
         if AIP.RaidTools and AIP.RaidTools.ToggleAnnounceConfig then
             AIP.RaidTools.ToggleAnnounceConfig()
         end
     end)
+    cfgBtn:SetPoint("LEFT", annLabel, "RIGHT", 10, 0)
     cfgBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.95, 0.76, 0.12, 1)
+        self:SetBackdropColor(0.16, 0.15, 0.10, 0.98)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:AddLine("Configure Floating Bar Buttons", 1, 0.82, 0)
         GameTooltip:AddLine("Add/edit/remove the announcement buttons with", 1, 1, 1, true)
         GameTooltip:AddLine("a simple label / message / channel editor.", 1, 1, 1, true)
         GameTooltip:Show()
     end)
-    cfgBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    cfgBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.24, 0.26, 0.34, 1)
+        self:SetBackdropColor(0.10, 0.11, 0.16, 0.95)
+        GameTooltip:Hide()
+    end)
 
     local annHint = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     annHint:SetPoint("TOPLEFT", annLabel, "BOTTOMLEFT", 0, -8)
@@ -2240,7 +2215,7 @@ local function CreateLootBrowser()
     title:SetText("Boss Loot Browser")
     title:SetTextColor(1, 0.82, 0)
 
-    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    local closeBtn = AIP.UI.CloseButton(f, function() f:Hide() end)
     closeBtn:SetPoint("TOPRIGHT", -5, -5)
 
     f.instances = (AIP.LootDB and AIP.LootDB.Instances) or {}
@@ -2623,14 +2598,9 @@ RM.BossList = {
 local function CreateDropdownMenu(parent, width, items, onSelect, placeholder)
     local dropdown = CreateFrame("Frame", nil, parent)
     dropdown:SetSize(width, 24)
-    dropdown:SetBackdrop({
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 14,
-        insets = {left = 3, right = 3, top = 3, bottom = 3}
-    })
-    dropdown:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
-    dropdown:SetBackdropBorderColor(0.5, 0.5, 0.5)
+    dropdown:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+    dropdown:SetBackdropColor(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 0.9)
+    dropdown:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
 
     local text = dropdown:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     text:SetPoint("LEFT", 8, 0)
@@ -2654,14 +2624,9 @@ local function CreateDropdownMenu(parent, width, items, onSelect, placeholder)
     menu:SetPoint("TOPLEFT", dropdown, "BOTTOMLEFT", 0, -2)
     menu:SetWidth(width)
     menu:SetFrameStrata("TOOLTIP")
-    menu:SetBackdrop({
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 14,
-        insets = {left = 3, right = 3, top = 3, bottom = 3}
-    })
-    menu:SetBackdropColor(0.1, 0.1, 0.1, 0.95)
-    menu:SetBackdropBorderColor(0.34, 0.37, 0.46)
+    menu:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+    menu:SetBackdropColor(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 0.95)
+    menu:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
     menu:Hide()
     dropdown.menu = menu
 
@@ -2800,20 +2765,16 @@ function RM.ShowLootBanAddPopup(prefilledPlayer, context)
         popup:SetScript("OnDragStart", popup.StartMoving)
         popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
         popup:SetClampedToScreen(true)
-        popup:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-            tile = true, tileSize = 32, edgeSize = 32,
-            insets = {left = 11, right = 12, top = 12, bottom = 11}
-        })
-        popup:SetBackdropColor(0, 0, 0, 1)
+        popup:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+        popup:SetBackdropColor(unpack(AIP.UI.Colors.bgRGB))
+        popup:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
 
         local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
         title:SetPoint("TOP", 0, -16)
         title:SetText("Add Loot Ban")
         title:SetTextColor(1, 0.3, 0.3)
 
-        local closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
+        local closeBtn = AIP.UI.CloseButton(popup, function() popup:Hide() end)
         closeBtn:SetPoint("TOPRIGHT", -5, -5)
 
         local y = -45
@@ -2886,11 +2847,7 @@ function RM.ShowLootBanAddPopup(prefilledPlayer, context)
         popup.contextItemLabel = contextItemLabel
 
         -- Buttons
-        local addBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-        addBtn:SetSize(80, 22)
-        addBtn:SetPoint("BOTTOMLEFT", 40, 18)
-        addBtn:SetText("Add")
-        addBtn:SetScript("OnClick", function()
+        local addBtn = AIP.UI.FlatButton(popup, "Add", 80, 22, function()
             -- Get player
             local player = nil
             local selectedPlayer = popup.playerDropdown.selectedValue
@@ -2951,12 +2908,10 @@ function RM.ShowLootBanAddPopup(prefilledPlayer, context)
             popup.customBossInput:Hide()
             popup:Hide()
         end)
+        addBtn:SetPoint("BOTTOMLEFT", 40, 18)
 
-        local cancelBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-        cancelBtn:SetSize(80, 22)
+        local cancelBtn = AIP.UI.FlatButton(popup, "Cancel", 80, 22, function() popup:Hide() end)
         cancelBtn:SetPoint("LEFT", addBtn, "RIGHT", 20, 0)
-        cancelBtn:SetText("Cancel")
-        cancelBtn:SetScript("OnClick", function() popup:Hide() end)
 
         popup:Hide()
         tinsert(UISpecialFrames, "AIPRMLootBanAddPopup")

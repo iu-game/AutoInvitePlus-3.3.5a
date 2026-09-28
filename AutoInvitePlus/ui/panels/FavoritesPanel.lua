@@ -271,11 +271,7 @@ function FP.Create(parent)
     if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(addNoteBox) end
     frame.addNoteBox = addNoteBox
 
-    local addBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    addBtn:SetSize(60, 22)
-    addBtn:SetPoint("LEFT", addNoteBox, "RIGHT", 10, 0)
-    addBtn:SetText("Add")
-    addBtn:SetScript("OnClick", function()
+    local addBtn = AIP.UI.FlatButton(frame, "Add", 60, 22, function()
         local name = addNameBox:GetText():trim()
         local note = addNoteBox:GetText():trim()
         if name ~= "" then
@@ -289,6 +285,7 @@ function FP.Create(parent)
             AIP.Print("Please enter a player name")
         end
     end)
+    addBtn:SetPoint("LEFT", addNoteBox, "RIGHT", 10, 0)
 
     addNameBox:SetScript("OnEnterPressed", function()
         addBtn:Click()
@@ -398,36 +395,25 @@ function FP.Create(parent)
         row.sourceText = sourceText
 
         -- Edit button
-        local editBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        editBtn:SetSize(40, 20)
-        editBtn:SetPoint("LEFT", 510, 0)
-        editBtn:SetText("Edit")
-        editBtn:SetScript("OnClick", function(self)
+        local editBtn = AIP.UI.FlatButton(row, "Edit", 40, 20, function(self)
             local entry = self:GetParent().entryData
             if entry then
                 FP.ShowEditDialog(entry.name, entry.note)
             end
         end)
+        editBtn:SetPoint("LEFT", 510, 0)
         row.editBtn = editBtn
 
-        -- Remove button
-        local removeBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        removeBtn:SetSize(25, 20)
-        removeBtn:SetPoint("LEFT", editBtn, "RIGHT", 5, 0)
-        removeBtn:SetText("X")
-        removeBtn:SetScript("OnClick", function(self)
+        -- Remove button (static single-line tooltip folded into UI.FlatButton's
+        -- own tooltip param instead of a separate SetScript pair).
+        local removeBtn = AIP.UI.FlatButton(row, "X", 25, 20, function(self)
             local entry = self:GetParent().entryData
             if entry and AIP.RemoveFromFavorites then
                 AIP.RemoveFromFavorites(entry.name)
                 FP.Update()
             end
-        end)
-        removeBtn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Remove from favorites")
-            GameTooltip:Show()
-        end)
-        removeBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        end, "Remove from favorites")
+        removeBtn:SetPoint("LEFT", editBtn, "RIGHT", 5, 0)
         row.removeBtn = removeBtn
 
         row:Hide()
@@ -442,41 +428,46 @@ function FP.Create(parent)
     end)
 
     -- Bottom buttons (anchored to bottom of frame)
-    local importGuildBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    importGuildBtn:SetSize(100, 22)
-    importGuildBtn:SetPoint("BOTTOMLEFT", 10, 10)
-    importGuildBtn:SetText("Import Guild")
-    importGuildBtn:SetScript("OnClick", function()
+    local importGuildBtn = AIP.UI.FlatButton(frame, "Import Guild", 100, 22, function()
         FP.ImportGuild()
     end)
+    importGuildBtn:SetPoint("BOTTOMLEFT", 10, 10)
+    -- Multi-line tooltip: kept as manual SetScript (per spec §2.1 hover-clobber
+    -- guard), re-applying UI.FlatButton's own hover recolor at the top of each
+    -- handler so it isn't silently lost by this replace-not-stack SetScript.
     importGuildBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.95, 0.76, 0.12, 1)
+        self:SetBackdropColor(0.16, 0.15, 0.10, 0.98)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Import Guild Members")
         GameTooltip:AddLine("Add all online guild members to favorites", 1, 1, 1, true)
         GameTooltip:Show()
     end)
-    importGuildBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    importGuildBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.24, 0.26, 0.34, 1)
+        self:SetBackdropColor(0.10, 0.11, 0.16, 0.95)
+        GameTooltip:Hide()
+    end)
 
-    local importFriendsBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    importFriendsBtn:SetSize(100, 22)
-    importFriendsBtn:SetPoint("LEFT", importGuildBtn, "RIGHT", 10, 0)
-    importFriendsBtn:SetText("Import Friends")
-    importFriendsBtn:SetScript("OnClick", function()
+    local importFriendsBtn = AIP.UI.FlatButton(frame, "Import Friends", 100, 22, function()
         FP.ImportFriends()
     end)
+    importFriendsBtn:SetPoint("LEFT", importGuildBtn, "RIGHT", 10, 0)
     importFriendsBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.95, 0.76, 0.12, 1)
+        self:SetBackdropColor(0.16, 0.15, 0.10, 0.98)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Import Friends")
         GameTooltip:AddLine("Add all online friends to favorites", 1, 1, 1, true)
         GameTooltip:Show()
     end)
-    importFriendsBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    importFriendsBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.24, 0.26, 0.34, 1)
+        self:SetBackdropColor(0.10, 0.11, 0.16, 0.95)
+        GameTooltip:Hide()
+    end)
 
-    local clearBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    clearBtn:SetSize(80, 22)
-    clearBtn:SetPoint("LEFT", importFriendsBtn, "RIGHT", 10, 0)
-    clearBtn:SetText("Clear All")
-    clearBtn:SetScript("OnClick", function()
+    local clearBtn = AIP.UI.FlatButton(frame, "Clear All", 80, 22, function()
         StaticPopupDialogs["AIP_CLEAR_FAVORITES"] = {
             text = "Clear ALL favorites?",
             button1 = "Yes",
@@ -494,6 +485,7 @@ function FP.Create(parent)
         }
         StaticPopup_Show("AIP_CLEAR_FAVORITES")
     end)
+    clearBtn:SetPoint("LEFT", importFriendsBtn, "RIGHT", 10, 0)
 
     -- Count display (anchored to bottom right)
     local countText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")

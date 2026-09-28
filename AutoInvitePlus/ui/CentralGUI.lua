@@ -265,65 +265,77 @@ GUI.CustomChannels = {
 -- Use AIP.Utils.DelayedCall for WotLK-compatible timers
 -- (defined in core/Utils.lua, no need for local fallback)
 
--- Standardized backdrop templates for consistent appearance
+-- Standardized backdrop templates for consistent appearance.
+-- Flat 1px hairline chrome (matches the floating windows' TK.SkinPanel
+-- language; converged tokens via AIP.UI.FlatPanelBackdrop, Phase 0/1 — see
+-- docs/superpowers/specs/2026-09-28-main-window-design-alignment.md §2.3).
+-- All four variants share one flat shape now: the old Panel/SubPanel/Inset/
+-- Input split only ever differed in Blizzard tiled-art edge thickness, which
+-- a 1px hairline border doesn't have. Safe to share one table reference
+-- across variants — SetBackdrop copies the fields in, it doesn't keep a live
+-- reference to the table (the same AIP.UI.FlatPanelBackdrop table is already
+-- reused this way for the outer main-frame window, Phase 1).
 GUI.Backdrops = {
-    -- Main panel backdrop (dark, solid)
-    Panel = {
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 16,
-        insets = {left = 5, right = 5, top = 5, bottom = 5}
-    },
-    -- Sub-panel backdrop (slightly lighter)
-    SubPanel = {
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 14,
-        insets = {left = 4, right = 4, top = 4, bottom = 4}
-    },
-    -- Input field backdrop
-    Input = {
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 10,
-        insets = {left = 3, right = 3, top = 3, bottom = 3}
-    },
-    -- Small inset panel
-    Inset = {
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 8, edgeSize = 8,
-        insets = {left = 2, right = 2, top = 2, bottom = 2}
-    },
+    Panel = AIP.UI.FlatPanelBackdrop,
+    SubPanel = AIP.UI.FlatPanelBackdrop,
+    Input = AIP.UI.FlatPanelBackdrop,
+    Inset = AIP.UI.FlatPanelBackdrop,
 }
 
 -- Helper: Apply standard backdrop to frame
 function GUI.ApplyBackdrop(frame, backdropType, bgAlpha, borderAlpha)
     local bd = GUI.Backdrops[backdropType] or GUI.Backdrops.Panel
     frame:SetBackdrop(bd)
-    -- Cohesive theme: subtle dark-navy fill + soft slate border (was flat grey).
-    frame:SetBackdropColor(0.045, 0.05, 0.072, bgAlpha or 0.95)
-    frame:SetBackdropBorderColor(0.34, 0.37, 0.46, borderAlpha or 1)
+    local alpha = bgAlpha or 0.95
+    -- Cohesive theme: dark-navy fill + slate border (converged TK/RG tokens).
+    frame:SetBackdropColor(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], alpha)
+    frame:SetBackdropBorderColor(AIP.UI.Colors.borderRGB[1], AIP.UI.Colors.borderRGB[2], AIP.UI.Colors.borderRGB[3], borderAlpha or 1)
+
+    -- Subtle top-to-bottom body gradient, mirroring TK.SkinPanel — but ONLY
+    -- for near-opaque panels. The gradient is a separate texture layer drawn
+    -- on top of the backdrop fill; scaling BOTH layers by the same bgAlpha
+    -- does not reproduce bgAlpha (two stacked alpha-a layers composite to
+    -- 1-(1-a)^2 — e.g. 0.3 -> 0.51, 0.6 -> 0.84), which would visibly
+    -- over-opacify every deliberately-translucent caller (summaryFrame 0.3,
+    -- buffFrame 0.4, benefitsFrame 0.4, groupsFrame 0.5, buffSection 0.6,
+    -- msgBg 0.7). Every floating-window caller of TK.SkinPanel itself only
+    -- ever passes 0.96/0.97 in practice, so >= 0.9 reserves the gradient for
+    -- that near-opaque case; anything under the threshold stays a flat fill
+    -- at bgAlpha exactly as before, no gradient layer at all.
+    if alpha >= 0.9 then
+        if not frame._aipBody then
+            local body = frame:CreateTexture(nil, "BACKGROUND", nil, -7)
+            body:SetPoint("TOPLEFT", 1, -1); body:SetPoint("BOTTOMRIGHT", -1, 1)
+            body:SetTexture(1, 1, 1, 1)
+            body:SetGradientAlpha("VERTICAL", 0.03, 0.035, 0.05, 1, 0.075, 0.08, 0.115, 1)
+            frame._aipBody = body
+        end
+        frame._aipBody:Show()
+    elseif frame._aipBody then
+        -- Frame previously qualified for the gradient (e.g. re-styled with a
+        -- lower alpha) — hide it rather than leaving a stale opaque-looking
+        -- layer on top of a now-translucent fill.
+        frame._aipBody:Hide()
+    end
 end
 
--- Beautify a popup dialog to match the main window: dark-navy fill, soft slate
+-- Beautify a popup dialog to match the main window: dark-navy fill, slate
 -- border, and a gold-accented title strip. Cosmetic only; idempotent.
 function GUI.StylePopup(popup, titleHeight)
     if not popup then return end
-    popup:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 16,
-        insets = { left = 5, right = 5, top = 5, bottom = 5 },
-    })
-    popup:SetBackdropColor(0.05, 0.055, 0.085, 1)
-    popup:SetBackdropBorderColor(0.4, 0.42, 0.52, 1)
+    -- Flat 1px hairline chrome (same shape as GUI.Backdrops / AIP.UI.FlatPanelBackdrop
+    -- above — popups always render fully opaque, so no alpha-bleed risk here,
+    -- unlike GUI.ApplyBackdrop's variable-bgAlpha callers above).
+    popup:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+    popup:SetBackdropColor(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 1)
+    popup:SetBackdropBorderColor(AIP.UI.Colors.borderRGB[1], AIP.UI.Colors.borderRGB[2], AIP.UI.Colors.borderRGB[3], 1)
     if not popup._aipBg then
-        -- Solid backing layer so nothing behind the popup bleeds through (the dark
-        -- dialog texture alone is semi-transparent).
+        -- Solid backing layer so nothing behind the popup bleeds through.
+        -- Offsets unchanged (§3 Do Not Touch item 2 — AddGroupPopup's own
+        -- internal content may assume these exact 5px/6px anchors).
         local bg = popup:CreateTexture(nil, "BACKGROUND", nil, -8)
         bg:SetPoint("TOPLEFT", 5, -5); bg:SetPoint("BOTTOMRIGHT", -5, 5)
-        bg:SetTexture(0.045, 0.05, 0.072, 1)
+        bg:SetTexture(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 1)
         popup._aipBg = bg
     end
     if not popup._aipStrip then
@@ -693,7 +705,11 @@ function GUI.CreateMinimapButton()
 
     button:SetScript("OnClick", function(self, button)
         if button == "LeftButton" then
-            GUI.Toggle()
+            if IsShiftKeyDown() then
+                if AIP.RaidGroups and AIP.RaidGroups.ToggleWindow then AIP.RaidGroups.ToggleWindow() end
+            else
+                GUI.Toggle()
+            end
         elseif button == "RightButton" then
             -- Show quick menu
             GUI.ShowQuickMenu(self)
@@ -734,6 +750,7 @@ function GUI.CreateMinimapButton()
 
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("|cFFFFFFFFLeft-click:|r Open main window", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("|cFFFFFFFFShift-click:|r Raid Groups window", 0.7, 0.7, 0.7)
         GameTooltip:AddLine("|cFFFFFFFFRight-click:|r Quick menu", 0.7, 0.7, 0.7)
         GameTooltip:Show()
     end)
@@ -786,6 +803,25 @@ function GUI.ShowQuickMenu(anchor)
                 end
             end,
         },
+        {text = "Windows", isTitle = true, notCheckable = true},
+        {text = "Roll Window", func = function()
+            if AIP.RaidTools and AIP.RaidTools.ToggleRollWindow then AIP.RaidTools.ToggleRollWindow() end
+        end, notCheckable = true},
+        {text = "Tank Cast Window", func = function()
+            if AIP.TankCast and AIP.TankCast.ToggleWindow then AIP.TankCast.ToggleWindow() end
+        end, notCheckable = true},
+        {text = "Raid Groups Window", func = function()
+            if AIP.RaidGroups and AIP.RaidGroups.ToggleWindow then AIP.RaidGroups.ToggleWindow() end
+        end, notCheckable = true},
+        {text = "Toggle Dungeon Finder (RDF)", func = function()
+            if AIP.LFGWatch and AIP.LFGWatch.Toggle then AIP.LFGWatch.Toggle() end
+        end, notCheckable = true},
+        {text = "Raid Tools", isTitle = true, notCheckable = true},
+        {text = "Start Ready Check", func = function()
+            if AIP.RaidTools and AIP.RaidTools.StartReadyCheck then AIP.RaidTools.StartReadyCheck() end
+        end, notCheckable = true},
+        {text = "Pull Timer (10s)", func = function() if AIP.DBMBridge then AIP.DBMBridge.SendPull(10) end end, notCheckable = true},
+        {text = "Break Timer (5m)", func = function() if AIP.DBMBridge then AIP.DBMBridge.SendBreak(5) end end, notCheckable = true},
         {text = "Actions", isTitle = true, notCheckable = true},
         {text = "Spam Invite Message", func = function() AIP.SpamInvite() end, notCheckable = true},
         {text = "Invite Guild", func = function() AIP.InviteGuild() end, notCheckable = true},
@@ -849,20 +885,17 @@ function GUI.CreateFrame()
     -- Make closeable with Escape
     tinsert(UISpecialFrames, frame:GetName())
 
-    -- Background - solid black backdrop to prevent character showing through
-    frame:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = {left = 11, right = 12, top = 12, bottom = 11}
-    })
-    frame:SetBackdropColor(0, 0, 0, 1)
+    -- Background - flat 1px hairline chrome (matches the floating windows'
+    -- TK.SkinPanel language; converged tokens from AIP.UI.Colors, Phase 0).
+    frame:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+    frame:SetBackdropColor(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 1)
+    frame:SetBackdropBorderColor(AIP.UI.Colors.borderRGB[1], AIP.UI.Colors.borderRGB[2], AIP.UI.Colors.borderRGB[3], 1)
 
     -- Add an additional solid background layer for guaranteed opacity (dark navy).
     local solidBg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
-    solidBg:SetPoint("TOPLEFT", 11, -11)
-    solidBg:SetPoint("BOTTOMRIGHT", -11, 11)
-    solidBg:SetTexture(0.045, 0.05, 0.072, 1)
+    solidBg:SetPoint("TOPLEFT", 1, -1)
+    solidBg:SetPoint("BOTTOMRIGHT", -1, 1)
+    solidBg:SetTexture(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 1)
 
     -- Title bar
     local titleBar = CreateFrame("Frame", nil, frame)
@@ -890,11 +923,12 @@ function GUI.CreateFrame()
     subtitleText:SetText("by iuGames")
     subtitleText:SetTextColor(0.6, 0.6, 0.6)
 
-    -- Window-chrome buttons (close/maximize/minimize/simplify) reuse the
-    -- addon's own maroon/gold UIPanelButtonTemplate skin - the same one the
-    -- Rolls/Break/Pull/RDF/Bar/Ready buttons below and the Apply/Whisper/etc.
-    -- buttons elsewhere already use - with a flat glyph (gold, matching the
-    -- title text/tab-selected accent color) drawn on top instead of a label.
+    -- Window-chrome buttons (close/maximize/minimize/simplify) are built on
+    -- AIP.UI.FlatButton (the flat, hairline-bordered chrome shared with the
+    -- floating TankCast/RaidGroups windows - see docs/superpowers/specs/
+    -- 2026-09-28-main-window-design-alignment.md §4 Phase 3), with a flat
+    -- glyph (gold, matching the title text/tab-selected accent color) drawn
+    -- on top instead of a label.
     -- Built from axis-aligned solid-color blocks only (no Texture:SetRotation
     -- - it's a no-op for a plain color texture in this client, confirmed via
     -- live testing), so diagonals (the x) are drawn as a pixel staircase
@@ -920,29 +954,44 @@ function GUI.CreateFrame()
         end
     end
 
-    local function chromeButton(size)
-        local b = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-        b:SetSize(size, size)
-        b:SetText("")
+    -- tooltip is optional: pass a static string for buttons whose tooltip
+    -- never changes (e.g. "Close"); leave nil and set OnEnter/OnLeave
+    -- manually for buttons whose tooltip text depends on live state
+    -- (Maximize/Restore, Minimize/Expand, Simplify/Full View) - FlatButton's
+    -- own OnEnter/OnLeave only supports a fixed string, and a caller-added
+    -- SetScript("OnEnter"/"OnLeave", ...) afterward would otherwise replace
+    -- (not stack with) FlatButton's hover recolor, so those three re-apply
+    -- the same recolor values inside their own handlers below.
+    local function chromeButton(size, tooltip)
+        local b = AIP.UI.FlatButton(frame, "", size, size, nil, tooltip)
         return b
     end
 
-    -- Close button (x)
-    local closeBtn = chromeButton(17)
+    -- Close button (x). Static tooltip text -> passed straight through to
+    -- FlatButton's own tooltip param instead of a manual OnEnter/OnLeave, so
+    -- FlatButton's hover recolor is never overwritten. Icon is the literal
+    -- "X" character, drawn as its own gold FontString overlay (same
+    -- CHROME_GOLD as the chromeBar/chromeDiagonal icons on the other title
+    -- bar buttons) rather than through FlatButton's own SetText, which
+    -- would swap to a different (white) font/color on hover via its
+    -- automatic Normal/Highlight font-object switching.
+    local closeBtn = chromeButton(17, "Close")
     closeBtn:SetPoint("TOPRIGHT", -6, -6)
-    chromeDiagonal(closeBtn, -4, -4, 4, 4, 3, 2)
-    chromeDiagonal(closeBtn, 4, -4, -4, 4, 3, 2)
+    local closeGlyph = closeBtn:CreateFontString(nil, "OVERLAY")
+    local closeFont = GameFontNormal and GameFontNormal:GetFont()
+    if closeFont then closeGlyph:SetFont(closeFont, 13, "OUTLINE") end
+    closeGlyph:SetPoint("CENTER", 0, 0)
+    closeGlyph:SetText("X")
+    closeGlyph:SetTextColor(unpack(CHROME_GOLD))
     closeBtn:SetScript("OnClick", function() frame:Hide() end)
-    closeBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Close")
-        GameTooltip:Show()
-    end)
-    closeBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     frame.closeBtn = closeBtn
 
     -- Maximize/Restore button ([]) - a plain square outline; the tooltip
     -- (not the glyph) communicates which direction the click will go.
+    -- Tooltip text depends on live state (GUI.IsMaximized), so it can't go
+    -- through FlatButton's static tooltip param - OnEnter/OnLeave are set
+    -- manually below and re-apply FlatButton's own hover recolor values so
+    -- overwriting the handler doesn't lose the visual feedback.
     local maxBtn = chromeButton(17)
     maxBtn:SetPoint("RIGHT", closeBtn, "LEFT", -2, 0)
     frame.maxBtn = maxBtn
@@ -955,15 +1004,22 @@ function GUI.CreateFrame()
         GUI.ToggleMaximize()
     end)
     maxBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.95, 0.76, 0.12, 1)
+        self:SetBackdropColor(0.16, 0.15, 0.10, 0.98)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine(GUI.IsMaximized and "Restore" or "Maximize")
         GameTooltip:Show()
     end)
-    maxBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    maxBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.24, 0.26, 0.34, 1)
+        self:SetBackdropColor(0.10, 0.11, 0.16, 0.95)
+        GameTooltip:Hide()
+    end)
 
     -- Minimize button (-) - shrinks the whole window down to just the title
     -- bar; the glyph stays the same "-" both ways (like a real OS title bar),
-    -- the tooltip covers the "click again to expand" direction.
+    -- the tooltip covers the "click again to expand" direction. Same
+    -- dynamic-tooltip / manual-recolor situation as maxBtn above.
     local minBtn = chromeButton(17)
     minBtn:SetPoint("RIGHT", maxBtn, "LEFT", -2, 0)
     frame.minBtn = minBtn
@@ -973,71 +1029,51 @@ function GUI.CreateFrame()
         GUI.ToggleMinimize()
     end)
     minBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.95, 0.76, 0.12, 1)
+        self:SetBackdropColor(0.16, 0.15, 0.10, 0.98)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine(GUI.IsMinimized and "Expand" or "Minimize")
         GameTooltip:Show()
     end)
-    minBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    minBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.24, 0.26, 0.34, 1)
+        self:SetBackdropColor(0.10, 0.11, 0.16, 0.95)
+        GameTooltip:Hide()
+    end)
 
-    -- Quick raid buttons in the title bar - stay visible even when minimized.
-    local function titleBtn(text, w, ref, ofs, onClick, tip)
-        local b = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-        b:SetSize(w, 18); b:SetText(text)
-        b:SetPoint("RIGHT", ref, "LEFT", ofs, 0)
-        b:SetScript("OnClick", onClick)
-        b:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:AddLine(tip); GameTooltip:Show() end)
-        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        return b
-    end
     -- Simplified View toggle - lives in the title bar (not the tab bar)
     -- because simplified mode hides the tab bar itself; this button must stay
     -- reachable to turn it back off. Three tapering stacked bars read as a
     -- "view density" control (this toggle shows less/more content, not a
-    -- window resize), the same idiom as a list/detail-density icon.
+    -- window resize), the same idiom as a list/detail-density icon. Same
+    -- dynamic-tooltip / manual-recolor situation as maxBtn/minBtn above.
     local simpleBtn = chromeButton(17)
     simpleBtn:SetPoint("RIGHT", minBtn, "LEFT", -8, 0)
     frame.simpleBtn = simpleBtn
-    chromeBar(simpleBtn, 10, 1.3, 0, 4)
-    chromeBar(simpleBtn, 7, 1.3, 0, 0)
-    chromeBar(simpleBtn, 4, 1.3, 0, -4)
+    chromeDiagonal(simpleBtn, -4, -4, 4, 4, 3, 2)
+    chromeDiagonal(simpleBtn, 4, -4, -4, 4, 3, 2)
     simpleBtn:SetScript("OnClick", function() GUI.ToggleSimplifiedView() end)
     simpleBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.95, 0.76, 0.12, 1)
+        self:SetBackdropColor(0.16, 0.15, 0.10, 0.98)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine((AIP.db and AIP.db.simplifiedView) and "Full View" or "Simplify")
         GameTooltip:AddLine("Show only the LFM/LFG tree", 1, 1, 1, true)
         GameTooltip:Show()
     end)
-    simpleBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    simpleBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.24, 0.26, 0.34, 1)
+        self:SetBackdropColor(0.10, 0.11, 0.16, 0.95)
+        GameTooltip:Hide()
+    end)
 
-    local qTools = titleBtn("Rolls", 46, simpleBtn, -3,
-        function() if AIP.RaidTools and AIP.RaidTools.ToggleRollWindow then AIP.RaidTools.ToggleRollWindow() end end,
-        "Raid Tools (roll window)")
-    local qBreak = titleBtn("Break", 44, qTools, -3,
-        function() if AIP.DBMBridge then AIP.DBMBridge.SendBreak(5) end end, "5-minute break timer")
-    local qPull = titleBtn("Pull", 40, qBreak, -3,
-        function() if AIP.DBMBridge then AIP.DBMBridge.SendPull(10) end end, "Pull timer (10s, DBM-synced)")
-    local qRDF = titleBtn("RDF", 40, qPull, -3,
-        function() if AIP.LFGWatch and AIP.LFGWatch.Toggle then AIP.LFGWatch.Toggle() end end,
-        "Toggle the Dungeon Finder queue window")
-    local qBar = titleBtn("Bar", 38, qRDF, -3,
-        function() if AIP.RaidTools and AIP.RaidTools.ToggleBar then AIP.RaidTools.ToggleBar() end end,
-        "Toggle the floating announcement bar")
-    local qReady = titleBtn("Ready", 52, qBar, -3,
-        function() if AIP.RaidTools and AIP.RaidTools.StartReadyCheck then AIP.RaidTools.StartReadyCheck() end end,
-        "Start a ready check")
-
-    -- Simplified View shrinks the window to GUI.SIMPLIFIED_WIDTH (380px),
-    -- which isn't wide enough for "AutoInvite+ by iuGames" plus all six
-    -- text quick-buttons above without them overlapping the title - so in
-    -- that mode they're replaced by this single dropdown button instead.
-    -- Full View has room (1000px default) and keeps the buttons as-is.
-    frame.quickTitleButtons = {qTools, qBreak, qPull, qRDF, qBar, qReady}
-
-    local quickActionsBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    quickActionsBtn:SetSize(28, 18)
-    quickActionsBtn:SetText("...")
+    -- Title bar consolidation: every quick action lives in this ONE "..." button,
+    -- in BOTH Full and Simplified view (Simplified needed it first purely for
+    -- width; Full View gets it too now so the title bar never has to grow to fit
+    -- a per-feature button again - see GUI.ToggleSimplifiedView, which used to
+    -- swap a row of buttons for this and now just always shows it).
+    local quickActionsBtn = AIP.UI.FlatButton(frame, "...", 28, 18)
     quickActionsBtn:SetPoint("RIGHT", simpleBtn, "LEFT", -3, 0)
-    quickActionsBtn:Hide()
     quickActionsBtn:SetScript("OnClick", function(self)
         if not GUI.TitlebarQuickMenu then
             GUI.TitlebarQuickMenu = CreateFrame("Frame", "AIPTitlebarQuickMenu", UIParent, "UIDropDownMenuTemplate")
@@ -1056,6 +1092,10 @@ function GUI.CreateFrame()
                 func = function() if AIP.DBMBridge then AIP.DBMBridge.SendBreak(5) end end},
             {text = "Roll Window", notCheckable = true,
                 func = function() if AIP.RaidTools and AIP.RaidTools.ToggleRollWindow then AIP.RaidTools.ToggleRollWindow() end end},
+            {text = "Tank Cast Window", notCheckable = true,
+                func = function() if AIP.TankCast and AIP.TankCast.ToggleWindow then AIP.TankCast.ToggleWindow() end end},
+            {text = "Raid Groups Window", notCheckable = true,
+                func = function() if AIP.RaidGroups and AIP.RaidGroups.ToggleWindow then AIP.RaidGroups.ToggleWindow() end end},
             {text = " ", disabled = true, notCheckable = true},
             {text = "Cancel", notCheckable = true},
         }
@@ -1064,7 +1104,7 @@ function GUI.CreateFrame()
     quickActionsBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Quick Actions")
-        GameTooltip:AddLine("Ready Check, Bar, RDF, Pull, Break, Rolls", 1, 1, 1, true)
+        GameTooltip:AddLine("Ready Check, Bar, RDF, Pull, Break, Rolls, Tanks, Groups", 1, 1, 1, true)
         GameTooltip:Show()
     end)
     quickActionsBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1094,29 +1134,23 @@ function GUI.CreateFrame()
     -- Tab bar background
     local tabBarBg = tabBar:CreateTexture(nil, "BACKGROUND")
     tabBarBg:SetAllPoints()
-    tabBarBg:SetTexture(0.1, 0.1, 0.1, 1)
+    tabBarBg:SetTexture(0.10, 0.11, 0.16, 1)
 
     -- Create tab buttons (custom simple buttons for WotLK compatibility)
     frame.tabButtons = {}
     local tabX = 5
     local firstTab = true
-    -- Custom widths for each tab to fit text properly with consistent spacing
-    local tabWidths = {
-        lfm = 90,        -- "LFM Browser"
-        favorites = 70,  -- "Favorites"
-        blacklist = 68,  -- "Blacklist"
-        composition = 85, -- "Composition"
-        raidmgmt = 78,   -- "Raid Mgmt"
-        loothistory = 82, -- "Loot History"
-        character = 72,  -- "Character"
-        settings = 62,   -- "Settings"
-    }
     local tabSpacing = 6  -- Gap between tabs (increased for better visual separation)
+    -- Padding added on each side of a tab label's real measured width (elastic
+    -- sizing - see elastic-container-sizing-principle memory). This replaces a
+    -- hand-tuned pixel width per tab id; the old hardcoded values ran roughly
+    -- 16-24px wider than each label's natural rendered width, so this constant
+    -- keeps the same visual density the tab bar already had.
+    local TAB_LABEL_PADDING = 20
 
     for i, tab in ipairs(GUI.Tabs) do
-        local tabWidth = tabWidths[tab.id] or 90
         local tabBtn = CreateFrame("Button", "AIPTab" .. tab.id, tabBar)
-        tabBtn:SetSize(tabWidth, 24)
+        tabBtn:SetSize(60, 24) -- placeholder; resized below once the label's real width is measured
         tabBtn:SetPoint("TOPLEFT", tabX, -3)
         tabBtn.tabId = tab.id
 
@@ -1136,13 +1170,21 @@ function GUI.CreateFrame()
         local tabBorder = tabBtn:CreateTexture(nil, "BORDER")
         tabBorder:SetPoint("TOPLEFT", -1, 1)
         tabBorder:SetPoint("BOTTOMRIGHT", 1, -1)
-        tabBorder:SetTexture(0.4, 0.4, 0.4, 1)
+        tabBorder:SetTexture(AIP.UI.Colors.borderRGB[1], AIP.UI.Colors.borderRGB[2], AIP.UI.Colors.borderRGB[3], 1)
         tabBtn.border = tabBorder
 
         -- Tab text
         local tabText = tabBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         tabText:SetPoint("CENTER", 0, 0)
         tabText:SetText(tab.name)
+        -- Measure the label's real rendered width now that SetText has run and size
+        -- the button to fit it. GetStringWidth() is accurate immediately after
+        -- SetText for a short single-line label like this (no wrap, no layout-pass
+        -- wait needed) - the same pattern already used a few hundred lines up for
+        -- the minimap tooltip button's text-fit sizing, and in UIFactory.lua's
+        -- CreateLabeledEditBox.
+        local tabWidth = (tabText:GetStringWidth() or 0) + TAB_LABEL_PADDING
+        tabBtn:SetSize(tabWidth, 24)
         -- First tab starts selected with gold text
         if firstTab then
             tabText:SetTextColor(1, 0.82, 0)
@@ -1380,18 +1422,6 @@ function GUI.ApplySimplifiedView(enabled)
         frame.content:ClearAllPoints()
         frame.content:SetPoint("TOPLEFT", 10, enabled and -45 or -75)
         frame.content:SetPoint("BOTTOMRIGHT", -10, enabled and (GUI.SIMPLIFIED_STATUSBAR_HEIGHT + 10) or 40)
-    end
-
-    -- Title bar: swap the six text quick-buttons for a single "..." dropdown
-    -- (see GUI.CreateFrame) so they don't overlap "AutoInvite+ by iuGames" at
-    -- the narrow Simplified width. Full View has room and keeps the buttons.
-    if frame.quickTitleButtons then
-        for _, btn in ipairs(frame.quickTitleButtons) do
-            if enabled then btn:Hide() else btn:Show() end
-        end
-    end
-    if frame.quickActionsBtn then
-        if enabled then frame.quickActionsBtn:Show() else frame.quickActionsBtn:Hide() end
     end
 
     -- Maximizing doesn't make sense for the narrow Simplified window (it's
@@ -1824,10 +1854,8 @@ function GUI.CreateCompositionTab(container)
     UIDropDownMenu_SetWidth(templateDropdown, 150)
     container.templateDropdown = templateDropdown
 
-    local scanBtn = CreateFrame("Button", nil, container, "UIPanelButtonTemplate")
-    scanBtn:SetSize(90, 22)
+    local scanBtn = AIP.UI.FlatButton(container, "Scan Raid", 90, 22)
     scanBtn:SetPoint("LEFT", templateDropdown, "RIGHT", 10, 2)
-    scanBtn:SetText("Scan Raid")
     scanBtn:SetScript("OnClick", function()
         if AIP.Composition then
             AIP.Composition.ScanRaid()
@@ -1851,12 +1879,16 @@ function GUI.CreateCompositionTab(container)
     container.variationLabel = varLabel
     container.variationButtons = {}
 
-    -- Smart recommendations button
-    local recommendBtn = CreateFrame("Button", nil, container, "UIPanelButtonTemplate")
-    recommendBtn:SetSize(95, 22)
-    recommendBtn:SetText("Recommend")
+    -- Smart recommendations button. The old multi-line, multi-color tooltip
+    -- can't be expressed via FlatButton's single-string tooltip param, so
+    -- OnEnter/OnLeave are set manually below (after FlatButton's own) - they
+    -- re-apply FlatButton's hover recolor themselves so the manual handlers
+    -- don't silently clobber the visual feedback.
+    local recommendBtn = AIP.UI.FlatButton(container, "Recommend", 95, 22)
     recommendBtn:SetScript("OnClick", function() GUI.ShowRecommendations() end)
     recommendBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.95, 0.76, 0.12, 1)
+        self:SetBackdropColor(0.16, 0.15, 0.10, 0.98)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
         GameTooltip:AddLine("Smart Recommendations", 1, 0.82, 0)
         GameTooltip:AddLine("Analyzes the current raid against the selected", 1, 1, 1, true)
@@ -1864,19 +1896,24 @@ function GUI.CreateCompositionTab(container)
         GameTooltip:AddLine("recruit, prioritizing missing roles and raid buffs.", 1, 1, 1, true)
         GameTooltip:Show()
     end)
-    recommendBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    recommendBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.24, 0.26, 0.34, 1)
+        self:SetBackdropColor(0.10, 0.11, 0.16, 0.95)
+        GameTooltip:Hide()
+    end)
     container.recommendBtn = recommendBtn
 
     -- Save the CURRENT group's composition as a custom template (works as a
-    -- raid member too - "emulate the comp of a raid I joined")
-    local saveTplBtn = CreateFrame("Button", nil, container, "UIPanelButtonTemplate")
-    saveTplBtn:SetSize(85, 22)
+    -- raid member too - "emulate the comp of a raid I joined"). Same
+    -- multi-line-tooltip / manual-recolor situation as recommendBtn above.
+    local saveTplBtn = AIP.UI.FlatButton(container, "Save Group", 85, 22)
     saveTplBtn:SetPoint("LEFT", recommendBtn, "RIGHT", 5, 0)
-    saveTplBtn:SetText("Save Group")
     saveTplBtn:SetScript("OnClick", function()
         StaticPopup_Show("AIP_SAVE_COMP_TEMPLATE")
     end)
     saveTplBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.95, 0.76, 0.12, 1)
+        self:SetBackdropColor(0.16, 0.15, 0.10, 0.98)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
         GameTooltip:AddLine("Save Group as Template", 1, 0.82, 0)
         GameTooltip:AddLine("Snapshots the current group's size and role split", 1, 1, 1, true)
@@ -1885,7 +1922,11 @@ function GUI.CreateCompositionTab(container)
         GameTooltip:AddLine("Delete via /aip comp deltpl <name>", 0.6, 0.6, 0.6)
         GameTooltip:Show()
     end)
-    saveTplBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    saveTplBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.24, 0.26, 0.34, 1)
+        self:SetBackdropColor(0.10, 0.11, 0.16, 0.95)
+        GameTooltip:Hide()
+    end)
     container.saveTplBtn = saveTplBtn
 
     StaticPopupDialogs["AIP_SAVE_COMP_TEMPLATE"] = StaticPopupDialogs["AIP_SAVE_COMP_TEMPLATE"] or {
@@ -2402,6 +2443,39 @@ function GUI.CreateCompositionTab(container)
     local GROUP_HEIGHT = 90
     local MEMBER_HEIGHT = 24  -- Increased for 2-row display (name + spec)
 
+    -- Fades a texture's alpha in/out instead of an instant Show()/Hide(),
+    -- used for the drag-and-drop highlight below so a drop target reads as
+    -- an eased cue rather than a hard on/off flash. Textures (unlike Frames)
+    -- have no SetScript/OnUpdate of their own, so each texture gets a tiny
+    -- companion driver frame (created once, cached on the texture) that
+    -- drives the alpha ramp.
+    local DRAG_HIGHLIGHT_FADE = 0.12
+    local function fadeShowHide(tex, show)
+        local driver = tex._fadeDriver
+        if not driver then
+            driver = CreateFrame("Frame")
+            tex._fadeDriver = driver
+        end
+        driver:SetScript("OnUpdate", nil)
+        if show then
+            if tex:IsShown() and tex:GetAlpha() >= 1 then return end
+            tex:SetAlpha(0); tex:Show()
+        elseif not tex:IsShown() then
+            return
+        end
+        local from, to = tex:GetAlpha(), show and 1 or 0
+        local elapsed = 0
+        driver:SetScript("OnUpdate", function(self, dt)
+            elapsed = elapsed + dt
+            local t = math.min(elapsed / DRAG_HIGHLIGHT_FADE, 1)
+            tex:SetAlpha(from + (to - from) * t)
+            if t >= 1 then
+                self:SetScript("OnUpdate", nil)
+                if not show then tex:Hide() end
+            end
+        end)
+    end
+
     -- Dynamic resizing function for group frames
     local function RecalculateGroupLayouts()
         local frameWidth = groupsFrame:GetWidth()
@@ -2582,7 +2656,7 @@ function GUI.CreateCompositionTab(container)
                         for sNum = 1, 5 do
                             local s = container.raidGroups[gNum].slots[sNum]
                             if s and s.dragHighlight then
-                                s.dragHighlight:Hide()
+                                fadeShowHide(s.dragHighlight, false)
                             end
                         end
                     end
@@ -2593,7 +2667,7 @@ function GUI.CreateCompositionTab(container)
             slot:SetScript("OnEnter", function(self)
                 -- Show drop highlight if dragging
                 if container.dragSource and container.dragSource ~= self then
-                    self.dragHighlight:Show()
+                    fadeShowHide(self.dragHighlight, true)
                 else
                     self.bg:SetTexture(0.3, 0.3, 0.4, 0.6)
                 end
@@ -2619,7 +2693,7 @@ function GUI.CreateCompositionTab(container)
             end)
             slot:SetScript("OnLeave", function(self)
                 self.bg:SetTexture(0.15, 0.15, 0.15, 0.5)
-                self.dragHighlight:Hide()
+                fadeShowHide(self.dragHighlight, false)
                 GameTooltip:Hide()
             end)
 
@@ -5558,15 +5632,28 @@ GUI.ClassSpecs = {
 }
 
 function GUI.CreateAddGroupPopup()
+    -- Single source of truth for the collapsed-mode content geometry, shared
+    -- between COLLAPSED_HEIGHT's derivation below and the actual widget
+    -- SetPoint/SetSize calls further down (collapsedNeedsText, customizeBtn) -
+    -- previously these were three independent hardcoded "340"s/"-168"/"134"
+    -- that could silently drift apart (see elastic-container-sizing-principle
+    -- memory; this popup's ~7px real margin was exactly that kind of drift).
+    local COLLAPSED_NEEDS_Y = -168      -- collapsedNeedsText's TOPLEFT y-offset
+    local COLLAPSED_NEEDS_H = 13        -- collapsedNeedsText's own height
+    local COLLAPSED_MARGIN = 16         -- clearance between needs hint and Customize button
+    local CUSTOMIZE_BTN_HEIGHT = 18
+    local CUSTOMIZE_BTN_BOTTOM_OFFSET = 134  -- customizeBtn's BOTTOMLEFT y-offset from popup bottom
+    local COLLAPSED_HEIGHT = math.abs(COLLAPSED_NEEDS_Y) + COLLAPSED_NEEDS_H + COLLAPSED_MARGIN
+        + CUSTOMIZE_BTN_HEIGHT + CUSTOMIZE_BTN_BOTTOM_OFFSET
+
     local popup = CreateFrame("Frame", "AIPAddGroupPopup", UIParent)
-    popup:SetSize(500, 340)  -- collapsed height; SetExpanded() grows it (500 wide: per-spec count boxes)
+    popup:SetSize(500, COLLAPSED_HEIGHT)  -- SetExpanded() grows it (500 wide: per-spec count boxes)
     popup:SetPoint("CENTER", -255, 0)  -- offset left clears the Enroll popup at the new 500 width
     popup:SetFrameStrata("DIALOG")
     AIP.UI.MakeDraggable(popup)
     popup:SetClampedToScreen(true)
     GUI.StylePopup(popup)
 
-    local COLLAPSED_HEIGHT = 340  -- 320 + 20px so the needs hint clears the Customize button
     local EXPANDED_HEIGHT = 688  -- 668 + 20px for the composition "Need:" line
 
     local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -5574,7 +5661,10 @@ function GUI.CreateAddGroupPopup()
     title:SetText("Create Group Listing")
     title:SetTextColor(1, 0.82, 0)
 
-    local closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
+    -- UIPanelCloseButton's template baked in "hide my parent" as its default
+    -- click behavior; UI.CloseButton has no such default, so it's passed
+    -- explicitly here to preserve the same behavior.
+    local closeBtn = AIP.UI.CloseButton(popup, function() popup:Hide() end)
     closeBtn:SetPoint("TOPRIGHT", -5, -5)
 
     -- ========================================================================
@@ -5672,9 +5762,9 @@ function GUI.CreateAddGroupPopup()
     -- suggestions are visible without expanding the full form. Clipped to a
     -- single line - it must never bleed into the PREVIEW section below.
     local collapsedNeedsText = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    collapsedNeedsText:SetPoint("TOPLEFT", 20, -168)
+    collapsedNeedsText:SetPoint("TOPLEFT", 20, COLLAPSED_NEEDS_Y)
     collapsedNeedsText:SetPoint("RIGHT", popup, "RIGHT", -20, 0)
-    collapsedNeedsText:SetHeight(13)
+    collapsedNeedsText:SetHeight(COLLAPSED_NEEDS_H)
     collapsedNeedsText:SetJustifyH("LEFT")
     if collapsedNeedsText.SetWordWrap then collapsedNeedsText:SetWordWrap(false) end
     collapsedNeedsText:SetText("")
@@ -6242,11 +6332,20 @@ function GUI.CreateAddGroupPopup()
 
     popup.classChecks.DPS = {}
     makeRoleToggle("DPS:", 1, 0.5, 0.5, -176, "DPS")
-    local dpsX, dpsY = 80, -174
+    -- Single source of truth for the DPS grid's wrap geometry - ReflowDetailRows
+    -- below derives detailed mode's `needs` row (and everything cascading from
+    -- it) from these same constants instead of a hardcoded Y offset, so the
+    -- layout stays correct automatically if GUI.ClassSpecs.DPS's entry count
+    -- ever changes (previously required manually re-deriving and editing a
+    -- hardcoded table - see elastic-container-sizing-principle memory).
+    popup.DPS_PER_ROW = 5
+    popup.DPS_ROW_START_Y = -174
+    popup.DPS_ROW_STEP = -26
+    local dpsX, dpsY = 80, popup.DPS_ROW_START_Y
     local dpsCount = 0
     for _, spec in ipairs(GUI.ClassSpecs.DPS) do
-        if dpsCount > 0 and dpsCount % 5 == 0 then
-            dpsY = dpsY - 26
+        if dpsCount > 0 and dpsCount % popup.DPS_PER_ROW == 0 then
+            dpsY = dpsY + popup.DPS_ROW_STEP
             dpsX = 80
         end
         makeSpecCheck(spec, dpsX, dpsY, "DPS")
@@ -6340,16 +6439,27 @@ function GUI.CreateAddGroupPopup()
     -- reserved-items frame's own height) in every case - keep that identity
     -- if you ever change reservedFrame's height.
     --
-    -- detailed's `needs` (-254) assumes the class grid is exactly 3 DPS rows
-    -- (GUI.ClassSpecs.DPS currently has 13 entries, wrapped 5/5/3 -> Tanks
-    -- -124, Heals -150, DPS rows -176/-202/-228, grid bottom ~-248). If
-    -- GUI.ClassSpecs.DPS ever grows past 15 entries (a 4th wrapped row),
-    -- lower detailed.needs (and everything below it, and CONTENT_BOTTOM.detailed)
-    -- by 26 per extra row, or the grid will overlap the Need summary line.
+    -- detailed's `needs` row (and everything cascading below it) is DERIVED
+    -- from the DPS grid's actual row count (popup.DPS_PER_ROW/_ROW_START_Y/
+    -- _ROW_STEP, set where the grid is built above), not a hardcoded offset -
+    -- so it stays correct automatically however many entries
+    -- GUI.ClassSpecs.DPS has, instead of needing a manual re-derivation (see
+    -- elastic-container-sizing-principle memory: a parent must size/position
+    -- itself from its children's real extent, not a number hand-tuned for
+    -- today's data).
+    local dpsRows = math.max(1, math.ceil(#GUI.ClassSpecs.DPS / popup.DPS_PER_ROW))
+    local dpsGridBottomY = popup.DPS_ROW_START_Y + (dpsRows - 1) * popup.DPS_ROW_STEP
+    local detailedNeedsY = dpsGridBottomY - 28
+    local detailedNoteY = detailedNeedsY - 26
+    local detailedKeywordY = detailedNoteY - 28
+    local detailedBroadcastY = detailedKeywordY - 26
+    local detailedReservedLabelY = detailedBroadcastY - 26
+    local detailedReservedFrameY = detailedReservedLabelY - 18
+
     local ROW_Y = {
         minimal  = { req = -26, achieve = -72,  needs = -106, note = -132, keyword = -160, broadcast = -186, reservedLabel = -212, reservedFrame = -230 },
         compact  = { req = -74, achieve = -120, needs = -154, note = -180, keyword = -208, broadcast = -234, reservedLabel = -260, reservedFrame = -278 },
-        detailed = { req = -26, achieve = -72,  needs = -254, note = -280, keyword = -308, broadcast = -334, reservedLabel = -360, reservedFrame = -378 },
+        detailed = { req = -26, achieve = -72,  needs = detailedNeedsY, note = detailedNoteY, keyword = detailedKeywordY, broadcast = detailedBroadcastY, reservedLabel = detailedReservedLabelY, reservedFrame = detailedReservedFrameY },
     }
     local CONTENT_BOTTOM = { minimal = -264, compact = -312, detailed = -412 }
     local HEADER_HEIGHT = 96   -- detail frame's fixed TOPLEFT offset from the popup
@@ -6430,8 +6540,8 @@ function GUI.CreateAddGroupPopup()
     -- FOOTER: customize toggle, live preview, schedule line, buttons
     -- ========================================================================
     local customizeBtn = CreateFrame("Button", nil, popup)
-    customizeBtn:SetSize(140, 18)
-    customizeBtn:SetPoint("BOTTOMLEFT", 20, 134)
+    customizeBtn:SetSize(140, CUSTOMIZE_BTN_HEIGHT)
+    customizeBtn:SetPoint("BOTTOMLEFT", 20, CUSTOMIZE_BTN_BOTTOM_OFFSET)
     local customizeText = customizeBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     customizeText:SetPoint("LEFT", 0, 0)
     customizeText:SetText("|cFF66AAFF[+] Customize...|r")
@@ -6891,10 +7001,8 @@ function GUI.CreateAddGroupPopup()
     -- ========================================================================
     -- BUTTONS
     -- ========================================================================
-    local createBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-    createBtn:SetSize(100, 24)
+    local createBtn = AIP.UI.FlatButton(popup, "Post Group", 100, 24)
     createBtn:SetPoint("BOTTOM", popup, "BOTTOM", -60, 16)  -- pair centered in the 500-wide popup
-    createBtn:SetText("Post Group")
     createBtn:SetScript("OnClick", function()
         local raidKey = GetRaidKey()
         if not raidKey then
@@ -7028,10 +7136,8 @@ function GUI.CreateAddGroupPopup()
             "!" .. (popup.broadcastCheck:GetChecked() and " |cFF00FF00Auto-broadcasting started.|r" or ""))
     end)
 
-    local cancelBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-    cancelBtn:SetSize(80, 24)
+    local cancelBtn = AIP.UI.FlatButton(popup, "Cancel", 80, 24)
     cancelBtn:SetPoint("LEFT", createBtn, "RIGHT", 20, 0)
-    cancelBtn:SetText("Cancel")
     cancelBtn:SetScript("OnClick", function() popup:Hide() end)
 
     -- Hide BEFORE the initial ApplyTemplateDefaults() call: CreateFrame frames
@@ -7400,7 +7506,7 @@ function GUI.CreateEnrollPopup()
     title:SetText("Enroll as Looking for Group")
     title:SetTextColor(1, 0.82, 0)
 
-    local closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
+    local closeBtn = AIP.UI.CloseButton(popup, function() popup:Hide() end)
     closeBtn:SetPoint("TOPRIGHT", -5, -5)
 
     local y = -45
@@ -7921,10 +8027,8 @@ function GUI.CreateEnrollPopup()
     y = y - 28
 
     -- === Buttons ===
-    local enrollBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-    enrollBtn:SetSize(90, 24)
+    local enrollBtn = AIP.UI.FlatButton(popup, "Enroll", 90, 24)
     enrollBtn:SetPoint("BOTTOMLEFT", 80, 15)
-    enrollBtn:SetText("Enroll")
     enrollBtn:SetScript("OnClick", function()
         local raidKey = GetRaidKey()
         local role = popup.selectedRole or GUI.DetectPlayerRole()
@@ -8054,10 +8158,8 @@ function GUI.CreateEnrollPopup()
         AIP.Print("Enrolled as LFG for " .. raidKey .. " (" .. role .. ")! |cFF00FF00Auto-broadcasting until you join a group.|r")
     end)
 
-    local cancelBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-    cancelBtn:SetSize(80, 24)
+    local cancelBtn = AIP.UI.FlatButton(popup, "Cancel", 80, 24)
     cancelBtn:SetPoint("LEFT", enrollBtn, "RIGHT", 20, 0)
-    cancelBtn:SetText("Cancel")
     cancelBtn:SetScript("OnClick", function() popup:Hide() end)
 
     -- Update stats when shown
@@ -8145,8 +8247,7 @@ function GUI.RebuildVariationButtons(container)
         local btn = buttons[i]
         if v then
             if not btn then
-                btn = CreateFrame("Button", nil, container, "UIPanelButtonTemplate")
-                btn:SetSize(22, 22)
+                btn = AIP.UI.FlatButton(container, "", 22, 22)
                 buttons[i] = btn
             end
             btn:ClearAllPoints()
@@ -8162,7 +8263,18 @@ function GUI.RebuildVariationButtons(container)
                 AIP.Composition.SetVariation(self.variationIndex)
                 GUI.UpdateCompositionTab()
             end)
+            -- Per-instance tooltip content (variation name/comp/GS/note) can't
+            -- go through FlatButton's static tooltip param, so OnEnter/OnLeave
+            -- are set manually - they re-apply FlatButton's own hover recolor
+            -- so the manual handlers don't clobber it. LockHighlight/
+            -- UnlockHighlight (the old template's built-in "selected" look) no
+            -- longer has a highlight texture to act on with a flat button, so
+            -- the active variation's selected state is now shown via the same
+            -- gold border FlatButton uses on hover instead (still cleared/
+            -- reasserted correctly on leave).
             btn:SetScript("OnEnter", function(self)
+                self:SetBackdropBorderColor(0.95, 0.76, 0.12, 1)
+                self:SetBackdropColor(0.16, 0.15, 0.10, 0.98)
                 local vv = self.variationData
                 GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
                 GameTooltip:AddLine(vv.name, 1, 0.82, 0)
@@ -8173,8 +8285,22 @@ function GUI.RebuildVariationButtons(container)
                 if vv.note then GameTooltip:AddLine(vv.note, 0.7, 0.7, 0.7, true) end
                 GameTooltip:Show()
             end)
-            btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            if i == activeIndex then btn:LockHighlight() else btn:UnlockHighlight() end
+            btn:SetScript("OnLeave", function(self)
+                if self.variationIndex == activeIndex then
+                    self:SetBackdropBorderColor(0.95, 0.76, 0.12, 1)
+                else
+                    self:SetBackdropBorderColor(0.24, 0.26, 0.34, 1)
+                end
+                self:SetBackdropColor(0.10, 0.11, 0.16, 0.95)
+                GameTooltip:Hide()
+            end)
+            if i == activeIndex then
+                btn:LockHighlight()
+                btn:SetBackdropBorderColor(0.95, 0.76, 0.12, 1)
+            else
+                btn:UnlockHighlight()
+                btn:SetBackdropBorderColor(0.24, 0.26, 0.34, 1)
+            end
             btn:Show()
             anchor = btn
         elseif btn then
@@ -8214,7 +8340,7 @@ function GUI.ShowRecommendations()
         title:SetText("Recruitment Recommendations")
         title:SetTextColor(1, 0.82, 0)
 
-        local close = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
+        local close = AIP.UI.CloseButton(popup, function() popup:Hide() end)
         close:SetPoint("TOPRIGHT", -6, -6)
 
         local scroll = CreateFrame("ScrollFrame", "AIPCompRecScroll", popup, "UIPanelScrollFrameTemplate")

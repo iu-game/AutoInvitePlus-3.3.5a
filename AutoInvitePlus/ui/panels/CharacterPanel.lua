@@ -1500,11 +1500,9 @@ function P.Create(container)
     local border = CreateFrame("Frame", nil, container)
     border:SetPoint("TOPLEFT", pad, -80)
     border:SetPoint("BOTTOMRIGHT", -pad - 224, 120)
-    border:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 } })
-    border:SetBackdropColor(0, 0, 0, 0.4)
-    border:SetBackdropBorderColor(0.4, 0.4, 0.45)
+    border:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+    border:SetBackdropColor(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 0.4)
+    border:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
 
     local scroll = CreateFrame("ScrollFrame", nil, border)
     scroll:SetPoint("TOPLEFT", 6, -6)
@@ -1529,11 +1527,9 @@ function P.Create(container)
     local mborder = CreateFrame("Frame", nil, container)
     mborder:SetPoint("TOPRIGHT", -pad, -80)
     mborder:SetSize(212, 208)
-    mborder:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 } })
-    mborder:SetBackdropColor(0, 0, 0, 0.5)
-    mborder:SetBackdropBorderColor(0.4, 0.4, 0.45)
+    mborder:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+    mborder:SetBackdropColor(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 0.5)
+    mborder:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
 
     local model = CreateFrame("PlayerModel", nil, mborder)
     model:SetPoint("TOPLEFT", 5, -5); model:SetPoint("BOTTOMRIGHT", -5, 5)
@@ -1566,10 +1562,8 @@ function P.Create(container)
     sborder:SetPoint("TOPRIGHT", -pad, -294)
     sborder:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -pad, 116)
     sborder:SetWidth(212)
-    sborder:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 } })
-    sborder:SetBackdropColor(0, 0, 0, 0.5); sborder:SetBackdropBorderColor(0.4, 0.4, 0.45)
+    sborder:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+    sborder:SetBackdropColor(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 0.5); sborder:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
     local stitle = sborder:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     stitle:SetPoint("TOPLEFT", 8, -6); stitle:SetText("|cffffd100Character Stats|r")
     -- Scrollable body so the full stat list fits and scrolls (plain ScrollFrame,

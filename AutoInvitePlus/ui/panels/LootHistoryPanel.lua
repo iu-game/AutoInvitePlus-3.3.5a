@@ -314,17 +314,14 @@ function LH.Create(parent)
     FauxScrollFrame_Update(raidsScroll, 0, 7, 18)
 
     -- Raids buttons
-    local deleteRaidBtn = CreateFrame("Button", nil, raidsPanel, "UIPanelButtonTemplate")
-    deleteRaidBtn:SetSize(50, 18)
-    deleteRaidBtn:SetPoint("BOTTOMLEFT", 5, 8)
-    deleteRaidBtn:SetText("Delete")
-    deleteRaidBtn:SetScript("OnClick", function()
+    local deleteRaidBtn = AIP.UI.FlatButton(raidsPanel, "Delete", 50, 18, function()
         if not LH.SelectedRaid then
             AIP.Print("Select a raid session to delete.")
             return
         end
         StaticPopup_Show("AIP_CONFIRM_DELETE_RAID")
     end)
+    deleteRaidBtn:SetPoint("BOTTOMLEFT", 5, 8)
 
     -- === BOSSES PANEL ===
     local bossesPanel = LH.CreatePanelFrame(frame, "Bosses", PANEL_WIDTH_THIRD, TOP_ROW_HEIGHT)
@@ -732,29 +729,20 @@ function LH.Create(parent)
     end)
 
     -- Chat export buttons (post selected boss loot to chat)
-    local postSayBtn = CreateFrame("Button", nil, lootPanel, "UIPanelButtonTemplate")
-    postSayBtn:SetSize(50, 18)
-    postSayBtn:SetPoint("BOTTOMLEFT", 5, 8)
-    postSayBtn:SetText("Say")
-    postSayBtn:SetScript("OnClick", function()
+    local postSayBtn = AIP.UI.FlatButton(lootPanel, "Say", 50, 18, function()
         LH.PostBossLootToChat("SAY")
     end)
+    postSayBtn:SetPoint("BOTTOMLEFT", 5, 8)
 
-    local postPartyBtn = CreateFrame("Button", nil, lootPanel, "UIPanelButtonTemplate")
-    postPartyBtn:SetSize(50, 18)
-    postPartyBtn:SetPoint("LEFT", postSayBtn, "RIGHT", 3, 0)
-    postPartyBtn:SetText("Party")
-    postPartyBtn:SetScript("OnClick", function()
+    local postPartyBtn = AIP.UI.FlatButton(lootPanel, "Party", 50, 18, function()
         LH.PostBossLootToChat("PARTY")
     end)
+    postPartyBtn:SetPoint("LEFT", postSayBtn, "RIGHT", 3, 0)
 
-    local postRaidBtn = CreateFrame("Button", nil, lootPanel, "UIPanelButtonTemplate")
-    postRaidBtn:SetSize(50, 18)
-    postRaidBtn:SetPoint("LEFT", postPartyBtn, "RIGHT", 3, 0)
-    postRaidBtn:SetText("Raid")
-    postRaidBtn:SetScript("OnClick", function()
+    local postRaidBtn = AIP.UI.FlatButton(lootPanel, "Raid", 50, 18, function()
         LH.PostBossLootToChat("RAID")
     end)
+    postRaidBtn:SetPoint("LEFT", postPartyBtn, "RIGHT", 3, 0)
 
     -- ========================================================================
     -- DYNAMIC RESIZING
@@ -1016,14 +1004,9 @@ end
 function LH.CreatePanelFrame(parent, title, width, height)
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetSize(width, height)
-    panel:SetBackdrop({
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 12,
-        insets = {left = 3, right = 3, top = 3, bottom = 3}
-    })
-    panel:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
-    panel:SetBackdropBorderColor(0.4, 0.4, 0.4)
+    panel:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+    panel:SetBackdropColor(AIP.UI.Colors.bgRGB[1], AIP.UI.Colors.bgRGB[2], AIP.UI.Colors.bgRGB[3], 0.9)
+    panel:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
 
     local titleText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     titleText:SetPoint("TOPLEFT", 8, -6)
@@ -1462,19 +1445,16 @@ function LH.ShowAddBossPopup()
         popup:RegisterForDrag("LeftButton")
         popup:SetScript("OnDragStart", popup.StartMoving)
         popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
-        popup:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-            tile = true, tileSize = 32, edgeSize = 32,
-            insets = {left = 8, right = 8, top = 8, bottom = 8}
-        })
+        popup:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+        popup:SetBackdropColor(unpack(AIP.UI.Colors.bgRGB))
+        popup:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
 
         local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
         title:SetPoint("TOP", 0, -12)
         title:SetText("Add Boss Kill")
         title:SetTextColor(1, 0.82, 0)
 
-        local closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
+        local closeBtn = AIP.UI.CloseButton(popup, function() popup:Hide() end)
         closeBtn:SetPoint("TOPRIGHT", -5, -5)
 
         local nameLabel = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -1488,11 +1468,7 @@ function LH.ShowAddBossPopup()
         if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(nameInput) end
         popup.nameInput = nameInput
 
-        local addBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-        addBtn:SetSize(80, 24)
-        addBtn:SetPoint("BOTTOMLEFT", 50, 15)
-        addBtn:SetText("Add")
-        addBtn:SetScript("OnClick", function()
+        local addBtn = AIP.UI.FlatButton(popup, "Add", 80, 24, function()
             local bossName = strtrim(popup.nameInput:GetText() or "")
             if bossName == "" then
                 AIP.Print("Please enter a boss name.")
@@ -1527,12 +1503,10 @@ function LH.ShowAddBossPopup()
             popup.nameInput:SetText("")
             popup:Hide()
         end)
+        addBtn:SetPoint("BOTTOMLEFT", 50, 15)
 
-        local cancelBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-        cancelBtn:SetSize(80, 24)
+        local cancelBtn = AIP.UI.FlatButton(popup, "Cancel", 80, 24, function() popup:Hide() end)
         cancelBtn:SetPoint("LEFT", addBtn, "RIGHT", 20, 0)
-        cancelBtn:SetText("Cancel")
-        cancelBtn:SetScript("OnClick", function() popup:Hide() end)
 
         popup:Hide()
         tinsert(UISpecialFrames, "AIPAddBossPopup")
@@ -1554,19 +1528,16 @@ function LH.ShowExportPopup(text)
         popup:RegisterForDrag("LeftButton")
         popup:SetScript("OnDragStart", popup.StartMoving)
         popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
-        popup:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-            tile = true, tileSize = 32, edgeSize = 32,
-            insets = {left = 8, right = 8, top = 8, bottom = 8}
-        })
+        popup:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+        popup:SetBackdropColor(unpack(AIP.UI.Colors.bgRGB))
+        popup:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
 
         local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
         title:SetPoint("TOP", 0, -12)
         title:SetText("Export Session")
         title:SetTextColor(1, 0.82, 0)
 
-        local closeBtn = CreateFrame("Button", nil, popup, "UIPanelCloseButton")
+        local closeBtn = AIP.UI.CloseButton(popup, function() popup:Hide() end)
         closeBtn:SetPoint("TOPRIGHT", -5, -5)
 
         local scroll = CreateFrame("ScrollFrame", "AIPLootExportScroll", popup, "UIPanelScrollFrameTemplate")
@@ -1582,14 +1553,11 @@ function LH.ShowExportPopup(text)
         scroll:SetScrollChild(editBox)
         popup.editBox = editBox
 
-        local copyBtn = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
-        copyBtn:SetSize(80, 24)
-        copyBtn:SetPoint("BOTTOM", 0, 15)
-        copyBtn:SetText("Select All")
-        copyBtn:SetScript("OnClick", function()
+        local copyBtn = AIP.UI.FlatButton(popup, "Select All", 80, 24, function()
             popup.editBox:HighlightText()
             popup.editBox:SetFocus()
         end)
+        copyBtn:SetPoint("BOTTOM", 0, 15)
 
         popup:Hide()
         tinsert(UISpecialFrames, "AIPLootExportPopup")

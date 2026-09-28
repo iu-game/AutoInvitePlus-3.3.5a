@@ -29,7 +29,14 @@ UI.Colors = {
     goldRGB   = { 1, 0.82, 0 },        -- section headers, titles
     dimRGB    = { 0.55, 0.55, 0.55 },  -- empty states, hints
     accentRGB = { 0.2, 0.8, 1 },
-    borderRGB = { 0.34, 0.37, 0.46 },  -- theme slate border
+    -- Canonical flat-window fill/border (matches AIP.TankCast's TK.SkinPanel /
+    -- RaidGroupsWindow's fallback skinPanel — see docs/superpowers/specs/
+    -- 2026-09-28-main-window-design-alignment.md §2.5). borderRGB was corrected
+    -- from 0.34,0.37,0.46 (CentralGUI's near-miss token) to the TK/RG value;
+    -- verified zero existing readers of UI.Colors.borderRGB addon-wide before
+    -- changing it, so this is a safe zero-visual-change correction.
+    bgRGB     = { 0.04, 0.045, 0.065 },  -- theme flat panel fill (TK.SkinPanel)
+    borderRGB = { 0.30, 0.33, 0.42 },  -- theme slate border (TK.SkinPanel)
     -- Role tints (queue/waitlist rows, composition labels)
     roleRGB = {
         TANK   = { 0.5, 0.5, 1 },
@@ -287,7 +294,6 @@ end
 -- Create edit box with label
 function UI.CreateLabeledEditBox(parent, label, width, height, numeric)
     local container = CreateFrame("Frame", nil, parent)
-    container:SetSize(width + 60, height or 20)
 
     local labelText = container:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     labelText:SetPoint("LEFT", 0, 0)
@@ -297,6 +303,13 @@ function UI.CreateLabeledEditBox(parent, label, width, height, numeric)
     local editBox = UI.CreateEditBox(container, width, height, numeric)
     editBox:SetPoint("LEFT", labelText, "RIGHT", 5, 0)
     container.editBox = editBox
+
+    -- Derived from the label's real rendered width (+ its own 5px gap to the
+    -- edit box) instead of a flat "+60" guessed for whatever "label" happened
+    -- to be when this was written - see elastic-container-sizing-principle
+    -- memory. GetStringWidth() is accurate immediately after SetText, no
+    -- OnUpdate/layout-pass wait needed (unlike a wrapped multi-line string).
+    container:SetSize((labelText:GetStringWidth() or 0) + 5 + width, height or 20)
 
     return container
 end
@@ -325,28 +338,15 @@ end
 -- BUTTONS
 -- ============================================================================
 
--- Create a standard button
+-- Create a standard button. Body redirects to the flat, hairline-bordered
+-- chrome (UI.FlatButton, defined below) so every caller of this shared
+-- factory inherits the theme-aligned look for free — see
+-- docs/superpowers/specs/2026-09-28-main-window-design-alignment.md §4
+-- Phase 3. External signature/return shape is unchanged: same params,
+-- same defaults (80x22), returns a Button whose :SetText/:GetScript("OnClick")/
+-- etc keep working exactly as before.
 function UI.CreateButton(parent, text, width, height, onClick, tooltip)
-    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    button:SetSize(width or 80, height or 22)
-    button:SetText(text)
-
-    if onClick then
-        button:SetScript("OnClick", onClick)
-    end
-
-    if tooltip then
-        button:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine(tooltip)
-            GameTooltip:Show()
-        end)
-        button:SetScript("OnLeave", function()
-            GameTooltip:Hide()
-        end)
-    end
-
-    return button
+    return UI.FlatButton(parent, text, width or 80, height or 22, onClick, tooltip)
 end
 
 -- Create an icon button
@@ -392,6 +392,86 @@ function UI.CreateCloseButton(parent, onClick)
     end
 
     return button
+end
+
+-- ============================================================================
+-- FLAT (non-Blizzard-template) CHROME
+-- Reproduces the floating windows' (AIP.TankCast / AIP.RaidGroups) flat,
+-- hairline-bordered visual language: dark fill, 1px slate border, gold-tinted
+-- on hover. This is new, independent code (not a refactor of TK.FlatButton /
+-- TK.CloseButton, and not a dependency on AIP.TankCast — see
+-- docs/superpowers/specs/2026-09-28-main-window-design-alignment.md §3 item 6).
+-- Nothing calls these yet (Phase 0: additive only, zero visual change).
+-- ============================================================================
+
+local FLAT_WHITE = "Interface\\Buttons\\WHITE8X8"
+
+-- The flat 1px-hairline backdrop *shape* (matches TK.SkinPanel's backdrop
+-- table). Data only for now — a later phase wires GUI.Backdrops/GUI.StylePopup
+-- to consume it.
+UI.FlatPanelBackdrop = {
+    bgFile = FLAT_WHITE, edgeFile = FLAT_WHITE, edgeSize = 1,
+    insets = { left = 1, right = 1, top = 1, bottom = 1 },
+}
+
+-- Flat button: dark fill, 1px slate border, gold-tinted on hover (combined
+-- OnEnter/OnLeave also shows the optional tooltip). Mirrors TK.FlatButton
+-- (TankCastWindow.lua:107-136) exactly, reproduced from scratch.
+function UI.FlatButton(parent, text, w, h, onClick, tooltip)
+    local b = CreateFrame("Button", nil, parent)
+    b:SetSize(w, h)
+    b:SetBackdrop({
+        bgFile = FLAT_WHITE, edgeFile = FLAT_WHITE, edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    b:SetBackdropColor(0.10, 0.11, 0.16, 0.95)
+    b:SetBackdropBorderColor(0.24, 0.26, 0.34, 1)
+    b:SetNormalFontObject(GameFontHighlightSmall)
+    b:SetHighlightFontObject(GameFontNormalSmall)
+    b:SetDisabledFontObject(GameFontDisableSmall)
+    b:SetText(text)
+    if onClick then b:SetScript("OnClick", onClick) end
+    b:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.95, 0.76, 0.12, 1)
+        self:SetBackdropColor(0.16, 0.15, 0.10, 0.98)
+        if tooltip then
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine(tooltip, 1, 1, 1, true)
+            GameTooltip:Show()
+        end
+    end)
+    b:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.24, 0.26, 0.34, 1)
+        self:SetBackdropColor(0.10, 0.11, 0.16, 0.95)
+        GameTooltip:Hide()
+    end)
+    return b
+end
+
+-- Small flat "x" close button (title bars/popups). Grey by default, red on
+-- hover. Mirrors TK.CloseButton (TankCastWindow.lua:139-152) exactly.
+function UI.CloseButton(parent, onClick, size)
+    size = size or 14
+    local b = CreateFrame("Button", nil, parent)
+    b:SetSize(size, size)
+    local fs = b:CreateFontString(nil, "OVERLAY")
+    local font = GameFontHighlight and GameFontHighlight:GetFont()
+    if font then fs:SetFont(font, size - 1, "OUTLINE") end
+    fs:SetPoint("CENTER", 0, 1)
+    fs:SetText("x")
+    fs:SetTextColor(0.7, 0.72, 0.8)
+    if onClick then b:SetScript("OnClick", onClick) end
+    b:SetScript("OnEnter", function(self)
+        fs:SetTextColor(1, 0.35, 0.3)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Close")
+        GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function()
+        fs:SetTextColor(0.7, 0.72, 0.8)
+        GameTooltip:Hide()
+    end)
+    return b
 end
 
 -- ============================================================================

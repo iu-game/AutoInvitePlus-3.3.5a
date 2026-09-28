@@ -93,6 +93,29 @@ DB.EventTypes = {
         },
     },
 
+    -- RGNOTE: Raid Groups manager-set assignment note on a player (the one field in
+    -- the Raid Groups feature with no native interface equivalent - see its spec)
+    RGNOTE = {
+        id = "RGNOTE",
+        name = "Raid Groups Assignment",
+        fields = {
+            "player",       -- string: the player this assignment is about
+            "note",         -- string: the assignment text ("" clears it)
+            "author",       -- string: who set it
+        },
+    },
+
+    -- RGALL: Raid Groups manager-set announcement for the WHOLE raid (not one
+    -- player) - same idea as RGNOTE, minus the "player" field.
+    RGALL = {
+        id = "RGALL",
+        name = "Raid Groups Announcement",
+        fields = {
+            "note",         -- string: the announcement text ("" clears it)
+            "author",       -- string: who set it
+        },
+    },
+
     -- GEAR: a player's own gear-readiness summary (so peers don't inspect them)
     GEAR = {
         id = "GEAR",

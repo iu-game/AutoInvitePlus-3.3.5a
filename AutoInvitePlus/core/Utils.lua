@@ -30,6 +30,18 @@ end
 -- WTF/Account/<acct>/SavedVariables/AutoInvitePlus.lua on /reload or logout.
 -- Use /aip log clear to reset.
 -- ============================================================================
+-- Stable key for this login's character (realm+name). AutoInvitePlusDB is
+-- account-wide SavedVariables (no PerCharacter suffix in the .toc), so any
+-- module that saves something genuinely personal to one character - a tank
+-- list, a player's own quick-cast spells, a private note - must namespace that
+-- data under this key itself, or every character on the account silently
+-- shares it (which is exactly the bug this exists to let modules opt out of).
+function Utils.CharKey()
+    local realm = (GetRealmName and GetRealmName()) or "?"
+    local name = (UnitName and UnitName("player")) or "?"
+    return realm .. "-" .. name
+end
+
 local LOG_MAX = 4000
 
 function AIP.Log(msg)
