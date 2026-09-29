@@ -169,7 +169,7 @@ local function populatePicker()
     local what = (pickerTab == "spells") and "spells" or "items"
     local note
     if #list == 0 then
-        note = "Nothing here can target a friendly player. Type a name below, or drag one onto a pick."
+        note = "No " .. what .. " found. Type a name below, or drag one onto a pick."
     elseif not filtered then
         note = "Detection API missing on this client - showing " .. what .. " that might qualify."
     elseif #list > n then
@@ -177,7 +177,7 @@ local function populatePicker()
     elseif pickerTab == "items" then
         note = "Bag items detected as castable on a friendly player (grouped by kind). Hover for details."
     else
-        note = "Your spells that can be cast on a friendly player. Not listed? Type it below."
+        note = "Your whole spellbook (not every spell can target a player). Not listed? Type it below."
     end
     picker.note:SetText(note)
 end

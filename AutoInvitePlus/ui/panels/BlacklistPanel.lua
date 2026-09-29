@@ -447,12 +447,16 @@ function BP.Create(parent)
         -- Remove button
         local remBtn = AIP.UI.CloseButton(row, function(self)
             if row.playerName then
+                -- Capture the name shown in the confirmation text now; the pooled
+                -- row can be repointed to a different entry by a BP.Update() that
+                -- runs while this popup is still open (e.g. search/filter change).
+                local targetName = row.playerName
                 StaticPopupDialogs["AIP_REMOVE_BL_" .. i] = {
-                    text = "Remove " .. row.playerName .. " from blacklist?",
+                    text = "Remove " .. targetName .. " from blacklist?",
                     button1 = "Yes",
                     button2 = "No",
                     OnAccept = function()
-                        AIP.RemoveFromBlacklist(row.playerName)
+                        AIP.RemoveFromBlacklist(targetName)
                         BP.Update()
                     end,
                     timeout = 0,

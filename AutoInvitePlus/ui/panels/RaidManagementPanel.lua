@@ -482,7 +482,10 @@ RM.ClassBuffs = {
     },
     PRIEST = {
         {buffName = "Fortitude", spellName = "Prayer of Fortitude"},
-        {buffName = "Spirit", spellName = "Prayer of Spirit"},
+        -- Divine Spirit / Prayer of Spirit is Discipline/Holy only (see
+        -- data/RaidComposition.lua's "Divine Spirit" entry) - a Shadow priest
+        -- never learns it, so this is spec-gated below.
+        {buffName = "Spirit", spellName = "Prayer of Spirit", specs = {"Discipline", "Holy"}},
         {buffName = "Shadow Prot", spellName = "Prayer of Shadow Protection"},
     },
     MAGE = {
@@ -515,14 +518,44 @@ function RM.ScanBuffProviders()
         local classBuffs = RM.ClassBuffs[class]
         if classBuffs then
             for _, buffInfo in ipairs(classBuffs) do
-                RM.BuffProviders[buffInfo.buffName] = RM.BuffProviders[buffInfo.buffName] or {}
-                table.insert(RM.BuffProviders[buffInfo.buffName], {
-                    name = name,
-                    class = class,
-                    spellName = buffInfo.spellName,
-                    isGreater = buffInfo.isGreater,
-                })
-                RM.AvailableBuffs[buffInfo.buffName] = true
+                local canProvide = true
+
+                if buffInfo.specs then
+                    -- Spec-restricted buff (e.g. Divine Spirit). Only exclude
+                    -- on POSITIVE evidence of a non-matching spec; an unknown
+                    -- spec still counts (same assume-can-provide default as
+                    -- every other entry here) so we don't hide real coverage
+                    -- just because a priest hasn't been inspected/whispered.
+                    local knownSpec
+                    if UnitIsUnit(unit, "player") then
+                        knownSpec = RM.DetectSpecFromTalents(unit)
+                    elseif UnitBuff(unit, "Shadowform") then
+                        knownSpec = "Shadow"
+                    elseif AIP.db and AIP.db.msTracking and AIP.db.msTracking[name] then
+                        knownSpec = AIP.db.msTracking[name].ms
+                    end
+
+                    if knownSpec then
+                        canProvide = false
+                        for _, allowedSpec in ipairs(buffInfo.specs) do
+                            if allowedSpec:lower() == knownSpec:lower() then
+                                canProvide = true
+                                break
+                            end
+                        end
+                    end
+                end
+
+                if canProvide then
+                    RM.BuffProviders[buffInfo.buffName] = RM.BuffProviders[buffInfo.buffName] or {}
+                    table.insert(RM.BuffProviders[buffInfo.buffName], {
+                        name = name,
+                        class = class,
+                        spellName = buffInfo.spellName,
+                        isGreater = buffInfo.isGreater,
+                    })
+                    RM.AvailableBuffs[buffInfo.buffName] = true
+                end
             end
         end
     end
@@ -1834,11 +1867,15 @@ function RM.RefreshTemplateList(content, scrollFrame)
 
     local templates = RM.GetTemplates()
     local numRows = #content.templateRows
-    local offset = scrollFrame and FauxScrollFrame_GetOffset(scrollFrame) or 0
 
     if scrollFrame then
         FauxScrollFrame_Update(scrollFrame, #templates, numRows, 18)
     end
+
+    -- Read the offset AFTER Update so a shrunk data set (e.g. re-running a
+    -- scan with fewer entries) clamps the offset instead of using the stale
+    -- value from the previous, larger list.
+    local offset = scrollFrame and FauxScrollFrame_GetOffset(scrollFrame) or 0
 
     for i = 1, numRows do
         local row = content.templateRows[i]
@@ -1867,11 +1904,15 @@ function RM.RefreshBuffTable(content)
     RM.LayoutBuffColumns(content)
 
     local data = RM.BuffCheckData or {}
-    local offset = content.buffTableScroll and FauxScrollFrame_GetOffset(content.buffTableScroll) or 0
 
     if content.buffTableScroll then
         FauxScrollFrame_Update(content.buffTableScroll, #data, 10, 18)
     end
+
+    -- Read the offset AFTER Update so a shrunk data set (e.g. re-running
+    -- 'Check All' after players left) clamps the offset instead of using the
+    -- stale value carried over from the previous, larger list.
+    local offset = content.buffTableScroll and FauxScrollFrame_GetOffset(content.buffTableScroll) or 0
 
     -- Show/hide empty state
     if content.buffEmptyText then
@@ -1982,11 +2023,13 @@ function RM.RefreshMSTable(content)
         return a.name < b.name
     end)
 
-    local offset = content.msTableScroll and FauxScrollFrame_GetOffset(content.msTableScroll) or 0
-
     if content.msTableScroll then
         FauxScrollFrame_Update(content.msTableScroll, #data, 10, 18)
     end
+
+    -- Read the offset AFTER Update so a shrunk data set clamps the offset
+    -- instead of using the stale value from the previous, larger list.
+    local offset = content.msTableScroll and FauxScrollFrame_GetOffset(content.msTableScroll) or 0
 
     -- Show/hide empty state
     if content.msEmptyText then
@@ -3080,7 +3123,19 @@ end)
 -- Boss kill detection to track current boss
 local bossEventFrame = CreateFrame("Frame")
 bossEventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+bossEventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 bossEventFrame:SetScript("OnEvent", function(self, event, timestamp, subevent, srcGUID, srcName, srcFlags, dstGUID, dstName, dstFlags)
+    if event == "PLAYER_REGEN_DISABLED" then
+        -- Entering combat (new pull). Several encounters are multi-add fights
+        -- or end via a scripted event rather than a single named unit dying,
+        -- so RM.CurrentBoss can otherwise stay stuck on whatever boss died
+        -- last. Clear it here so IsPlayerLootBanned(name, nil) falls back to
+        -- flagging any boss-scoped ban (over-warn) instead of silently
+        -- comparing a roll against a stale boss from a previous fight.
+        RM.CurrentBoss = nil
+        return
+    end
+
     -- WotLK 3.3.5a passes combat log args directly to the handler
     if subevent == "UNIT_DIED" and dstName then
         -- Check if it's a known boss

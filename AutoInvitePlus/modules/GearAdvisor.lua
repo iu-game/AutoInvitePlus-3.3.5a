@@ -33,6 +33,12 @@ local CLASS_ARMOR = {
 }
 local ARMOR_RANK = { Cloth=1, Leather=2, Mail=3, Plate=4 }
 
+-- Shield proficiency in 3.3.5a is class-gated, not armor-type-gated (Shields
+-- aren't in ARMOR_RANK at all, so canUseArmor() never sees them) - only
+-- Warrior/Paladin/Shaman can equip one; every other class would have the
+-- equip fail client-side even though it scores fine.
+local SHIELD_CLASSES = { WARRIOR=true, PALADIN=true, SHAMAN=true }
+
 -- INVTYPE -> candidate equip slot(s). Shared with ItemScore (loaded first) to
 -- avoid a duplicate copy that could drift out of sync.
 local INVTYPE_SLOTS = AIP.ItemScore.INVTYPE_SLOTS
@@ -170,6 +176,7 @@ function GA.BestFromBags()
                 if slots and quality and quality >= 2 then   -- uncommon+
                     local usable = true
                     if ARMOR_RANK[subType] then usable = canUseArmor(class, subType) end
+                    if usable and equipLoc == "INVTYPE_SHIELD" then usable = SHIELD_CLASSES[class] or false end
                     if usable then
                         local st = IS.GetStats(link)
                         local score = st and IS.Score(st, scale, caps) or 0

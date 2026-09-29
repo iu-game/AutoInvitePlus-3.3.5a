@@ -319,7 +319,9 @@ function LH.Create(parent)
             AIP.Print("Select a raid session to delete.")
             return
         end
-        StaticPopup_Show("AIP_CONFIRM_DELETE_RAID")
+        local session = LH.GetSelectedSession()
+        local label = (session and session.zone) or "this raid"
+        StaticPopup_Show("AIP_CONFIRM_DELETE_RAID", label, nil, LH.SelectedRaid)
     end)
     deleteRaidBtn:SetPoint("BOTTOMLEFT", 5, 8)
 
@@ -1141,10 +1143,9 @@ function LH.RefreshRaids()
     local scrollFrame = LH.Frame.raidsScroll
     if not scrollFrame then return end
 
-    local offset = FauxScrollFrame_GetOffset(scrollFrame) or 0
-
     local vis = LH.VisibleCount(scrollFrame)
     FauxScrollFrame_Update(scrollFrame, #sessions, vis, 18)
+    local offset = FauxScrollFrame_GetOffset(scrollFrame) or 0
 
     for i = 1, #LH.Frame.raidRows do
         local row = LH.Frame.raidRows[i]
@@ -1180,10 +1181,10 @@ function LH.RefreshBosses()
     local bosses = LH.GetBosses() or {}
     local scrollFrame = LH.Frame.bossesScroll
     if not scrollFrame then return end
-    local offset = FauxScrollFrame_GetOffset(scrollFrame) or 0
 
     local vis = LH.VisibleCount(scrollFrame)
     FauxScrollFrame_Update(scrollFrame, #bosses, vis, 18)
+    local offset = FauxScrollFrame_GetOffset(scrollFrame) or 0
 
     for i = 1, #LH.Frame.bossRows do
         local row = LH.Frame.bossRows[i]
@@ -1218,10 +1219,10 @@ function LH.RefreshBossAttendees()
     local attendees = LH.GetBossAttendees() or {}
     local scrollFrame = LH.Frame.bossAttScroll
     if not scrollFrame then return end
-    local offset = FauxScrollFrame_GetOffset(scrollFrame) or 0
 
     local vis = LH.VisibleCount(scrollFrame)
     FauxScrollFrame_Update(scrollFrame, #attendees, vis, 18)
+    local offset = FauxScrollFrame_GetOffset(scrollFrame) or 0
 
     for i = 1, #LH.Frame.bossAttRows do
         local row = LH.Frame.bossAttRows[i]
@@ -1249,10 +1250,10 @@ function LH.RefreshRaidAttendees()
     local attendees = LH.GetRaidAttendees() or {}
     local scrollFrame = LH.Frame.raidAttScroll
     if not scrollFrame then return end
-    local offset = FauxScrollFrame_GetOffset(scrollFrame) or 0
 
     local vis = LH.VisibleCount(scrollFrame)
     FauxScrollFrame_Update(scrollFrame, #attendees, vis, 18)
+    local offset = FauxScrollFrame_GetOffset(scrollFrame) or 0
 
     for i = 1, #LH.Frame.raidAttRows do
         local row = LH.Frame.raidAttRows[i]
@@ -1283,10 +1284,10 @@ function LH.RefreshLoot()
     local loot = LH.GetLoot() or {}
     local scrollFrame = LH.Frame.lootScroll
     if not scrollFrame then return end
-    local offset = FauxScrollFrame_GetOffset(scrollFrame) or 0
 
     local vis = LH.VisibleCount(scrollFrame)
     FauxScrollFrame_Update(scrollFrame, #loot, vis, 18)
+    local offset = FauxScrollFrame_GetOffset(scrollFrame) or 0
 
     if LH.Frame.lootStats then
         LH.Frame.lootStats:SetText(#loot .. " items")
@@ -1376,14 +1377,16 @@ end
 function LH.CreatePopups()
     -- Delete raid confirmation
     StaticPopupDialogs["AIP_CONFIRM_DELETE_RAID"] = {
-        text = "Delete this raid session and all its data?",
+        text = "Delete raid session '%s' and all its data?",
         button1 = "Yes",
         button2 = "No",
-        OnAccept = function()
-            if LH.SelectedRaid and AIP.RaidSession then
-                AIP.RaidSession.DeleteSession(LH.SelectedRaid)
-                LH.SelectedRaid = nil
-                LH.SelectedBoss = nil
+        OnAccept = function(self, data)
+            if data and AIP.RaidSession then
+                AIP.RaidSession.DeleteSession(data)
+                if LH.SelectedRaid == data then
+                    LH.SelectedRaid = nil
+                    LH.SelectedBoss = nil
+                end
                 LH.RefreshAll()
                 AIP.Print("Raid session deleted.")
             end

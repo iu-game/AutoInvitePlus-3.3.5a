@@ -6793,16 +6793,26 @@ function GUI.CreateAddGroupPopup()
         end
         for roleKey, group in pairs(popup.classChecks) do
             local roleWanted = wanted[roleKey]
-            for _, check in pairs(group) do
-                local cls = check.specData and check.specData.class
-                local n = roleWanted and cls and roleWanted[cls] or nil
-                check:SetChecked(n and true or false)  -- n == 0 still checked (spec-flexible)
-                if check.countInput then
-                    if n and n > 0 then
-                        check.countInput:SetText(tostring(n))
-                        roleWanted[cls] = 0
-                    else
-                        check.countInput:SetText("0")
+            -- Walk GUI.ClassSpecs[roleKey] in its declared/visual order (not
+            -- pairs(group), which is hash-ordered by "CLASSSpec" key) so that
+            -- when a class has two spec boxes in this role (e.g. Priest
+            -- Holy/Discipline, Shaman Enhancement/Elemental), the recommended
+            -- count deterministically lands on the FIRST one, matching this
+            -- function's own contract instead of whichever spec pairs()
+            -- happens to visit first.
+            for _, spec in ipairs(GUI.ClassSpecs[roleKey] or {}) do
+                local check = group[spec.class .. spec.spec]
+                if check then
+                    local cls = spec.class
+                    local n = roleWanted and roleWanted[cls] or nil
+                    check:SetChecked(n and true or false)  -- n == 0 still checked (spec-flexible)
+                    if check.countInput then
+                        if n and n > 0 then
+                            check.countInput:SetText(tostring(n))
+                            roleWanted[cls] = 0
+                        else
+                            check.countInput:SetText("0")
+                        end
                     end
                 end
             end

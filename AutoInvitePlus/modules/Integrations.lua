@@ -552,9 +552,7 @@ readyFrame:SetScript("OnEvent", function(self, event, ...)
         local notReady = 0
         local noResponse = 0
 
-        local numRaid = GetNumRaidMembers()
-        for i = 1, numRaid do
-            local name = GetRaidRosterInfo(i)
+        local function tally(name)
             if name then
                 if Int.ReadyCheckResults[name] == true then
                     ready = ready + 1
@@ -563,6 +561,20 @@ readyFrame:SetScript("OnEvent", function(self, event, ...)
                 else
                     noResponse = noResponse + 1
                 end
+            end
+        end
+
+        local numRaid = GetNumRaidMembers()
+        if numRaid > 0 then
+            for i = 1, numRaid do
+                tally(GetRaidRosterInfo(i))
+            end
+        else
+            -- Not in a raid: ready checks also fire for party groups.
+            tally(UnitName("player"))
+            local numParty = GetNumPartyMembers()
+            for i = 1, numParty do
+                tally(UnitName("party" .. i))
             end
         end
 
@@ -620,11 +632,13 @@ Int.RaidAchievementsByInstance = {
     -- RS has no dedicated meta achievement in our set (left intentionally absent).
 }
 
--- Normalise an LFG raid id ("ICC25", "TOC10", "ULDUAR10HC") to its bare instance
--- key ("ICC", "TOC", ...) by stripping the size (10/25) and difficulty (H/HC) suffix.
+-- Normalise an LFG raid id ("ICC25", "TOC10", "ULDUAR10HC", "ICC25N") to its bare
+-- instance key ("ICC", "TOC", ...) by stripping the size (10/25), difficulty
+-- (H/HC), and normal-mode (N) suffix.
 function Int.RaidToInstanceKey(raidId)
     if not raidId then return nil end
     local key = tostring(raidId):upper():gsub("%s+", "")
+    key = key:gsub("(%d)N$", "%1")   -- e.g. ICC25N -> ICC25 (bare raidKey convention for Normal)
     key = key:gsub("HC$", ""):gsub("H$", ""):gsub("25$", ""):gsub("10$", "")
     key = key:gsub("HC$", ""):gsub("H$", "")   -- e.g. ICC25HC -> ICC
     if key == "" then return nil end

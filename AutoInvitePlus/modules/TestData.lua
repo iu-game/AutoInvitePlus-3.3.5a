@@ -244,7 +244,7 @@ function TD.GenerateRaidSessions(count)
         -- Bosses: array of {id, name, killTime, attendees=[names]}; loot is at session level
         local bosses = {}
         local loot = {}
-        local bossPrefix = raid.key:match("^(%u+)")
+        local bossPrefix = raid.key:match("^(%a+)")
         local bossList = BOSS_NAMES[bossPrefix] or BOSS_NAMES.ICC
         local numBosses = math.random(math.floor(#bossList * 0.5), #bossList)
 

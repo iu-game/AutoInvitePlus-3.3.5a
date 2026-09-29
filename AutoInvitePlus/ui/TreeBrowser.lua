@@ -63,6 +63,28 @@ TB.HideLocked = true
 -- Runtime flag mirroring HideLocked; defaults on.
 TB.HideExcluded = true
 
+-- Tag filters (off by default - these NARROW the list to matching groups,
+-- unlike HideLocked/HideExcluded which hide noise and default on).
+TB.DiscordOnly = false
+TB.PartialOnly = false
+
+-- Does `group` pass the current Discord/Partial-progress tag filters? True
+-- when neither filter is active. Both read the group's raw message text via
+-- AIP.Parsers (core/Parsers.lua's RequiresDiscord/ParseRaidProgress).
+function TB.PassesTagFilters(group)
+    if not (TB.DiscordOnly or TB.PartialOnly) then return true end
+    local Parsers = AIP.Parsers
+    if not Parsers then return true end
+    local msg = group.message or group.note or ""
+    if TB.DiscordOnly and not Parsers.RequiresDiscord(msg) then return false end
+    if TB.PartialOnly then
+        local catId = Parsers.GetRaidCategory(group.raid)
+        local prog = catId and Parsers.ParseRaidProgress(msg, catId)
+        if not (prog and prog.isPartial) then return false end
+    end
+    return true
+end
+
 -- Should this LFM group be hidden from the tree right now?
 -- Never hide our own listing. Hidden when either:
 --   * the leader is blacklisted and "Hide blacklisted" (persistent) is on, or
@@ -122,8 +144,14 @@ function TB.ApplyListingDecor(node, group)
     if reqTime then
         local mins = math.floor((time() - reqTime) / 60)
         local ago = mins <= 0 and "just now" or (mins .. "m ago")
-        node.compText = (node.compText and node.compText ~= "" and (node.compText .. "  ") or "")
-            .. "|cFF888888(requested " .. ago .. ")|r"
+        -- REPLACES compText (not appended) - the comp-text FontString is one
+        -- line with a real pixel-width limit, and WoW truncates an
+        -- over-length string to "..." with NEITHER half readable (confirmed
+        -- live while adding the progress/Discord badge below, which fills
+        -- this same line far more often than the old T/H/M/R-only text did,
+        -- making that collision much more likely here too) - "you already
+        -- messaged this leader" is the more actionable single fact to show.
+        node.compText = "|cFF888888(requested " .. ago .. ")|r"
         if not isFav and not group.isOwn then
             node.textColor = {r = 0.5, g = 0.5, b = 0.5}
         end
@@ -466,6 +494,131 @@ local function ExtractRaidSize(raidStr)
     return nil  -- Size not specified
 end
 
+-- Exact-id match of `raidId` against one of `category`'s RaidHierarchy
+-- children (e.g. category "ICC", raidId "ICC25H" -> the {id="ICC25H",
+-- size=25, heroic=true} entry). nil if `raidId` only matched the category by
+-- prefix (GetRaidCategory's fallback path) rather than a specific child.
+local function ChildFor(category, raidId)
+    if not raidId then return nil end
+    for _, child in ipairs(category.children) do
+        if child.id == raidId then return child end
+    end
+    return nil
+end
+
+-- Groups `groups` by `keyFn(group) -> key, label`. Returns an ordered list of
+-- keys (first-seen order - callers needing a STABLE order, e.g. sibling tree
+-- nodes, must re-sort it; see sortBucketOrder) and a {key -> {label, groups}}
+-- map. Used to build each conditional tree level below - a level is only
+-- actually split when the returned key list has more than one entry (see
+-- AppendCategoryNodes).
+local function BucketBy(groups, keyFn)
+    local order, byKey = {}, {}
+    for _, group in ipairs(groups) do
+        local key, label = keyFn(group)
+        if not byKey[key] then
+            byKey[key] = {label = label, groups = {}}
+            order[#order + 1] = key
+        end
+        table.insert(byKey[key].groups, group)
+    end
+    return order, byKey
+end
+
+-- Re-sorts a BucketBy `order` list into a stable, content-independent order:
+-- explicit `rank` first (lower first), then alphabetical by label as a
+-- deterministic tiebreak for anything unranked. Without this, sibling nodes
+-- (e.g. "Normal"/"Heroic", or "25-man"/"10-man") reorder themselves every
+-- time a fresh listing changes which bucket's newest group sorts first in
+-- `groups` (BucketBy's order is first-seen, and `groups` itself is
+-- recency-ordered) - a bucket getting a new post would visibly jump to the
+-- top of the tree. Sorting by a fixed rank keeps sibling folders in a
+-- constant position regardless of which one just got new data.
+local function sortBucketOrder(order, byKey, rank)
+    table.sort(order, function(a, b)
+        local ra, rb = rank[a] or 99, rank[b] or 99
+        if ra ~= rb then return ra < rb end
+        return (byKey[a].label or a) < (byKey[b].label or b)
+    end)
+end
+
+local SIZE_RANK = { ["25"] = 1, ["10"] = 2 }
+local DIFFICULTY_RANK = { N = 1, H = 2 }
+
+-- Appends `groups` into `catNode.children`, applying a conditional two-level
+-- split: size/mode (10-man / 25-man / a named special mode like "ICC
+-- Reputation Farm" / Unspecified), then within each size, difficulty
+-- (Normal / Heroic). Each level is built ONLY when the groups present
+-- actually differ on that dimension - a raid tier with no heroic mode (e.g.
+-- Naxxramas) never gets an empty "Heroic (0)" folder, and a category
+-- currently showing only one size never gets a redundant single-child
+-- size folder; groups just render as leaves directly under whatever level
+-- didn't need splitting. `idPrefix` seeds unique/stable node ids (drives
+-- expand-state persistence via TB.KnownCategories).
+local function AppendCategoryNodes(catNode, category, groups, makeLeaf, idPrefix, preserveState)
+    local function addSubNode(id, text, count)
+        local node = {
+            id = id, type = "category", text = text .. " (" .. count .. ")",
+            count = count, icon = TB.Icons.raid, children = {}, data = category,
+        }
+        if not preserveState and not TB.KnownCategories[id] then
+            TB.TreeData.expandedNodes[id] = true
+            TB.KnownCategories[id] = true
+        end
+        return node
+    end
+
+    local function appendDifficultySplit(parentNode, levelId, levelGroups)
+        local diffOrder, diffBuckets = BucketBy(levelGroups, function(group)
+            local child = ChildFor(category, group.raid)
+            local heroic = child and child.heroic
+            if heroic == nil then return "unknown", nil end
+            return (heroic and "H" or "N"), (heroic and "Heroic" or "Normal")
+        end)
+        sortBucketOrder(diffOrder, diffBuckets, DIFFICULTY_RANK)
+
+        if #diffOrder > 1 then
+            for _, key in ipairs(diffOrder) do
+                local bucket = diffBuckets[key]
+                local diffNode = addSubNode(levelId .. "_" .. key, bucket.label or "Unknown Difficulty", #bucket.groups)
+                for _, group in ipairs(bucket.groups) do
+                    table.insert(diffNode.children, makeLeaf(group))
+                end
+                table.insert(parentNode.children, diffNode)
+            end
+        else
+            for _, group in ipairs(levelGroups) do
+                table.insert(parentNode.children, makeLeaf(group))
+            end
+        end
+    end
+
+    local sizeOrder, sizeBuckets = BucketBy(groups, function(group)
+        local child = ChildFor(category, group.raid)
+        if child and child.size then
+            return tostring(child.size), child.size .. "-man"
+        elseif child then
+            return "mode:" .. child.id, child.name
+        end
+        local sz = ExtractRaidSize(group.raid)
+        if sz then return tostring(sz), sz .. "-man" end
+        return "any", "Unspecified size"
+    end)
+    sortBucketOrder(sizeOrder, sizeBuckets, SIZE_RANK)
+
+    if #sizeOrder > 1 then
+        for _, key in ipairs(sizeOrder) do
+            local bucket = sizeBuckets[key]
+            local sizeId = idPrefix .. "_" .. key
+            local sizeNode = addSubNode(sizeId, bucket.label, #bucket.groups)
+            appendDifficultySplit(sizeNode, sizeId, bucket.groups)
+            table.insert(catNode.children, sizeNode)
+        end
+    else
+        appendDifficultySplit(catNode, idPrefix, groups)
+    end
+end
+
 -- Check if player is locked to an instance based on raid string
 function TB.IsLockedToInstance(raidStr)
     if not raidStr then return false end
@@ -660,7 +813,8 @@ function TB.BuildLFMTree(preserveState)
                 local isLocked = TB.IsLockedToInstance(group.raid)
                 if isLocked then lockedCount = lockedCount + 1 end
                 if (not TB.HideLocked or not isLocked or group.isOwn)
-                   and not TB.IsGroupHidden(group) then
+                   and not TB.IsGroupHidden(group)
+                   and TB.PassesTagFilters(group) then
                     group.isLocked = isLocked  -- Store lock state for coloring
                     table.insert(filteredGroups, group)
                 end
@@ -688,9 +842,36 @@ function TB.BuildLFMTree(preserveState)
                 local function makeLeaf(group)
                     local displayName = group.leader .. " - " .. (DisplayRaidLabel(group.raid) or "?")
 
-                    -- Build composition text for second line
+                    -- Progress/Discord badge (see Parsers.ParseRaidProgress/
+                    -- RequiresDiscord) takes priority over the plain T/H/M/R
+                    -- composition counts on this line - the comp-text
+                    -- FontString is narrow (one line, ~room for the T/H/M/R
+                    -- string and little else; a WoW-truncated "..." is what a
+                    -- combined string longer than that looks like, confirmed
+                    -- live), and the composition counts are usually all-zero
+                    -- noise for a listing nobody's joined yet, so when a
+                    -- progress/Discord signal is found it's shown INSTEAD of
+                    -- (not appended to) the composition line, not both.
                     local compText = ""
-                    if group.tanks or group.healers or group.mdps or group.rdps or group.dps then
+                    local tagText = nil
+                    if AIP.Parsers then
+                        local msg = group.message or group.note or ""
+                        local prog = AIP.Parsers.ParseRaidProgress(msg, category.id)
+                        local tagParts = {}
+                        if prog and prog.killed and prog.total then
+                            tagParts[#tagParts + 1] = string.format("|cFFFFCC00%d/%d|r", prog.killed, prog.total)
+                        elseif prog and prog.boss and prog.isPartial then
+                            tagParts[#tagParts + 1] = "|cFFFFCC00@" .. prog.boss .. "|r"
+                        end
+                        if AIP.Parsers.RequiresDiscord(msg) then
+                            tagParts[#tagParts + 1] = "|cFF7289DADiscord|r"
+                        end
+                        if #tagParts > 0 then tagText = table.concat(tagParts, "  ") end
+                    end
+
+                    if tagText then
+                        compText = tagText
+                    elseif group.tanks or group.healers or group.mdps or group.rdps or group.dps then
                         local compParts = {}
                         if group.tanks then
                             local tc = group.tanks.current or 0
@@ -752,45 +933,12 @@ function TB.BuildLFMTree(preserveState)
                     return groupNode
                 end
 
-                -- Split the category into 25-man / 10-man sub-groups (with an
-                -- "Unspecified size" bucket for listings that don't state a size).
-                -- Size comes from the already-parsed raid id (ExtractRaidSize).
-                local byKey = {}
-                for _, group in ipairs(filteredGroups) do
-                    local sz = ExtractRaidSize(group.raid)
-                    local key = (sz == 25 and "25") or (sz == 10 and "10") or "any"
-                    if not byKey[key] then byKey[key] = {} end
-                    table.insert(byKey[key], group)
-                end
-                local sizeLabel = { ["25"] = "25-man", ["10"] = "10-man", ["any"] = "Unspecified size" }
-                local displayOrder = {}
-                for _, k in ipairs({ "25", "10", "any" }) do if byKey[k] then displayOrder[#displayOrder + 1] = k end end
-
-                -- Always show the size sub-grouping, even when only one size is
-                -- currently present - a lone "Unspecified size (1)" node is more
-                -- informative than a bare, unlabeled flat listing, and the
-                -- sub-node reappearing/disappearing as other sizes come and go
-                -- would otherwise reshuffle the tree structure under the player.
-                for _, key in ipairs(displayOrder) do
-                    local list = byKey[key]
-                    local sizeNode = {
-                        id = "lfm_" .. category.id .. "_" .. key,
-                        type = "category",
-                        text = sizeLabel[key] .. " (" .. #list .. ")",
-                        count = #list,
-                        icon = TB.Icons.raid,
-                        children = {},
-                        data = category,
-                    }
-                    if not preserveState and not TB.KnownCategories[sizeNode.id] then
-                        TB.TreeData.expandedNodes[sizeNode.id] = true
-                        TB.KnownCategories[sizeNode.id] = true
-                    end
-                    for _, group in ipairs(list) do
-                        table.insert(sizeNode.children, makeLeaf(group))
-                    end
-                    table.insert(catNode.children, sizeNode)
-                end
+                -- Conditional size -> difficulty split (see AppendCategoryNodes):
+                -- a level only appears when the groups present actually differ
+                -- on that dimension, so e.g. Naxxramas (no heroic mode, one
+                -- size currently posted) shows flat, while ICC gets the full
+                -- 25-man/10-man -> Normal/Heroic breakdown.
+                AppendCategoryNodes(catNode, category, filteredGroups, makeLeaf, "lfm_" .. category.id, preserveState)
 
                 table.insert(tree, catNode)
             end
@@ -841,7 +989,8 @@ function TB.BuildLFMTree(preserveState)
         for _, group in ipairs(unmatchedGroups) do
             local isLocked = TB.IsLockedToInstance(group.raid)
             if (not TB.HideLocked or not isLocked or group.isOwn)
-               and not TB.IsGroupHidden(group) then
+               and not TB.IsGroupHidden(group)
+               and TB.PassesTagFilters(group) then
                 group.isLocked = isLocked
                 table.insert(filteredUnmatched, group)
             end

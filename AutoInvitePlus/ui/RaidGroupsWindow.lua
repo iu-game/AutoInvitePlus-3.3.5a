@@ -90,7 +90,17 @@ local refresh, refreshValues
 -- Tank Cast's TK.GuardEdit): the window still shows the OLD roster, so an index
 -- taken from it could hit the wrong live member.
 function RG.GuardEdit()
-    if not RG.dirty then return true end
+    -- RG.dirty alone only reflects combat lockdown detected by a PAST
+    -- roster-changed callback (refresh()/LayoutWindow() are the only places
+    -- that set it, and only when THEY happen to run while InCombatLockdown()
+    -- is true) - it can still be false while the player is actually in combat
+    -- if no roster event fired since the pull started. Re-checking
+    -- InCombatLockdown() directly here closes that gap: without it, a member
+    -- action would reach the protected Blizzard API (PromoteToLeader,
+    -- UninviteUnit, SetRaidSubgroup, ...) straight from insecure code mid-
+    -- combat instead of being deferred like this comment promises.
+    if not RG.dirty and not InCombatLockdown() then return true end
+    RG.dirty = true
     AIP.Print("Changes apply after combat - wait for the fight to end before editing again.")
     return false
 end

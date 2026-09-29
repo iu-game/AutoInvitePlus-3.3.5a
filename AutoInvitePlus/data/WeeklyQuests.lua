@@ -45,6 +45,10 @@ W.testActive = nil  -- set to a token string, e.g. "Marrowgar"
 local cache = nil          -- {quest = <entry>, complete = bool} or false (scanned, none held)
 
 local function scanQuestLog()
+    -- A collapsed zone/header row hides its child quests from
+    -- GetNumQuestLogEntries()/GetQuestLogTitle entirely, so expand every
+    -- header first or a weekly filed under a collapsed header goes unseen.
+    if ExpandQuestHeader then ExpandQuestHeader(0) end
     local numEntries = GetNumQuestLogEntries and GetNumQuestLogEntries() or 0
     for i = 1, numEntries do
         -- 3.3.5a returns: title, level, questTag, suggestedGroup, isHeader,

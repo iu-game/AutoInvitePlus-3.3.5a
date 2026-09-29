@@ -557,28 +557,33 @@ local BOOK = BOOKTYPE_SPELL or "spell"
 
 local function byName(a, b) return a.name < b.name end
 
--- Your spellbook: {name, icon, index, book}, passives and duplicate ranks
--- dropped, sorted by name. Returns list, filtered(bool).
+-- Your whole spellbook: {name, icon, index, book}, only passives and
+-- duplicate ranks dropped (a passive can't be cast at all, so it's never a
+-- valid pick), sorted by name. No castability filtering - the
+-- IsHelpfulSpell+SpellHasRange heuristic used here previously excluded most
+-- of a class's real spellbook for many classes/specs (e.g. only 2-3 spells
+-- survived it for a Death Knight), which made the picker useless for them.
+-- Showing everything and letting TK.IsFriendlyCastable warn post-pick is
+-- simpler and actually usable. Second return is always true (kept for the
+-- caller's "filtered vs not" note - see ui/TankCastConfig.lua).
 function TK.ListSpells()
     local out = {}
     if not (GetNumSpellTabs and GetSpellTabInfo and GetSpellName) then return out, false end
-    local filtered = (IsHelpfulSpell ~= nil) and (SpellHasRange ~= nil)
     local seen = {}
     for tab = 1, GetNumSpellTabs() do
         local _, _, offset, num = GetSpellTabInfo(tab)
         for i = (offset or 0) + 1, (offset or 0) + (num or 0) do
             local name = GetSpellName(i, BOOK)
             if name and not seen[name] and not (IsPassiveSpell and IsPassiveSpell(i, BOOK)) then
-                if not filtered or (IsHelpfulSpell(i, BOOK) and SpellHasRange(i, BOOK)) then
-                    seen[name] = true
-                    out[#out + 1] = {
-                        name = name, index = i, book = BOOK,
-                        icon = GetSpellTexture and GetSpellTexture(i, BOOK) or nil,
-                    }
-                end
+                seen[name] = true
+                out[#out + 1] = {
+                    name = name, index = i, book = BOOK,
+                    icon = GetSpellTexture and GetSpellTexture(i, BOOK) or nil,
+                }
             end
         end
     end
+    local filtered = true
     table.sort(out, byName)
     return out, filtered
 end

@@ -93,6 +93,54 @@ function GUI.CreateBrowserTab(container, tabType)
         -- Refresh sits to the left of the Viewed label, vertically centered on the
         -- same line as the checkboxes (the whole cluster now clears the title).
         refreshBtn:SetPoint("RIGHT", hideViewedLabel, "LEFT", -10, 0)
+
+        -- Second filter row: Discord-mandatory / Partial-progress tag filters
+        -- (AIP.TreeBrowser.DiscordOnly/PartialOnly - see TB.PassesTagFilters).
+        -- Unlike Locked/Viewed above (which hide noise and default ON), these
+        -- NARROW the list to matching groups and default OFF.
+        local partialCheck = CreateFrame("CheckButton", nil, treePanel, "UICheckButtonTemplate")
+        partialCheck:SetSize(20, 20)
+        partialCheck:SetPoint("TOPRIGHT", -6, -58)
+        partialCheck:SetChecked(AIP.TreeBrowser and AIP.TreeBrowser.PartialOnly or false)
+        partialCheck:SetScript("OnClick", function(self)
+            if AIP.TreeBrowser then AIP.TreeBrowser.PartialOnly = self:GetChecked() end
+            GUI.RefreshBrowserTab(tabType)
+        end)
+        partialCheck:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine("Partial Progress Only")
+            GameTooltip:AddLine("Show only groups that look mid-progress (e.g. \"8/12\", \"@Festergut\")", 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        partialCheck:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        local partialLabel = treePanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        partialLabel:SetPoint("RIGHT", partialCheck, "LEFT", 0, 0)
+        partialLabel:SetText("Partial")
+        partialLabel:SetTextColor(0.8, 0.8, 0.8)
+        container.partialCheck = partialCheck
+
+        local discordCheck = CreateFrame("CheckButton", nil, treePanel, "UICheckButtonTemplate")
+        discordCheck:SetSize(20, 20)
+        discordCheck:SetPoint("RIGHT", partialLabel, "LEFT", -10, 0)
+        discordCheck:SetChecked(AIP.TreeBrowser and AIP.TreeBrowser.DiscordOnly or false)
+        discordCheck:SetScript("OnClick", function(self)
+            if AIP.TreeBrowser then AIP.TreeBrowser.DiscordOnly = self:GetChecked() end
+            GUI.RefreshBrowserTab(tabType)
+        end)
+        discordCheck:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine("Discord Only")
+            GameTooltip:AddLine("Show only groups whose message mentions Discord", 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        discordCheck:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        local discordLabel = treePanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        discordLabel:SetPoint("RIGHT", discordCheck, "LEFT", 0, 0)
+        discordLabel:SetText("Discord")
+        discordLabel:SetTextColor(0.8, 0.8, 0.8)
+        container.discordCheck = discordCheck
     else
         refreshBtn:SetPoint("TOPRIGHT", -8, -6)
     end
@@ -171,20 +219,24 @@ function GUI.CreateBrowserTab(container, tabType)
     -- Tree view (dynamically sized based on tree panel)
     local treeFrame
     if AIP.TreeBrowser then
+        -- LFM gets a second filter-checkbox row (Discord/Partial, above) below
+        -- the search row, so its tree starts lower than LFG's.
+        local topInset = (tabType == "lfm") and 80 or 55
+
         -- Calculate initial size based on tree panel dimensions
         local initialWidth = treePanel:GetWidth() - 16  -- 8px padding each side
-        local initialHeight = treePanel:GetHeight() - 55 - 60  -- top offset and bottom buttons
+        local initialHeight = treePanel:GetHeight() - topInset - 60  -- top offset and bottom buttons
         if initialWidth < 100 then initialWidth = 320 end  -- fallback for initial creation
         if initialHeight < 100 then initialHeight = 430 end  -- fallback for initial creation
 
         treeFrame = AIP.TreeBrowser.CreateTreeView(treePanel, initialWidth, initialHeight)
-        treeFrame:SetPoint("TOPLEFT", 8, -55)
+        treeFrame:SetPoint("TOPLEFT", 8, -topInset)
         treeFrame:SetPoint("BOTTOMRIGHT", treePanel, "BOTTOMRIGHT", -8, 60)  -- Anchor to bottom with space for buttons
         -- Record the anchor insets so UpdateSize can derive the true available
         -- size from the parent panel. The tree frame's own GetHeight() is
         -- unreliable -- it carries an explicit SetSize from creation and keeps
         -- reporting that stale value even though the anchors stretch the frame.
-        treeFrame._heightInset = 55 + 60   -- TOPLEFT y -55, BOTTOMRIGHT y +60
+        treeFrame._heightInset = topInset + 60   -- TOPLEFT y -topInset, BOTTOMRIGHT y +60
         treeFrame._widthInset = 8 + 8      -- TOPLEFT x +8, BOTTOMRIGHT x -8
         container.treeView = treeFrame
 

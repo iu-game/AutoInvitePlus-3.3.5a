@@ -125,6 +125,13 @@ function Bridge.SendBreak(minutes)
         AIP.Print("Only the raid leader/assistant can start a break timer.")
         return
     end
+    if n <= 0 then
+        -- Unlike PT, a 0-second BT is not a recognized DBM cancel signal (OnD4
+        -- discards secs<=0 for "BT"), so broadcasting it would just spam the
+        -- raid with no effect. No-op locally instead of claiming success.
+        AIP.Print("Break timer cancelled.")
+        return
+    end
     local secs = n * 60
     local body = "BT\t" .. secs
     local ch = groupChannel()

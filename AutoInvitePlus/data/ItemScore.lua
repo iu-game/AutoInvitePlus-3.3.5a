@@ -285,6 +285,24 @@ function IS.ScoreLink(link)
     return IS.Score(stats, IS.GetScale(), IS.CurrentCaps()), stats
 end
 
+-- Backs an item's own hit/exp/arp contribution out of a IS.CurrentCaps()
+-- table. IS.CurrentCaps() reads live combat ratings, which already include
+-- whatever's presently equipped - so scoring an EQUIPPED item against the
+-- unmodified table double-subtracts: its own contribution both raised `cur`
+-- to (or past) the cap AND gets clamped by the resulting ~0 remaining room,
+-- making it look like that item contributes nothing when it's actually the
+-- thing keeping the player capped. Used by IS.UpgradeInfo to give equipped
+-- gear a fair baseline before comparing it against a candidate.
+function IS.WithoutOwnCap(cur, stats)
+    if not cur or not stats then return cur end
+    local out = {}
+    for k, v in pairs(cur) do out[k] = v end
+    if stats.hit and out.hit then out.hit = math.max(0, out.hit - stats.hit) end
+    if stats.exp and out.exp then out.exp = math.max(0, out.exp - stats.exp) end
+    if stats.arp and out.arp then out.arp = math.max(0, out.arp - stats.arp) end
+    return out
+end
+
 -- INVTYPE -> equip slot id(s) it can fill, and pretty slot names.
 IS.INVTYPE_SLOTS = {
     INVTYPE_HEAD={1}, INVTYPE_NECK={2}, INVTYPE_SHOULDER={3}, INVTYPE_CHEST={5},
@@ -302,9 +320,18 @@ IS.SLOT_NAME = { [1]="Head",[2]="Neck",[3]="Shoulder",[5]="Chest",[6]="Waist",[7
 -- Returns score, bestEquippedScore, deltaPct, slotName for an item link vs what
 -- you have equipped in that slot (the lower-scored of two, e.g. rings = the one
 -- it would replace). deltaPct/slotName are nil if there's nothing to compare.
+-- The candidate and the equipped item it's compared against are always scored
+-- against the SAME cap baseline (IS.WithoutOwnCap backs the equipped item's own
+-- hit/exp/arp out of IS.CurrentCaps() first) - otherwise the equipped item's
+-- own contribution gets read back off live totals that already include it,
+-- clamping it to ~0 and making a capped-stat candidate look like a false
+-- upgrade over the very item keeping the player at the cap.
 function IS.UpgradeInfo(link)
-    local score = IS.ScoreLink(link)
-    if not score then return nil end
+    local candStats = IS.GetStats(link)
+    if not candStats then return nil end
+    local scale = IS.GetScale()
+    local cur = IS.CurrentCaps()
+    local score = IS.Score(candStats, scale, cur)
     local equipLoc = select(9, GetItemInfo(link))
     local slots = equipLoc and IS.INVTYPE_SLOTS[equipLoc]
     if not slots then return score end
@@ -317,9 +344,14 @@ function IS.UpgradeInfo(link)
     if equipLoc == "INVTYPE_2HWEAPON" then
         local mhLink = GetInventoryItemLink("player", 16)
         local ohLink = GetInventoryItemLink("player", 17)
-        local bestEq = (mhLink and IS.ScoreLink(mhLink) or 0) + (ohLink and IS.ScoreLink(ohLink) or 0)
-        local delta = bestEq > 0 and (score / bestEq - 1) * 100 or nil
-        return score, bestEq, delta, IS.SLOT_NAME[16]
+        local mhStats = mhLink and IS.GetStats(mhLink)
+        local ohStats = ohLink and IS.GetStats(ohLink)
+        local base = IS.WithoutOwnCap(IS.WithoutOwnCap(cur, mhStats), ohStats)
+        local candScore = IS.Score(candStats, scale, base)
+        local bestEq = (mhStats and IS.Score(mhStats, scale, base) or 0)
+                     + (ohStats and IS.Score(ohStats, scale, base) or 0)
+        local delta = bestEq > 0 and (candScore / bestEq - 1) * 100 or nil
+        return candScore, bestEq, delta, IS.SLOT_NAME[16]
     end
 
     -- A plain one-hand weapon (INVTYPE_WEAPON) can go in either hand, but slot
@@ -349,14 +381,19 @@ function IS.UpgradeInfo(link)
         end
     end
 
-    local bestEq, bestSlot
+    local bestEq, bestSlot, bestCand
     for _, slot in ipairs(slots) do
         local eqLink = GetInventoryItemLink("player", slot)
-        local es = eqLink and IS.ScoreLink(eqLink) or 0
-        if not bestEq or es < bestEq then bestEq, bestSlot = es, slot end
+        local eqStats = eqLink and IS.GetStats(eqLink)
+        local base = IS.WithoutOwnCap(cur, eqStats)
+        local es = eqStats and IS.Score(eqStats, scale, base) or 0
+        if not bestEq or es < bestEq then
+            bestEq, bestSlot = es, slot
+            bestCand = IS.Score(candStats, scale, base)
+        end
     end
-    local delta = (bestEq and bestEq > 0) and (score / bestEq - 1) * 100 or nil
-    return score, bestEq, delta, IS.SLOT_NAME[bestSlot or 0]
+    local delta = (bestEq and bestEq > 0) and (bestCand / bestEq - 1) * 100 or nil
+    return (bestCand or score), bestEq, delta, IS.SLOT_NAME[bestSlot or 0]
 end
 
 -- ============================================================================

@@ -278,11 +278,13 @@ function E.ForSlot(slotId)
     local IS, SG = AIP.ItemScore, AIP.SpecGuides
     -- The "tank" archetype is shared by Warrior/Paladin/DK/Druid, but its
     -- slot-17 entry ("Enchant Shield - Defense") only applies to classes that
-    -- can actually equip a shield - Druids can't, in any spec or form, so
-    -- there's nothing to enchant there. Item-type check, not just class/spec.
+    -- can actually equip a shield - Druids can't, in any spec or form, and
+    -- Death Knights can't either (dual-wield or 2H only in WotLK), so
+    -- there's nothing to enchant there for either class. Item-type check,
+    -- not just class/spec.
     if slotId == 17 then
         local _, class = UnitClass("player")
-        if class == "DRUID" then return nil end
+        if class == "DRUID" or class == "DEATHKNIGHT" then return nil end
     end
     -- Ranged scope only makes sense on an actual bow/gun/crossbow - the other
     -- agiDPS classes put a wand/idol/totem in slot 18, which can't take one.

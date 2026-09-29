@@ -140,7 +140,10 @@ the function names.
    MDPS/RDPS/MELEE/RANGED -> DPS (waitlist store/UI only knows T/H/D), then
    `AIP.AddToWaitlist(name, role, "[Apply] ...", class, gs, silent=true)`
    (silent skips both the generic whisper AND the "Added to waitlist" print) ->
-   enrich entry (spec/ilvl/weekly/gs/class/isApplication) ->
+   enrich entry (role/note/spec/ilvl/weekly/gs/class/isApplication - role and
+   note are refreshed even when the entry already existed, i.e. a re-apply
+   with a different role/raid overwrites the stale ones rather than only
+   updating the stat fields) ->
    ACK `queued #<waitlist-pos>` (protocol shape unchanged) ->
    `Apply.SendFeedbackWhisper` (gated `applyFeedbackWhisper`; message =
    `Apply.BuildFeedback` = "[AIP] <raid>: queued #N (reason; ...)" - wording

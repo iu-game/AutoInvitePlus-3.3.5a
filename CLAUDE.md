@@ -4,21 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository snapshot
 
-This repo contains two separate World of Warcraft 3.3.5a (Wrath of the Lich King, Interface 30300) addons:
+This repo contains several separate World of Warcraft 3.3.5a (Wrath of the Lich King, Interface 30300) addons, released together:
 
-- AutoInvitePlus/ — the primary addon under active development. The current addon version is 6.7.1 in both AutoInvitePlus/AutoInvitePlus.toc and AutoInvitePlus/core/Core.lua.
+- AutoInvitePlus/ — the primary addon under active development. The version lives in both AutoInvitePlus/AutoInvitePlus.toc and the VERSION constant in AutoInvitePlus/core/Core.lua; keep them equal.
 - GearScoreLite/ — a vendored third-party dependency bundled for compatibility with AutoInvitePlus. Treat it as external code; do not refactor it as if it were part of the main addon.
+- GSE/, GSE_GUI/, GSE_LDB/ — a vendored WotLK 3.3.5a port of Gnome Sequencer Enhanced (macro-sequencer addon), bundled as an optional dependency. GSE.toc pulls in GSE_GUI and GSE_LDB as separate top-level AddOns folders (not subfolders of GSE), each shipped as its own release zip. Treat these as vendored/ported code, not part of AutoInvitePlus's own architecture below.
 
-The root also contains release automation in .github/workflows/main.yml, user-facing docs in README.md, and screenshots.
+The root also contains release automation in .github/workflows/main.yml, user-facing docs in README.md, screenshots, and tools/ (see "Slash commands and testing helpers" and the headless-spec note below).
 
 ## Working assumptions
 
-- This code targets Lua 5.1 and the WoW client directly. There is no build, test, lint, or package-manager workflow.
+- This code targets Lua 5.1 and the WoW client directly. There is no build step or package manager.
 - The practical dev loop is: edit a .lua file, /reload in-game, then observe the result and any Lua errors.
 - Use /console scriptErrors 1 if you need in-game error output; an addon such as BugSack/BugGrabber can also help.
 - Load order is controlled by the .toc file, not by require or module imports. If you add a new .lua file, add it to the relevant .toc so it actually loads.
 - On Windows, tools/wow-test-harness/ can drive a locally-running WoW client (screenshot, click, slash-command injection) for live verification instead of relying on a manual playtest or a static code read-through — see its README. It requires the live client's AddOns folder to be synced from this repo first (`Sync-Addon` in the harness); this repo is not itself the client's addon directory.
 - Lua syntax can be validated without launching the client via the `luaparse` npm package (`luaVersion: '5.1'`) — useful as a quick pre-/reload sanity check on a batch of edits.
+- Pure-logic modules can have headless spec tests under tools/tests/ (e.g. raidgroups_spec.lua, tankcast_spec.lua) that stub the WoW API and AIP namespace inline and run standalone: `luajit tools/tests/<name>_spec.lua` from the repo root. There is no shared test runner/framework (no busted, no CI wiring) — each spec file is self-contained. Follow this pattern for new pure-logic modules where a live-client /reload loop is impractical to iterate on.
 
 ## AutoInvitePlus architecture
 
@@ -134,5 +136,5 @@ Note that the GearScoreLite and GSE/GSE_GUI/GSE_LDB release asset names are curr
 - If you introduce a new Lua file, add it to the relevant .toc file immediately.
 - Preserve existing chat and invite safety behavior; this addon is heavily interaction-based and chat-ban avoidance is a real concern.
 - Keep current module boundaries intact; the codebase is deliberately split by responsibility and uses guarded cross-module access.
-- Avoid rewriting vendored code in GearScoreLite/ unless the change is clearly intended as an upstream patch.
+- Avoid rewriting vendored code in GearScoreLite/ or GSE/GSE_GUI/GSE_LDB/ unless the change is clearly intended as an upstream/port patch.
 - When changing raid-tools, mechanic announcers, or self-check logic, preserve the existing accuracy guards and channel-selection rules.

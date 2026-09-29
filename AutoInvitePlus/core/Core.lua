@@ -4,7 +4,7 @@
 -- Refactored with DRY principle and OOP patterns
 
 local ADDON_NAME = "AutoInvitePlus"
-local VERSION = "6.8.0"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
+local VERSION = "6.9.0"   -- keep equal to the .toc ## Version (broadcast to peers for the update checker)
 local DB_VERSION = 5  -- Increment when saved variables structure changes (5.5: raid sessions, 5.4: mdps/rdps split, 4: loot history retention)
 
 -- Create main addon namespace (may already exist from Utils.lua)
@@ -338,6 +338,19 @@ AIP.IsPlayerInGuild = IsPlayerInGuild
 -- list once and rebuild only when the source string changes.
 local triggerCache = { source = nil, list = {}, patterns = {} }
 
+-- Build a "whole token" match pattern for a trigger word. A %f[%w] frontier
+-- only fires when the character it steps onto is itself alphanumeric, so
+-- wrapping a punctuation-edged trigger (e.g. "+", "inv+", "!inv") in
+-- %f[%w]...%f[%W] on both sides can never be satisfied and the trigger would
+-- silently never match. Only add the frontier on a side whose edge character
+-- is itself alphanumeric; a punctuation edge is already its own boundary.
+local function BuildTriggerPattern(trigger)
+    local escaped = AIP.Utils.EscapePattern(trigger)
+    local leading = trigger:sub(1, 1):match("%w") and "%f[%w]" or ""
+    local trailing = trigger:sub(-1):match("%w") and "%f[%W]" or ""
+    return leading .. escaped .. trailing
+end
+
 local function GetParsedTriggers()
     local raw = AIP.db.triggers or ""
     if triggerCache.source ~= raw then
@@ -351,7 +364,7 @@ local function GetParsedTriggers()
                 -- Compile the word-boundary pattern once here rather than on
                 -- every CheckTriggers call (which runs on every incoming
                 -- message of every listened channel).
-                patterns[#patterns + 1] = "%f[%w]" .. AIP.Utils.EscapePattern(trigger) .. "%f[%W]"
+                patterns[#patterns + 1] = BuildTriggerPattern(trigger)
             end
         end
         triggerCache.list = list
@@ -387,7 +400,7 @@ local function CheckTriggers(message)
         -- whitespace-only keyword would auto-invite on every single message.
         local kw = myGroup.inviteKeyword:lower():trim()
         if kw ~= "" then
-            local pattern = "%f[%w]" .. AIP.Utils.EscapePattern(kw) .. "%f[%W]"
+            local pattern = BuildTriggerPattern(kw)
             if msg:find(pattern) then
                 return true
             end
@@ -849,9 +862,11 @@ local function ProcessMessage(author, message, channel)
     -- so the ad heuristic must not eat it.
     if channel ~= "whisper" then
         local msgLower = message:lower()
-        if msgLower:match("^lfm%s") or msgLower:match("%slfm%s") or
-           msgLower:match("lf%d+m") or msgLower:match('w/%s*"') or
-           msgLower:match("%[t:%d+/%d+") then
+        -- Word-boundary match (not just whitespace-bounded) so a hand-typed ad
+        -- like "[LFM] ..." or "LFM, ..." (bracket/comma instead of a plain
+        -- space) is still recognized as someone else's advertisement.
+        if msgLower:match("%f[%w]lfm%f[%W]") or msgLower:match("%f[%w]lf%d+m%f[%W]") or
+           msgLower:match('w/%s*"') or msgLower:match("%[t:%d+/%d+") then
             Debug("ProcessMessage: skipping LFM message from " .. author)
             return
         end

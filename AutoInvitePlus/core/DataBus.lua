@@ -1009,8 +1009,13 @@ local function OnEvent(self, event, ...)
                 DB.State.channelReady = true
             else
                 DB.State.channelReady = false
-                -- Try to rejoin if lost
-                DB.JoinChannel()
+                -- Try to rejoin if lost, respecting the same backoff as the periodic health check
+                local now = time()
+                local backoffTime = math.min(300, 10 * (2 ^ (DB.State.channelJoinAttempts or 0)))
+                if (now - (DB.State.lastChannelJoinAttempt or 0)) >= backoffTime then
+                    DB.State.lastChannelJoinAttempt = now
+                    DB.JoinChannel()
+                end
             end
         end
     end

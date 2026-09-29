@@ -651,15 +651,26 @@ function Utils.DelayedCall(delay, fn, ...)
         frame.argCount = nil
     end
 
+    -- Bump a per-frame generation token every time the frame is handed out.
+    -- The frame goes back into the pool the instant its callback fires (see
+    -- delayedCallOnUpdate above), so it can be handed out again for a totally
+    -- unrelated call while a caller is still holding on to an old handle. If
+    -- CancelDelayedCall just did SetScript(nil) on whatever frame object it
+    -- was given, a stale handle could silently cancel that unrelated,
+    -- currently-pending timer instead of a no-op. Wrapping the frame with the
+    -- token it was issued for lets CancelDelayedCall tell a stale handle from
+    -- the frame's current occupant.
+    frame.token = (frame.token or 0) + 1
+
     frame:SetScript("OnUpdate", delayedCallOnUpdate)
 
-    return frame  -- Return frame so caller can cancel if needed
+    return { frame = frame, token = frame.token }  -- opaque handle; pass to CancelDelayedCall
 end
 
--- Cancel a delayed call
-function Utils.CancelDelayedCall(frame)
-    if frame and frame.SetScript then
-        frame:SetScript("OnUpdate", nil)
+-- Cancel a delayed call (pass the handle returned by DelayedCall)
+function Utils.CancelDelayedCall(handle)
+    if handle and handle.frame and handle.frame.SetScript and handle.frame.token == handle.token then
+        handle.frame:SetScript("OnUpdate", nil)
     end
 end
 

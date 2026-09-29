@@ -279,6 +279,13 @@ local function onApply(event)
         -- Enrich the waitlist entry with structured fields the manual path lacks
         local onList, entry, position = AIP.IsOnWaitlist(sender)
         if onList and entry then
+            -- A re-application (existed) must refresh role/note too, not just
+            -- the stat fields below - otherwise a stale role/note from an
+            -- earlier, unrelated application persists indefinitely (the
+            -- waitlist store has no expiry) and role-filtered views
+            -- (AIP.GetWaitlistEntries("TANK")) miss the applicant entirely.
+            entry.role = wlRole or entry.role
+            entry.note = applyNote
             entry.spec = d.spec or entry.spec
             entry.ilvl = d.ilvl or entry.ilvl
             entry.weekly = d.weekly or entry.weekly

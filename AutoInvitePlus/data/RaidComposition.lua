@@ -2232,13 +2232,21 @@ function Comp.DetectRole(unit)
     local _, class = UnitClass(unit)
     if not class then return "DPS" end
 
-    -- Check if they have tank role assigned (in raid)
+    -- Check if they have tank role assigned (in raid). WotLK's raid roster only
+    -- ever reports "MAINTANK" or "MAINASSIST" - there is no "OFFTANK" flag on
+    -- this client (see modules/TankCast.lua), so leaders flag off-tanks via Main
+    -- Assist. But MA is also routinely handed to a DPS /assist caller, so only
+    -- trust it for a class that can actually fill the TANK role.
     if UnitInRaid(unit) then
         local name = UnitName(unit)
         for i = 1, GetNumRaidMembers() do
             local raidName, _, _, _, _, _, _, _, _, raidRole = GetRaidRosterInfo(i)
-            if raidName == name and (raidRole == "MAINTANK" or raidRole == "OFFTANK") then
-                return "TANK"
+            if raidName == name then
+                if raidRole == "MAINTANK" then
+                    return "TANK"
+                elseif raidRole == "MAINASSIST" and Comp.ClassRoles[class] and Comp.ClassRoles[class].roles.TANK then
+                    return "TANK"
+                end
             end
         end
     end
@@ -2246,7 +2254,7 @@ function Comp.DetectRole(unit)
     -- For the player we can read talents directly (argmax tree -> role), which
     -- correctly separates Holy vs Ret, Resto vs Balance, Shadow vs Disc/Holy, etc.
     -- rather than collapsing every hybrid to the class default. Feral/DK tanks are
-    -- still caught by the raid MAINTANK/OFFTANK flag handled above.
+    -- still caught by the raid MAINTANK/MAINASSIST flag handled above.
     local roleByTree = {
         PALADIN = { "HEALER", "TANK", "DPS" },
         PRIEST  = { "HEALER", "HEALER", "DPS" },
@@ -2288,6 +2296,25 @@ Comp.TalentTreeSpecs = {
 -- Cache for inspected player specs (name -> {spec, timestamp})
 Comp.InspectedSpecs = {}
 Comp.InspectCacheDuration = 300  -- 5 minutes cache
+
+-- The client keeps ONE shared "currently inspected unit" talent buffer
+-- (read via GetTalentTabInfo(i, true, false)) - it isn't scoped to whichever
+-- unit token you pass in, so CanInspect(unit) alone never proves the buffer
+-- actually holds THAT unit's data. Any module can repopulate it (our own
+-- RequestInspect below, InspectionEngine.lua, Integrations.lua's tooltip
+-- inspect), so we hook the global NotifyInspect to track who the buffer is
+-- for right now, and only trust it once INSPECT_TALENT_READY confirms that
+-- unit's data actually landed.
+Comp.InspectBufferUnit = nil          -- unit token most recently NotifyInspect'd
+Comp.InspectBufferExpectedName = nil  -- that unit's name, captured at request time
+Comp.InspectBufferName = nil          -- name CONFIRMED to be in the buffer right now
+if hooksecurefunc then
+    hooksecurefunc("NotifyInspect", function(unit)
+        Comp.InspectBufferUnit = unit
+        Comp.InspectBufferExpectedName = unit and UnitName(unit) or nil
+        Comp.InspectBufferName = nil  -- old data is stale until READY confirms the new unit
+    end)
+end
 
 -- Get spec name for a unit
 function Comp.GetSpecName(unit)
@@ -2359,6 +2386,14 @@ function Comp.GetInspectedSpec(unit)
     -- or if we have cached data from a recent inspection
     if not CanInspect(unit) then return nil end
 
+    -- CanInspect just says we're ALLOWED to inspect unit - it says nothing about
+    -- whose data is currently sitting in the shared buffer. Require the
+    -- NotifyInspect hook + INSPECT_TALENT_READY handler to have confirmed THIS
+    -- unit's data is what's loaded, or we'd risk reading a different, more
+    -- recently inspected player's talents and mis-attributing their spec.
+    local unitName = UnitName(unit)
+    if not unitName or Comp.InspectBufferName ~= unitName then return nil end
+
     -- Try to read talent data from inspection cache
     -- Note: GetTalentTabInfo with inspect=true only works during active inspection
     local maxPoints = 0
@@ -2393,6 +2428,7 @@ function Comp.RequestInspect(unit)
     -- Remember who we're inspecting: INSPECT_TALENT_READY carries no unit arg.
     Comp.PendingInspectUnit = unit
     Comp.PendingInspectName = UnitName(unit)
+    Comp.InspectBufferName = nil  -- whatever was confirmed before is stale until this lands
     NotifyInspect(unit)
 end
 
@@ -2401,20 +2437,22 @@ local inspectFrame = CreateFrame("Frame")
 inspectFrame:RegisterEvent("INSPECT_TALENT_READY")
 inspectFrame:SetScript("OnEvent", function(self, event)
     if event == "INSPECT_TALENT_READY" then
-        -- Resolve which unit was actually inspected (recorded at request time).
-        -- 3.3.5a's INSPECT_TALENT_READY carries no unit arg, and InspectFrame.unit
-        -- only exists when the Blizzard inspect UI is open.
-        local unit = Comp.PendingInspectUnit
-        if InspectFrame and InspectFrame.unit then
-            unit = InspectFrame.unit
-        end
+        -- Resolve which unit was actually inspected. 3.3.5a's INSPECT_TALENT_READY
+        -- carries no unit arg. InspectFrame.unit only exists when the Blizzard
+        -- inspect UI is open; Comp.InspectBufferUnit (set by the NotifyInspect
+        -- hook above) covers every other caller, including our own
+        -- Comp.PendingInspectUnit as a last-resort fallback.
+        local unit = (InspectFrame and InspectFrame.unit) or Comp.InspectBufferUnit or Comp.PendingInspectUnit
+        local expectedName = Comp.InspectBufferExpectedName or Comp.PendingInspectName
 
         if unit and UnitExists(unit)
-           and (not Comp.PendingInspectName or UnitName(unit) == Comp.PendingInspectName) then
+           and (not expectedName or UnitName(unit) == expectedName) then
             local unitName = UnitName(unit)
             local _, class = UnitClass(unit)
 
             if unitName and class and Comp.TalentTreeSpecs[class] then
+                -- Only NOW is the shared buffer confirmed to hold this unit's data.
+                Comp.InspectBufferName = unitName
                 local spec = Comp.GetInspectedSpec(unit)
                 if spec then
                     Comp.InspectedSpecs[unitName] = {spec = spec, timestamp = time()}

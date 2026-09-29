@@ -286,7 +286,12 @@ function IE.EstimatePerformance(data)
         confidence = "Low",
     }
 
-    local gs = data.gearScore or 5000
+    local gs = data.gearScore
+    if not gs or gs == 0 then
+        -- gearScore is stored as 0 (not nil) when no GS source was found
+        -- (see IE.InspectUnit); treat that the same as "unknown".
+        gs = 5000
+    end
     local gsModifier = (gs - 5000) / 100  -- Per 100 GS
 
     -- Try to detect role from gear (simplified)

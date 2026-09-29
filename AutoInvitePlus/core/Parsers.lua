@@ -39,10 +39,10 @@ Parsers.GSPatterns = {
 Parsers.RaidPatterns = {
     -- ICC (Icecrown Citadel)
     {pattern = "icc%s*25%s*hc", raid = "ICC25H", category = "ICC"},
-    {pattern = "icc%s*25%s*h[^a-z]", raid = "ICC25H", category = "ICC"},
+    {pattern = "icc%s*25%s*h%f[%A]", raid = "ICC25H", category = "ICC"},
     {pattern = "icc%s*25%s*heroic", raid = "ICC25H", category = "ICC"},
     {pattern = "icc%s*10%s*hc", raid = "ICC10H", category = "ICC"},
-    {pattern = "icc%s*10%s*h[^a-z]", raid = "ICC10H", category = "ICC"},
+    {pattern = "icc%s*10%s*h%f[%A]", raid = "ICC10H", category = "ICC"},
     {pattern = "icc%s*10%s*heroic", raid = "ICC10H", category = "ICC"},
     {pattern = "icc%s*25%s*n", raid = "ICC25N", category = "ICC"},
     {pattern = "icc%s*25%s*normal", raid = "ICC25N", category = "ICC"},
@@ -77,13 +77,20 @@ Parsers.RaidPatterns = {
     {pattern = "%f[%w]saurfang%f[%W]", raid = "ICC", category = "ICC"},
     {pattern = "lich%s*king", raid = "ICC", category = "ICC"},
 
-    -- RS (Ruby Sanctum)
-    {pattern = "rs%s*25%s*h", raid = "RS25H", category = "RS"},
-    {pattern = "rs%s*25%s*hc", raid = "RS25H", category = "RS"},
-    {pattern = "rs%s*10%s*h", raid = "RS10H", category = "RS"},
-    {pattern = "rs%s*10%s*hc", raid = "RS10H", category = "RS"},
-    {pattern = "rs%s*25", raid = "RS25N", category = "RS"},
-    {pattern = "rs%s*10", raid = "RS10N", category = "RS"},
+    -- RS (Ruby Sanctum) - "rs" is frontier-anchored on the left so it can't
+    -- match the tail of an ordinary word ("healers", "raiders"), and the
+    -- heroic "h" marker is frontier-anchored on the right so it can't match
+    -- the "h" that starts an unrelated following word ("RS25 heal"). Mirrors
+    -- the ICC block above (hc / anchored-h / spelled-out heroic, in that
+    -- order, before the bare normal-mode fallback).
+    {pattern = "%f[%w]rs%s*25%s*hc", raid = "RS25H", category = "RS"},
+    {pattern = "%f[%w]rs%s*25%s*h%f[%A]", raid = "RS25H", category = "RS"},
+    {pattern = "%f[%w]rs%s*25%s*heroic", raid = "RS25H", category = "RS"},
+    {pattern = "%f[%w]rs%s*10%s*hc", raid = "RS10H", category = "RS"},
+    {pattern = "%f[%w]rs%s*10%s*h%f[%A]", raid = "RS10H", category = "RS"},
+    {pattern = "%f[%w]rs%s*10%s*heroic", raid = "RS10H", category = "RS"},
+    {pattern = "%f[%w]rs%s*25", raid = "RS25N", category = "RS"},
+    {pattern = "%f[%w]rs%s*10", raid = "RS10N", category = "RS"},
     {pattern = "ruby%s*sanctum", raid = "RS", category = "RS"},
     {pattern = "halion", raid = "RS", category = "RS"},
 
@@ -543,18 +550,16 @@ function Parsers.ParseNeedCount(message, role)
     if not roleData then return 0 end
 
     for _, pattern in ipairs(roleData.lfmPatterns) do
-        -- Check for number in pattern like "lf2m"
-        local count = msg:match("lf(%d)m")
-        if count and msg:match(pattern) then
-            return tonumber(count) or 1
-        end
-        if msg:match(pattern) then
-            -- Check for explicit numbers
-            local numMatch = msg:match("need%s*(%d)%s*" .. role:lower())
-            if numMatch then
-                return tonumber(numMatch) or 1
-            end
-            return 1
+        -- Capture any "%d*" count placeholder in the pattern itself (e.g.
+        -- "lf%d*m?%s*heal" or "need%s*%d*%s*tank") so the number we return is
+        -- the one actually adjacent to THIS role's keyword, not some other
+        -- unrelated number/role elsewhere in the message (e.g. the overall
+        -- "lf3m" spots-left count leaking into a bare "need heal").
+        local capturePattern = pattern:gsub("%%d%*", "(%%d*)", 1)
+        local numMatch = msg:match(capturePattern)
+        if numMatch then
+            local count = tonumber(numMatch)
+            return count or 1
         end
     end
 
@@ -1330,4 +1335,160 @@ function Parsers.GetRaidName(raidId)
     end
 
     return raidId
+end
+
+-- Is `raidId` a heroic entry in the hierarchy? true/false when the id
+-- resolves to a specific child (e.g. "ICC10H" -> true, "ICC10N" -> false),
+-- nil when it's a bare category id or doesn't resolve at all (caller should
+-- treat nil as "unknown", not "normal").
+function Parsers.IsHeroicRaidId(raidId)
+    if not raidId then return nil end
+    for _, category in ipairs(Parsers.RaidHierarchy) do
+        for _, child in ipairs(category.children) do
+            if raidId == child.id then return child.heroic end
+        end
+    end
+    return nil
+end
+
+-- ============================================================================
+-- RAID PROGRESS / TAG DETECTION (LFM message text)
+-- ============================================================================
+-- Best-effort signals scraped from an LFM message's free text, for the
+-- browser's progress badge + "Partial Progress"/"Discord" filters. Both are
+-- allow-list-driven (never a blocklist of things to exclude) so an unrelated
+-- mention (e.g. "@Discord", "@GS") can't be misread as a boss/progress
+-- marker - see ParseRaidProgress below.
+
+-- Curated boss-name shorthand actually seen in live LFM chat, on top of the
+-- full boss name (always a valid alias, lowercased) from
+-- AIP.Composition.RaidBosses. Hand-curated rather than auto-derived from the
+-- name string: apostrophes/hyphens in names like "Blood-Queen Lana'thel"
+-- make a generic initialism generator produce wrong shorthand (e.g. "BQLT"
+-- instead of the real "BQL"), and this codebase's data files are curated,
+-- not guessed (see data/BiSData.lua etc.) - extend this table, don't try to
+-- derive it programmatically.
+local BOSS_SHORTHAND = {
+    ICC = {
+        marrow = "Lord Marrowgar", marrowgar = "Lord Marrowgar",
+        deathwhisper = "Lady Deathwhisper", ldw = "Lady Deathwhisper",
+        gunship = "Gunship Battle",
+        saurfang = "Deathbringer Saurfang", dbs = "Deathbringer Saurfang",
+        fest = "Festergut", fester = "Festergut", festergut = "Festergut",
+        rot = "Rotface", rotface = "Rotface",
+        pp = "Professor Putricide", putricide = "Professor Putricide",
+        bpc = "Blood Prince Council", princes = "Blood Prince Council",
+        bql = "Blood-Queen Lana'thel", lanathel = "Blood-Queen Lana'thel",
+        valithria = "Valithria Dreamwalker", dreamwalker = "Valithria Dreamwalker",
+        sindy = "Sindragosa", sindragosa = "Sindragosa",
+        lk = "The Lich King", lichking = "The Lich King",
+    },
+    RS = {
+        baltharus = "Baltharus the Warborn",
+        saviana = "Saviana Ragefire",
+        zarithrian = "General Zarithrian", zarith = "General Zarithrian",
+        halion = "Halion",
+    },
+    TOC = {
+        beasts = "Northrend Beasts",
+        jaraxxus = "Lord Jaraxxus", jarax = "Lord Jaraxxus",
+        champions = "Faction Champions",
+        valkyr = "Twin Val'kyr", twins = "Twin Val'kyr",
+        anub = "Anub'arak", anubarak = "Anub'arak",
+    },
+}
+
+local bossAliasCache = {}
+
+-- {alias -> canonical boss name} for `catId`, built once from
+-- AIP.Composition.RaidBosses (loads after this file - guarded, called only
+-- at runtime) plus BOSS_SHORTHAND above. nil if boss data isn't available.
+local function BossAliasesFor(catId)
+    if bossAliasCache[catId] then return bossAliasCache[catId] end
+    local Comp = AIP.Composition
+    local data = Comp and Comp.RaidBosses and Comp.RaidBosses[catId]
+    if not data then return nil end
+    local map = {}
+    for _, name in ipairs(data.bosses) do
+        map[name:lower()] = name
+    end
+    for alias, name in pairs(BOSS_SHORTHAND[catId] or {}) do
+        map[alias] = name
+    end
+    bossAliasCache[catId] = map
+    return map
+end
+
+-- Does `message` look like it requires/mentions Discord? Simple presence
+-- check (matches this file's IsGuildRecruitment-style pragmatic text
+-- matching) - any LFM ad that mentions Discord at all is signalling it in
+-- practice, whether "DISCORD MANDATORY" or a bare "@Discord".
+function Parsers.RequiresDiscord(message)
+    return message ~= nil and message:lower():find("discord", 1, true) ~= nil
+end
+
+-- Best-effort raid-progress read from an LFM message for category `catId`
+-- (e.g. "ICC"). Returns nil when nothing is recognized, otherwise
+-- {killed, total, boss, isFresh, isFullClear, isPartial}. `killed`/`total`
+-- come from either a "N/M" fraction whose denominator matches the raid's
+-- REAL boss count (this is what distinguishes real progress like "8/12" from
+-- an unrelated roster-size fraction like "24/25" - the denominators only
+-- collide if a raid's boss count equals its roster size, which doesn't
+-- happen for any raid in RaidHierarchy) or an explicit "N boss(es) down"
+-- phrase. `boss` comes from an "@Name" mention matched ONLY against the
+-- allow-list above (never a blocklist) - this is what keeps unrelated
+-- "@Discord"/"@GS" mentions from being misread as a boss marker.
+function Parsers.ParseRaidProgress(message, catId)
+    if not message or message == "" or not catId then return nil end
+    local Comp = AIP.Composition
+    local data = Comp and Comp.RaidBosses and Comp.RaidBosses[catId]
+    if not data or not data.bosses then return nil end
+    local total = #data.bosses
+
+    local result = nil
+    for killedStr, denomStr in message:gmatch("(%d+)%s*/%s*(%d+)") do
+        if tonumber(denomStr) == total then
+            local killed = tonumber(killedStr)
+            if killed and killed >= 0 and killed <= total then
+                result = result or {}
+                result.killed, result.total = killed, total
+            end
+        end
+    end
+
+    local down = message:match("(%d+)%s*[Bb]oss[%a]*%s*[Dd]own")
+    if down then
+        result = result or {}
+        result.killed = result.killed or tonumber(down)
+        result.total = result.total or total
+    end
+
+    local aliases = BossAliasesFor(catId)
+    if aliases then
+        for word in message:gmatch("@(%a[%a']*)") do
+            local boss = aliases[word:lower()]
+            if boss then
+                result = result or {}
+                result.boss = result.boss or boss
+                break
+            end
+        end
+    end
+
+    if result and result.boss and not result.killed then
+        for i, name in ipairs(data.bosses) do
+            if name == result.boss then
+                result.killed, result.total = i - 1, total
+                break
+            end
+        end
+    end
+
+    if not result then return nil end
+    local lower = message:lower()
+    result.isFresh = lower:find("fresh", 1, true) ~= nil
+    result.isFullClear = (result.killed and result.total and result.killed >= result.total)
+        or lower:find("lk run", 1, true) ~= nil or lower:find("full clear", 1, true) ~= nil
+    result.isPartial = (result.killed ~= nil and result.killed > 0) and not result.isFullClear
+    return result
 end

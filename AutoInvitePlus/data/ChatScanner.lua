@@ -1112,10 +1112,15 @@ local function OnDataBusLFG(event)
     }
 
     -- Add to players (same as regular chat)
+    -- Only auto-queue on a genuinely new listing, same as the chat path (CS.AddPlayer's
+    -- own new-entry branch). GUI.Broadcast rebroadcasts an enrolled peer's LFG on a
+    -- repeating interval, so without this gate every rebroadcast (now just an "existing"
+    -- update) would re-auto-queue a player the leader may have since removed manually.
+    local isNewPlayer = not CS.Players[info.author]
     CS.AddPlayer(info)
 
     -- Auto-queue if autoQueueLFG is enabled and matches our active LFM
-    if AIP.db and AIP.db.autoQueueLFG and CS.MatchesMyLFM(info) then
+    if isNewPlayer and AIP.db and AIP.db.autoQueueLFG and CS.MatchesMyLFM(info) then
         local GUI = AIP.CentralGUI or {}
         if GUI.MyGroup and AIP.AddToQueue then
             local isBlacklisted = AIP.IsBlacklisted and AIP.IsBlacklisted(info.author)

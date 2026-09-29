@@ -65,15 +65,17 @@ GetSpellInfo = function(n)
     if n == "Misdirection" or n == "Righteous Fury" then return n, "", "icon1" end
 end
 
--- Spellbook: 2 tabs (General idx 1-2, Class idx 3-7).
+-- Spellbook: 2 tabs (General idx 1-2, Class idx 3-7). h/r (helpful/range)
+-- flags are unused by TK.ListSpells itself (no longer filters on them) but
+-- stay on the fixture since TK.IsFriendlyCastable still reads them.
 local book = {
     { n = "Attack" },                                   -- 1: not helpful
-    { n = "Misdirection", h = true, r = true },         -- 2: friendly + range  -> KEEP
-    { n = "Power Word: Shield", h = true, r = true },   -- 3: friendly + range  -> KEEP
+    { n = "Misdirection", h = true, r = true },         -- 2: friendly + range
+    { n = "Power Word: Shield", h = true, r = true },   -- 3: friendly + range
     { n = "Righteous Fury", h = true },                 -- 4: helpful, self-only (no range)
     { n = "Fireball" },                                 -- 5: harmful
-    { n = "Toughness", passive = true, h = true, r = true }, -- 6: passive
-    { n = "Misdirection", h = true, r = true },         -- 7: duplicate rank
+    { n = "Toughness", passive = true, h = true, r = true }, -- 6: passive -> dropped
+    { n = "Misdirection", h = true, r = true },         -- 7: duplicate rank -> dropped
 }
 local function bookEntry(a)
     if type(a) == "number" then return book[a] end
@@ -351,20 +353,14 @@ local s, d = TK.GetCooldown("Misdirection", "spell"); eq(s .. "/" .. d, "10/30",
 s, d = TK.GetCooldown("Hearthstone", "item"); eq(s .. "/" .. d, "5/60", "cooldown item")
 s, d = TK.GetCooldown("", nil); eq(s .. "/" .. d, "0/0", "cooldown empty")
 
--- ---- spellbook / bag pickers (any spell or item usable on a friendly target) --
+-- ---- spellbook / bag pickers (whole spellbook; bag items usable on a friendly target) --
 local function names(list) local t = {}; for _, e in ipairs(list) do t[#t + 1] = e.name end; return table.concat(t, ",") end
 local sp, filtered = TK.ListSpells()
-eq(names(sp), "Misdirection,Power Word: Shield", "ListSpells keeps friendly ranged, drops self-only/harmful/passive/dupes")
-eq(filtered, true, "ListSpells reports filtering active")
-eq(sp[1].icon, "tex2", "ListSpells icon")
-eq(sp[1].index, 2, "ListSpells index of first hit")
-do
-    local saved = IsHelpfulSpell; IsHelpfulSpell = nil
-    local all, f2 = TK.ListSpells()
-    eq(names(all), "Attack,Fireball,Misdirection,Power Word: Shield,Righteous Fury", "ListSpells fallback: all non-passive when filter API missing")
-    eq(f2, false, "ListSpells fallback reports unfiltered")
-    IsHelpfulSpell = saved
-end
+eq(names(sp), "Attack,Fireball,Misdirection,Power Word: Shield,Righteous Fury",
+    "ListSpells lists the whole spellbook unfiltered - only passives/dupes dropped (helpful+range filtering was removed: it left too few spells for some classes to be usable)")
+eq(filtered, true, "ListSpells reports its list as complete")
+eq(sp[1].icon, "tex1", "ListSpells icon (Attack, alphabetically first)")
+eq(sp[1].index, 1, "ListSpells index of first entry")
 local it, ifiltered = TK.ListItems()
 eq(names(it), "Linen Bandage,Runed Talisman,Healing Potion,Scroll of Stamina V",
     "ListItems: API-positive + text-positive + known-kind items (now incl. potions/food/consumables); drops junk/enemy-text; dedupes; sorted by kind")

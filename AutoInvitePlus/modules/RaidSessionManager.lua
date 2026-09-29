@@ -420,7 +420,12 @@ end
 function RSM.GetRaidSize()
     local numRaid = GetNumRaidMembers() or 0
     if numRaid > 0 then
-        return numRaid <= 10 and 10 or 25
+        -- Size is determined by the locked-in instance difficulty, not the
+        -- transient headcount (a 10-man can temporarily carry extra members
+        -- to cover cancellations, which would otherwise mislabel the raid).
+        local diff = GetInstanceDifficulty() or 1
+        -- 1 = 10N, 2 = 25N, 3 = 10HC, 4 = 25HC
+        return (diff == 2 or diff == 4) and 25 or 10
     end
     -- 5-man party (e.g. a heroic dungeon)
     if (GetNumPartyMembers() or 0) > 0 then
