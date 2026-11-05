@@ -363,10 +363,10 @@ function WP.SlashHandler(cmd, rest)
             elseif a1 == "on" or a1 == "off" then
                 WP.SetContextEnabled(a1 == "on")
                 AIP.Print("Context profiles " .. a1:upper() .. ".")
-            elseif isContext(a1) and a2 ~= "" then
+            elseif WP.IsContext(a1) and a2 ~= "" then
                 local ok, err = WP.SetContextProfile(a1, a2)
                 if ok then
-                    AIP.Print(CTX_LABEL[a1] .. " -> " .. (WP.ContextProfile(a1) or "no change"))
+                    AIP.Print(WP.CONTEXT_LABELS[a1] .. " -> " .. (WP.ContextProfile(a1) or "no change"))
                     WP.lastContext = nil
                 else
                     AIP.Print("Context profile failed: " .. tostring(err))
@@ -420,6 +420,8 @@ local function isContext(c)
     for _, k in ipairs(WP.CONTEXTS) do if k == c then return true end end
     return false
 end
+-- Exposed on WP: SlashHandler is defined above this point, so it can't see the local.
+WP.IsContext = isContext
 
 -- 3.3.5a APIs only (no IsInGroup / IsInRaid).
 function WP.Context()

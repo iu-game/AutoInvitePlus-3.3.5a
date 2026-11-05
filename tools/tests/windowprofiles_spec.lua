@@ -155,4 +155,13 @@ check("applied after combat", WP.EvaluateContext() == "Minimal" and WP.pendingCo
 WP.SetContextProfile("solo", "none")
 check("clear mapping", AIP.db.contextProfiles.solo == nil)
 
+-- Slash path (a forward-referenced local once made `context <ctx> <profile>` a nil global call)
+for _, args in ipairs({ "", "off", "on", "profile Full", "context", "context off", "context on",
+        "context raid Full", "context raid none", "context bogus Full", "context raid nope" }) do
+    local ok, err = pcall(WP.SlashHandler, "windows", args)
+    check("slash 'windows " .. args .. "' does not error" .. (ok and "" or (": " .. tostring(err))), ok)
+end
+WP.SlashHandler("windows", "context raid Full")
+check("slash sets mapping", AIP.db.contextProfiles.raid == "Full")
+
 if fails == 0 then print("windowprofiles_spec: all passed") else print(fails .. " FAILED"); os.exit(1) end
