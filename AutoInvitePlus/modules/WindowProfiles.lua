@@ -355,6 +355,25 @@ function WP.SlashHandler(cmd, rest)
             WP.ClearOverrides()
             WP.Refresh()
             AIP.Print("All windows & bars " .. (v and "ON" or "OFF") .. ". /aip windows to review.")
+        elseif sub == "context" then
+            local a1, a2 = arg:match("^(%S*)%s*(.-)%s*$")
+            a1 = (a1 or ""):lower()
+            if a1 == "" then
+                WP.ContextStatus()
+            elseif a1 == "on" or a1 == "off" then
+                WP.SetContextEnabled(a1 == "on")
+                AIP.Print("Context profiles " .. a1:upper() .. ".")
+            elseif isContext(a1) and a2 ~= "" then
+                local ok, err = WP.SetContextProfile(a1, a2)
+                if ok then
+                    AIP.Print(CTX_LABEL[a1] .. " -> " .. (WP.ContextProfile(a1) or "no change"))
+                    WP.lastContext = nil
+                else
+                    AIP.Print("Context profile failed: " .. tostring(err))
+                end
+            else
+                AIP.Print("Usage: /aip windows context [on|off | <solo|party|raid|dungeon|raidinstance|battleground|arena> <Minimal|RaidLeader|Full|Multibox|none>]")
+            end
         elseif sub == "profile" then
             local name, scope = arg:match("^(%S+)%s*(%S*)$")
             local perChar = scope and scope:lower() == "char"
@@ -365,7 +384,7 @@ function WP.SlashHandler(cmd, rest)
                 AIP.Print("Usage: /aip windows profile <Minimal|RaidLeader|Full|Multibox> [char]  (" .. tostring(err) .. ")")
             end
         else
-            AIP.Print("Usage: /aip windows [on|off|profile <Minimal|RaidLeader|Full|Multibox> [char]]")
+            AIP.Print("Usage: /aip windows [on|off|profile <Minimal|RaidLeader|Full|Multibox> [char]|context ...]")
         end
     elseif cmd == "resetpos" then
         local n, skipped = WP.ResetPositions()
@@ -380,6 +399,123 @@ function WP.SlashHandler(cmd, rest)
         if n then AIP.Print("Imported " .. n .. " settings. /reload recommended.")
         else AIP.Print("Import failed: " .. tostring(err)) end
     end
+end
+
+-- ---------------------------------------------------------------------------
+-- Context-aware automatic profiles
+--   db.contextProfilesEnabled (bool) + db.contextProfiles[ctx] = profile name
+--   (nil / "" = leave windows alone in that context). Re-evaluated (debounced)
+--   on zone / roster changes, only when the context actually CHANGED. A manual
+--   /aip windows change sticks until the next context change. Never touches
+--   windows in combat - deferred to PLAYER_REGEN_ENABLED.
+-- ---------------------------------------------------------------------------
+WP.CONTEXTS = { "solo", "party", "raid", "dungeon", "raidinstance", "battleground", "arena" }
+local CTX_LABEL = {
+    solo = "Solo", party = "Party", raid = "Raid group", dungeon = "Dungeon",
+    raidinstance = "Raid instance", battleground = "Battleground", arena = "Arena",
+}
+WP.CONTEXT_LABELS = CTX_LABEL
+
+local function isContext(c)
+    for _, k in ipairs(WP.CONTEXTS) do if k == c then return true end end
+    return false
+end
+
+-- 3.3.5a APIs only (no IsInGroup / IsInRaid).
+function WP.Context()
+    local inInst, itype
+    if IsInInstance then inInst, itype = IsInInstance() end
+    if inInst then
+        if itype == "arena" then return "arena" end
+        if itype == "pvp" then return "battleground" end
+        if itype == "raid" then return "raidinstance" end
+        if itype == "party" then return "dungeon" end
+    end
+    if GetNumRaidMembers and (GetNumRaidMembers() or 0) > 0 then return "raid" end
+    if GetNumPartyMembers and (GetNumPartyMembers() or 0) > 0 then return "party" end
+    return "solo"
+end
+
+function WP.ContextProfile(ctx)
+    local db = AIP.db
+    if type(db) ~= "table" or type(db.contextProfiles) ~= "table" then return nil end
+    local n = db.contextProfiles[ctx]
+    if type(n) ~= "string" or n == "" then return nil end
+    return resolveProfileName(n)
+end
+
+-- Set (or clear with nil / "" / "none") the profile for a context.
+function WP.SetContextProfile(ctx, name)
+    if not isContext(ctx) or type(AIP.db) ~= "table" then return false, "unknown context" end
+    if type(AIP.db.contextProfiles) ~= "table" then AIP.db.contextProfiles = {} end
+    if name == nil or name == "" or tostring(name):lower() == "none" then
+        AIP.db.contextProfiles[ctx] = nil
+        return true
+    end
+    local p = resolveProfileName(name)
+    if not p then return false, "unknown profile" end
+    AIP.db.contextProfiles[ctx] = p
+    return true
+end
+
+function WP.SetContextEnabled(on)
+    if type(AIP.db) ~= "table" then return end
+    AIP.db.contextProfilesEnabled = on and true or false
+    WP.lastContext = nil           -- next evaluation counts as a change
+    if on then WP.EvaluateContext() end
+end
+
+-- Synchronous evaluation. Returns the profile applied (or nil).
+function WP.EvaluateContext()
+    local db = AIP.db
+    if type(db) ~= "table" or not db.contextProfilesEnabled then return nil end
+    local ctx = WP.Context()
+    if ctx == WP.lastContext then WP.pendingContext = false; return nil end
+    if inCombat() then WP.pendingContext = true; return nil end
+    WP.pendingContext = false
+    WP.lastContext = ctx
+    local name = WP.ContextProfile(ctx)
+    if not name then return nil end
+    local applied = WP.ApplyProfile(name, db.windowsPerCharMode and true or false)
+    if applied and AIP.Print then
+        AIP.Print("Context: " .. (CTX_LABEL[ctx] or ctx) .. " - window profile " .. applied .. ".")
+    end
+    return applied
+end
+
+-- Debounced (0.5s) entry point for event bursts.
+function WP.ScheduleContext()
+    if WP.ctxScheduled then return end
+    if not (AIP.db and AIP.db.contextProfilesEnabled) then return end
+    if AIP.Utils and AIP.Utils.DelayedCall then
+        WP.ctxScheduled = true
+        AIP.Utils.DelayedCall(0.5, function()
+            WP.ctxScheduled = false
+            WP.EvaluateContext()
+        end)
+    else
+        WP.EvaluateContext()
+    end
+end
+
+function WP.ContextStatus()
+    local db = AIP.db or {}
+    AIP.Print("Context profiles: " .. (db.contextProfilesEnabled and "ON" or "OFF") ..
+        "  (current context: " .. (CTX_LABEL[WP.Context()] or "?") .. ")")
+    for _, c in ipairs(WP.CONTEXTS) do
+        AIP.Print(string.format("  %s (%s): %s", CTX_LABEL[c], c, WP.ContextProfile(c) or "-"))
+    end
+    AIP.Print("Manual /aip windows changes stay until the next context change.")
+end
+
+if AIP.Utils and AIP.Utils.Events and AIP.Utils.Events.Register then
+    for _, ev in ipairs({ "PLAYER_ENTERING_WORLD", "ZONE_CHANGED_NEW_AREA",
+                          "PARTY_MEMBERS_CHANGED", "RAID_ROSTER_UPDATE" }) do
+        AIP.Utils.Events.Register(ev, function() WP.ScheduleContext() end, "WindowProfilesCtx")
+    end
+    AIP.Utils.Events.Register("PLAYER_REGEN_ENABLED", function()
+        if WP.pendingContext then WP.ScheduleContext() end
+    end, "WindowProfilesCtx")
 end
 
 -- One-time tip shortly after login.

@@ -358,6 +358,24 @@ function FP.Create(parent)
     emptyText:Hide()
     frame.emptyText = emptyText
 
+    -- Forward mouse-wheel from the rows to the scroll bar. Rows sit above the
+    -- FauxScrollFrame and (now that they EnableMouse for hover) would otherwise
+    -- swallow the wheel; this mirrors ScrollFrameTemplate_OnMouseWheel.
+    local function ForwardWheel(_, delta)
+        local sb = _G[scrollFrame:GetName() .. "ScrollBar"]
+        if not sb then return end
+        local step = FP.ROW_HEIGHT * 2
+        if delta > 0 then
+            sb:SetValue(sb:GetValue() - step)
+        else
+            sb:SetValue(sb:GetValue() + step)
+        end
+    end
+    scrollFrame:EnableMouseWheel(true)
+    if not scrollFrame:GetScript("OnMouseWheel") then
+        scrollFrame:SetScript("OnMouseWheel", ForwardWheel)
+    end
+
     -- Create a generous row pool; the number actually shown adapts to the
     -- scroll height (computed live in FP.VisibleCount / FP.Update).
     for i = 1, FP.MAX_ROWS do
@@ -365,6 +383,25 @@ function FP.Create(parent)
         row:SetHeight(24)
         row:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 0, -((i-1) * FP.ROW_HEIGHT))
         row:SetPoint("RIGHT", scrollFrame, "RIGHT", 0, 0)
+
+        -- Plain Frames ignore the mouse by default, so the HIGHLIGHT texture and
+        -- tooltip never fired. Child buttons (Edit/X) still get their own clicks.
+        row:EnableMouse(true)
+        row:EnableMouseWheel(true)
+        row:SetScript("OnMouseWheel", ForwardWheel)
+        row:SetScript("OnEnter", function(self)
+            local entry = self.entryData
+            if entry and entry.note and entry.note ~= "" then
+                GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+                GameTooltip:AddLine(entry.name or "?", 0, 1, 0.5)
+                GameTooltip:AddLine(entry.note, 1, 1, 1, true)
+                GameTooltip:Show()
+            end
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        row:SetScript("OnHide", function(self)
+            if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+        end)
 
         -- Highlight on hover
         local highlight = row:CreateTexture(nil, "HIGHLIGHT")
@@ -499,15 +536,68 @@ function FP.Create(parent)
     return frame
 end
 
--- Import guild members
+-- Import guild members. The guild roster is a cold, empty cache until the
+-- client has been asked for it (GuildRoster()) and the server answers with
+-- GUILD_ROSTER_UPDATE, so request it first and import on that event (with a
+-- timeout fallback so a silent server never leaves the button dead).
+local guildImportFrame
+local guildImportGen = 0
+local guildImportPending = false
+local GUILD_IMPORT_TIMEOUT = 4
+
 function FP.ImportGuild()
     if not IsInGuild() then
         AIP.Print("You are not in a guild")
         return
     end
+    if guildImportPending then
+        AIP.Print("Guild roster request already in progress...")
+        return
+    end
 
-    local added = 0
-    local numMembers = GetNumGuildMembers()
+    guildImportPending = true
+    guildImportGen = guildImportGen + 1
+    local myGen = guildImportGen
+
+    if not guildImportFrame then
+        guildImportFrame = CreateFrame("Frame")
+        guildImportFrame:SetScript("OnEvent", function()
+            -- The event can fire for unrelated roster pushes before our data is
+            -- in; only proceed once members are actually present.
+            if guildImportPending and (GetNumGuildMembers() or 0) > 0 then
+                guildImportPending = false
+                guildImportFrame:UnregisterEvent("GUILD_ROSTER_UPDATE")
+                FP.DoImportGuild()
+            end
+        end)
+    end
+    guildImportFrame:RegisterEvent("GUILD_ROSTER_UPDATE")
+
+    -- Timeout fallback (generation-guarded so a stale timer from an earlier
+    -- request can't cut a newer one short).
+    local function onTimeout()
+        if guildImportPending and guildImportGen == myGen then
+            guildImportPending = false
+            guildImportFrame:UnregisterEvent("GUILD_ROSTER_UPDATE")
+            FP.DoImportGuild()
+        end
+    end
+    if AIP.Utils and AIP.Utils.DelayedCall then
+        AIP.Utils.DelayedCall(GUILD_IMPORT_TIMEOUT, onTimeout)
+    else
+        guildImportPending = false
+        guildImportFrame:UnregisterEvent("GUILD_ROSTER_UPDATE")
+        FP.DoImportGuild()
+        return
+    end
+
+    AIP.Print("Requesting guild roster...")
+    GuildRoster()
+end
+
+function FP.DoImportGuild()
+    local added, skipped = 0, 0
+    local numMembers = GetNumGuildMembers() or 0
 
     for i = 1, numMembers do
         local name, _, _, _, _, _, _, _, online = GetGuildRosterInfo(i)
@@ -520,11 +610,18 @@ function FP.ImportGuild()
                 if AIP.AddToFavorites(cleanName, "Guild member", "guild") then
                     added = added + 1
                 end
+            else
+                skipped = skipped + 1
             end
         end
     end
 
-    AIP.Print("Imported " .. added .. " online guild members to favorites")
+    if numMembers == 0 then
+        AIP.Print("Guild roster not available yet - try again in a moment")
+    else
+        AIP.Print("Imported " .. added .. " online guild members to favorites" ..
+            (skipped > 0 and (" (" .. skipped .. " already favorites)") or ""))
+    end
     FP.Update()
 end
 

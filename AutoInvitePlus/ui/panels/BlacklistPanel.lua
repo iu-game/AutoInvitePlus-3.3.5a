@@ -390,6 +390,24 @@ function BP.Create(parent)
     end)
     frame.scrollFrame = scrollFrame
 
+    -- Forward mouse-wheel from the rows to the scroll bar. The rows sit above the
+    -- FauxScrollFrame and (now that they EnableMouse for hover) would otherwise
+    -- swallow the wheel; this does what ScrollFrameTemplate_OnMouseWheel does.
+    local function ForwardWheel(_, delta)
+        local sb = _G[scrollFrame:GetName() .. "ScrollBar"]
+        if not sb then return end
+        local step = BP.ROW_HEIGHT * 2
+        if delta > 0 then
+            sb:SetValue(sb:GetValue() - step)
+        else
+            sb:SetValue(sb:GetValue() + step)
+        end
+    end
+    scrollFrame:EnableMouseWheel(true)
+    if not scrollFrame:GetScript("OnMouseWheel") then
+        scrollFrame:SetScript("OnMouseWheel", ForwardWheel)
+    end
+
     -- Create a generous row pool; the number shown adapts to the scroll height
     -- (computed live in BP.VisibleCount / BP.Update).
     for i = 1, BP.MAX_ROWS do
@@ -397,6 +415,33 @@ function BP.Create(parent)
         row:SetSize(580, 22)
         row:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 10, -((i - 1) * BP.ROW_HEIGHT))
         row:SetPoint("RIGHT", scrollFrame, "RIGHT", -5, 0)  -- track panel width on resize
+
+        -- Plain Frames ignore the mouse by default, so the HIGHLIGHT texture and
+        -- OnEnter tooltip never fired. Child buttons still get their own clicks.
+        row:EnableMouse(true)
+        row:EnableMouseWheel(true)
+        row:SetScript("OnMouseWheel", ForwardWheel)
+        row:SetScript("OnEnter", function(self)
+            local entry = self.entryData
+            if not entry then return end
+            local hasNotes = entry.notes and entry.notes ~= ""
+            if (entry.reason and entry.reason ~= "") or hasNotes then
+                GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+                GameTooltip:AddLine(entry.name or "?", 1, 1, 1)
+                if entry.reason and entry.reason ~= "" then
+                    GameTooltip:AddLine("Reason: " .. entry.reason, 1, 1, 1, true)
+                end
+                if hasNotes then
+                    GameTooltip:AddLine("Notes: " .. entry.notes, 0.7, 0.7, 0.7, true)
+                end
+                GameTooltip:Show()
+            end
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        -- A pooled row hidden/repurposed under the cursor must not strand its tooltip.
+        row:SetScript("OnHide", function(self)
+            if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+        end)
 
         -- Highlight
         local highlight = row:CreateTexture(nil, "HIGHLIGHT")
@@ -629,6 +674,7 @@ function BP.Update()
         if i <= vis and index <= numEntries then
             local entry = entries[index]
             row.playerName = entry.name
+            row.entryData = entry
 
             row.nameText:SetText(entry.name)
 
@@ -642,7 +688,11 @@ function BP.Update()
 
             -- Reason (truncated)
             local reason = entry.reason or ""
-            row.reasonText:SetText(reason:sub(1, 35))
+            if AIP.TruncateUtf8 then
+                row.reasonText:SetText(AIP.TruncateUtf8(reason, 35))
+            else
+                row.reasonText:SetText(reason:sub(1, 35))
+            end
 
             -- Source with color coding
             local source = entry.source or "manual"
@@ -656,27 +706,12 @@ function BP.Update()
             row.sourceText:SetText(source:sub(1, 1):upper() .. source:sub(2))
             row.sourceText:SetTextColor(color[1], color[2], color[3])
 
-            -- Show tooltip with full reason on hover
-            row:SetScript("OnEnter", function(self)
-                if entry.reason or entry.notes then
-                    GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
-                    GameTooltip:AddLine(entry.name, 1, 1, 1)
-                    if entry.reason then
-                        GameTooltip:AddLine("Reason: " .. entry.reason, 1, 1, 1, true)
-                    end
-                    if entry.notes and entry.notes ~= "" then
-                        GameTooltip:AddLine("Notes: " .. entry.notes, 0.7, 0.7, 0.7, true)
-                    end
-                    GameTooltip:Show()
-                end
-            end)
-            row:SetScript("OnLeave", function()
-                GameTooltip:Hide()
-            end)
-
+            -- Hover tooltip (full reason/notes) is wired once at row creation and
+            -- reads row.entryData, so it never goes stale when rows are reused.
             row:Show()
         else
             row.playerName = nil
+            row.entryData = nil
             row:Hide()
         end
     end

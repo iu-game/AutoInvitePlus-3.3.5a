@@ -231,6 +231,8 @@ local defaults = {
     settingsCollapsed = {},         -- Settings tab: [sectionId] = true when collapsed
     windowsPerCharMode = false,     -- Settings tab: "This character only" checkbox for window profiles/toggles
     timerBarsEnabled = true,        -- pull/break/boss-ability countdown bars
+    contextProfilesEnabled = false, -- auto-apply a window profile per context (AIP.WindowProfiles.Context)
+    contextProfiles = {},           -- [solo|party|raid|dungeon|raidinstance|battleground|arena] = profile name
     windowsTipShown = false,        -- one-time "/aip windows off" login tip (AIP.WindowProfiles)
 
     rollDuration = 10,              -- Roll countdown seconds
@@ -1945,6 +1947,7 @@ local function SlashHandler(msg)
         Print("  /aip groups lock | unlock")
         Print("  /aip autoshow - Toggle auto-opening Tanks/Groups when you join a group")
         Print("  /aip windows [on|off|profile <Minimal|RaidLeader|Full|Multibox> [char]] - Popup/bar switches")
+        Print("  /aip windows context [on|off | <ctx> <Profile|none>] - Auto-switch window profile by solo/party/raid/dungeon/raidinstance/battleground/arena")
         Print("  /aip resetpos - Reset every AIP window to its default position")
         Print("  /aip export | import <string> - Copy settings between accounts")
         Print("  /aip roll [item] - Start a roll / toggle roll window")

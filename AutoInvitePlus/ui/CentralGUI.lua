@@ -774,6 +774,15 @@ function GUI.CreateMinimapButton()
 end
 
 -- Quick menu for minimap button
+local function quickApplyProfile(name)
+    if AIP.WindowProfiles and AIP.WindowProfiles.ApplyProfile then
+        local applied = AIP.WindowProfiles.ApplyProfile(name)
+        if applied then AIP.Print("Applied window profile " .. applied .. " (account-wide).") end
+    else
+        AIP.Print("Window profiles not available.")
+    end
+end
+
 function GUI.ShowQuickMenu(anchor)
     if not GUI.QuickMenuFrame then
         GUI.QuickMenuFrame = CreateFrame("Frame", "AIPQuickMenu", UIParent, "UIDropDownMenuTemplate")
@@ -821,6 +830,22 @@ function GUI.ShowQuickMenu(anchor)
         end, notCheckable = true},
         {text = "Toggle Dungeon Finder (RDF)", func = function()
             if AIP.LFGWatch and AIP.LFGWatch.Toggle then AIP.LFGWatch.Toggle() end
+        end, notCheckable = true},
+        {text = "Activity Log", func = function()
+            if AIP.ActivityLog and AIP.ActivityLog.ToggleWindow then AIP.ActivityLog.ToggleWindow() end
+        end, notCheckable = true},
+        {text = "Window Profile", hasArrow = true, notCheckable = true, menuList = {
+            {text = "Minimal", func = function() quickApplyProfile("Minimal") end, notCheckable = true},
+            {text = "Raid Leader", func = function() quickApplyProfile("RaidLeader") end, notCheckable = true},
+            {text = "Full", func = function() quickApplyProfile("Full") end, notCheckable = true},
+            {text = "Multibox", func = function() quickApplyProfile("Multibox") end, notCheckable = true},
+        }},
+        {text = "Reset Window Positions", func = function()
+            if AIP.WindowProfiles and AIP.WindowProfiles.ResetPositions then
+                local n, skipped = AIP.WindowProfiles.ResetPositions()
+                AIP.Print("Window positions reset (" .. (n or 0) .. " frames)" ..
+                    ((skipped or 0) > 0 and (", " .. skipped .. " skipped in combat - run again out of combat") or "") .. ".")
+            end
         end, notCheckable = true},
         {text = "Raid Tools", isTitle = true, notCheckable = true},
         {text = "Start Ready Check", func = function()
@@ -1296,6 +1321,7 @@ function GUI.CreateFrame()
         GameTooltip:Show()
     end)
     safetyBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    statusBar.safetyBtn = safetyBtn
     safetyBtn.acc = 0
     safetyBtn:SetScript("OnUpdate", function(self, dt)
         self.acc = self.acc + dt
@@ -1359,6 +1385,24 @@ function GUI.CreateFrame()
     simpleChat:Hide()
     statusBar.simpleChat = simpleChat
 
+    -- Hover tooltip for the Simplified-view chat-safety text: a transparent
+    -- button laid exactly over the fontstring (so it follows its measured
+    -- width), shown/hidden together with it in ApplySimplifiedView.
+    local simpleChatBtn = CreateFrame("Button", nil, statusBar)
+    simpleChatBtn:SetPoint("TOPLEFT", simpleChat, "TOPLEFT", 0, 0)
+    simpleChatBtn:SetPoint("BOTTOMRIGHT", simpleChat, "BOTTOMRIGHT", 0, 0)
+    simpleChatBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        local _, lines = GUI.ChatSafetyText()
+        for i, l in ipairs(lines or {}) do
+            if i == 1 then GameTooltip:SetText(l) else GameTooltip:AddLine(l, 0.8, 0.8, 0.8, true) end
+        end
+        GameTooltip:Show()
+    end)
+    simpleChatBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    simpleChatBtn:Hide()
+    statusBar.simpleChatBtn = simpleChatBtn
+
     -- Resize grip
     local resizeGrip = CreateFrame("Button", nil, frame)
     resizeGrip:SetSize(16, 16)
@@ -1376,7 +1420,9 @@ function GUI.CreateFrame()
         -- Save size - but not the width while Simplified View is shrinking
         -- it, or the next "full view" restore would come back at the narrow
         -- simplified width instead of the user's real preferred size.
-        if AIP.db then
+        -- Never persist while maximized: the screen-sized frame would become
+        -- the "preferred" size and a later restore would use it.
+        if AIP.db and not GUI.IsMaximized then
             if not AIP.db.simplifiedView then
                 AIP.db.guiWidth = frame:GetWidth()
             end
@@ -1500,6 +1546,8 @@ function GUI.ApplySimplifiedView(enabled)
             if sb.simpleLine1 then sb.simpleLine1:Show() end
             if sb.simpleLine2 then sb.simpleLine2:Show() end
             if sb.simpleChat then sb.simpleChat:Show() end
+            if sb.simpleChatBtn then sb.simpleChatBtn:Show() end
+            if sb.safetyBtn then sb.safetyBtn:Hide() end
             GUI.RenderSimplifiedFooter()
         else
             if frame.statusText then frame.statusText:Show() end
@@ -1509,6 +1557,8 @@ function GUI.ApplySimplifiedView(enabled)
             if sb.simpleLine1 then sb.simpleLine1:Hide() end
             if sb.simpleLine2 then sb.simpleLine2:Hide() end
             if sb.simpleChat then sb.simpleChat:Hide() end
+            if sb.simpleChatBtn then sb.simpleChatBtn:Hide() end
+            if sb.safetyBtn then sb.safetyBtn:Show() end
         end
     end
 
@@ -1678,8 +1728,19 @@ function GUI.ToggleMaximize()
         GUI.Frame:SetSize(screenWidth - 40, screenHeight - 40)
     else
         -- Restore saved size and position
-        if GUI.SavedSize then
-            GUI.Frame:SetSize(GUI.SavedSize.width, GUI.SavedSize.height)
+        do
+            local sw = GUI.SavedSize and GUI.SavedSize.width
+            local sh = GUI.SavedSize and GUI.SavedSize.height
+            local sc_w, sc_h = GetScreenWidth(), GetScreenHeight()
+            -- Fall back to persisted/default size if the snapshot is missing
+            -- or screen-sized (stale from a maximized save).
+            if not sw or not sh or sw >= sc_w - 40 or sh >= sc_h - 40 then
+                sw = (AIP.db and AIP.db.guiWidth) or GUI.Config.defaultWidth
+                sh = (AIP.db and AIP.db.guiHeight) or GUI.Config.defaultHeight
+                if AIP.db and AIP.db.simplifiedView then sw = GUI.SIMPLIFIED_WIDTH end
+            end
+            GUI.Frame:SetSize(math.max(sw, (AIP.db and AIP.db.simplifiedView) and GUI.SIMPLIFIED_WIDTH or GUI.Config.minWidth),
+                math.max(sh, GUI.Config.minHeight))
         end
         if GUI.SavedPosition then
             GUI.Frame:ClearAllPoints()
@@ -7534,9 +7595,9 @@ GUI.RaidInstanceVariants = {
     VOA = {"VOA25", "VOA10"},
     ULDUAR = {"ULDUAR25", "ULDUAR10"},
     NAXX = {"NAXX25", "NAXX10"},
-    EoE = {"EoE25", "EoE10"},
+    EoE = {"EOE25", "EOE10", "EoE25", "EoE10"},
     OS = {"OS25", "OS10"},
-    ONY = {"ONY25", "ONY10"},
+    ONY = {"ONYXIA25", "ONYXIA10", "ONY25", "ONY10"},
 }
 
 -- Map specific raid keys to their instance group
@@ -7550,6 +7611,10 @@ GUI.RaidToInstance = {
     EoE25 = "EoE", EoE10 = "EoE", EoE = "EoE",
     OS25 = "OS", OS10 = "OS", OS = "OS",
     ONY25 = "ONY", ONY10 = "ONY", ONY = "ONY",
+    -- Canonical ids GetRaidKey()/Parsers.RaidHierarchy actually produce
+    EOE25 = "EoE", EOE10 = "EoE", EOE = "EoE", EoE25H = "EoE", EoE25N = "EoE", EoE10H = "EoE", EoE10N = "EoE",
+    ONYXIA25 = "ONY", ONYXIA10 = "ONY", ONYXIA = "ONY", Ony25 = "ONY", Ony10 = "ONY",
+    Ony25H = "ONY", Ony25N = "ONY", Ony10H = "ONY", Ony10N = "ONY",
 }
 
 -- Get player's best achievement for a raid instance (checks all variants, returns best)

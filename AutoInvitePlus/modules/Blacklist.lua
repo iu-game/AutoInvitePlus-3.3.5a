@@ -320,118 +320,217 @@ function AIP.ExportBlacklist(format)
     return table.concat(lines, "\n")
 end
 
--- Parse import data and return entries (for preview)
+-- UTF-8 safe truncation: keep at most maxChars CHARACTERS (not bytes) so a
+-- multi-byte sequence is never cut in half (which renders as a garbage glyph).
+function AIP.TruncateUtf8(str, maxChars)
+    if type(str) ~= "string" then return "" end
+    if not maxChars or maxChars < 0 then return str end
+    if #str <= maxChars then return str end   -- bytes >= chars, so this is a safe fast path
+    local chars, i, n = 0, 1, #str
+    while i <= n do
+        local b = str:byte(i)
+        local len = 1
+        if b >= 240 then len = 4
+        elseif b >= 224 then len = 3
+        elseif b >= 192 then len = 2 end
+        if chars >= maxChars then break end
+        -- A truncated trailing sequence is dropped rather than kept half-formed.
+        if i + len - 1 > n then break end
+        chars = chars + 1
+        i = i + len
+    end
+    return str:sub(1, i - 1)
+end
+
+-- Hard limits for imported text (hostile / pasted-garbage input).
+AIP.BLACKLIST_IMPORT_LIMITS = {
+    MAX_BYTES = 262144,    -- whole paste
+    MAX_LINES = 3000,      -- non-empty lines examined
+    MAX_ENTRIES = 2000,    -- entries returned
+    MAX_LINE_BYTES = 1024, -- a single line
+    MAX_NAME_BYTES = 36,   -- 12 letters even at 3 bytes each
+    MAX_REASON_CHARS = 100,
+    MAX_NOTES_CHARS = 200,
+    MAX_SOURCE_CHARS = 16,
+    MAX_ERRORS = 20,       -- error strings kept (rest summarized)
+}
+
+-- Parse import data and return entries (for preview). Never errors: any
+-- non-string input yields an empty result; oversized input is capped.
 function AIP.ParseImportData(data)
+    local L = AIP.BLACKLIST_IMPORT_LIMITS
     local entries = {}
     local errors = {}
     local format = "unknown"
+    local droppedErrors = 0
 
-    if not data or data:trim() == "" then
+    local function addError(msg)
+        if #errors < L.MAX_ERRORS then
+            errors[#errors + 1] = msg
+        else
+            droppedErrors = droppedErrors + 1
+        end
+    end
+    local function trim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
+
+    if type(data) ~= "string" or data == "" then
+        return entries, errors, format
+    end
+
+    -- Cap total size, cutting at a line boundary so a half-read line can never
+    -- turn into a wrong (truncated) player name.
+    if #data > L.MAX_BYTES then
+        local cut = data:sub(1, L.MAX_BYTES)
+        local lastNl = 0
+        for pos in cut:gmatch("()[\r\n]") do lastNl = pos end
+        cut = lastNl > 0 and cut:sub(1, lastNl - 1) or ""
+        data = cut
+        addError("Input too large; only the first " .. L.MAX_BYTES .. " bytes were read")
+    end
+
+    -- Strip a UTF-8 BOM (Notepad exports)
+    if data:sub(1, 3) == "\239\187\191" then data = data:sub(4) end
+
+    if trim(data) == "" then
         return entries, errors, format
     end
 
     local lines = {}
-    for line in data:gmatch("[^\n]+") do
-        table.insert(lines, line)
+    local overLines = false
+    for line in data:gmatch("[^\r\n]+") do
+        if line:find("%S") then
+            if #lines >= L.MAX_LINES then overLines = true; break end
+            lines[#lines + 1] = line
+        end
+    end
+    if overLines then
+        addError("Too many lines; only the first " .. L.MAX_LINES .. " were read")
     end
 
-    -- Detect format based on first line
-    local firstLine = lines[1] or ""
-    if firstLine:match("^Name,Reason,Source,Notes,Date Added") then
+    -- Detect format from the first meaningful (non-comment) line
+    local firstIdx
+    for idx = 1, #lines do
+        if not trim(lines[idx]):match("^#") then firstIdx = idx; break end
+    end
+    if not firstIdx then return entries, errors, format end
+    local firstLine = lines[firstIdx]
+    if firstLine:match("^%s*Name,Reason,Source,Notes,Date Added") then
         format = "csv"
-        table.remove(lines, 1)  -- Remove header
-    elseif firstLine:find("|") then
+        table.remove(lines, firstIdx)  -- Remove header
+    elseif firstLine:find("|", 1, true) then
         format = "full"
     else
         format = "simple"
     end
 
-    for lineNum, line in ipairs(lines) do
-        line = line:trim()
-        if line ~= "" and not line:match("^#") then  -- Skip empty lines and comments
-            local entry = nil
-
-            if format == "csv" then
-                -- Parse CSV (simple parsing, handles quoted fields)
-                local function parseCSV(str)
-                    local result = {}
-                    local field = ""
-                    local inQuotes = false
-                    local i = 1
-                    while i <= #str do
-                        local c = str:sub(i, i)
-                        if c == '"' then
-                            if inQuotes and str:sub(i+1, i+1) == '"' then
-                                field = field .. '"'
-                                i = i + 1
-                            else
-                                inQuotes = not inQuotes
-                            end
-                        elseif c == ',' and not inQuotes then
-                            table.insert(result, field)
-                            field = ""
-                        else
-                            field = field .. c
-                        end
-                        i = i + 1
-                    end
-                    table.insert(result, field)
-                    return result
-                end
-                local fields = parseCSV(line)
-                if fields[1] and fields[1] ~= "" then
-                    entry = {
-                        name = fields[1]:trim(),
-                        reason = (fields[2] or ""):trim(),
-                        source = (fields[3] or "import"):trim(),
-                        notes = (fields[4] or ""):trim(),
-                        -- Ignore date from import, use current time
-                    }
+    local function parseCSV(str)
+        local result = {}
+        local buf = {}
+        local inQuotes = false
+        local i, n = 1, #str
+        while i <= n do
+            local c = str:sub(i, i)
+            if c == '"' then
+                if inQuotes and str:sub(i + 1, i + 1) == '"' then
+                    buf[#buf + 1] = '"'
+                    i = i + 1
                 else
-                    table.insert(errors, "Line " .. lineNum .. ": Empty name")
+                    inQuotes = not inQuotes
                 end
-            elseif format == "full" then
-                -- Parse full format: Name|Reason|Source|Notes|Timestamp
-                local parts = {strsplit("|", line)}
-                if parts[1] and parts[1] ~= "" then
-                    entry = {
-                        name = parts[1]:trim(),
-                        reason = (parts[2] or ""):trim(),
-                        source = (parts[3] or "import"):trim(),
-                        notes = (parts[4] or ""):trim(),
-                        -- parts[5] is timestamp, ignored on import
-                    }
-                else
-                    table.insert(errors, "Line " .. lineNum .. ": Empty name")
-                end
+            elseif c == ',' and not inQuotes then
+                result[#result + 1] = table.concat(buf)
+                buf = {}
+                if #result >= 6 then return result end  -- columns beyond Notes are ignored
             else
-                -- Parse simple format: Name;Reason
-                local name, reason = strsplit(";", line, 2)
-                name = name and name:trim() or ""
-                if name ~= "" then
-                    entry = {
-                        name = name,
-                        reason = reason and reason:trim() or "",
-                        source = "import",
-                        notes = "",
-                    }
-                else
-                    table.insert(errors, "Line " .. lineNum .. ": Empty name")
-                end
+                buf[#buf + 1] = c
             end
+            i = i + 1
+        end
+        result[#result + 1] = table.concat(buf)
+        return result
+    end
 
-            if entry then
-                -- Normalize name (handle single-char names safely)
-                if #entry.name >= 2 then
-                    entry.name = entry.name:sub(1,1):upper() .. entry.name:sub(2):lower()
-                elseif #entry.name == 1 then
-                    entry.name = entry.name:upper()
-                end
-                if entry.reason == "" then entry.reason = "Imported" end
-                if entry.source == "" then entry.source = "import" end
-                table.insert(entries, entry)
+    -- Free text (reason/notes): no control chars, no |-escapes (|c |r |H |T
+    -- would render as colors/links in tooltips and Print), bounded length.
+    local function cleanText(s, maxChars)
+        s = (s or ""):gsub("%c", " "):gsub("|", "/"):gsub("%s+", " ")
+        return AIP.TruncateUtf8(trim(s), maxChars)
+    end
+
+    -- Player name: optional -Realm suffix dropped; 2+ letters; ASCII must be
+    -- A-Z/a-z only (bytes >= 128 are UTF-8 accented letters).
+    local function cleanName(s)
+        s = trim((s or ""):gsub("%c", ""))
+        s = s:match("^([^%-]+)") or s
+        if #s < 2 or #s > L.MAX_NAME_BYTES then return nil end
+        for i = 1, #s do
+            local b = s:byte(i)
+            if b < 128 and not ((b >= 65 and b <= 90) or (b >= 97 and b <= 122)) then
+                return nil
             end
         end
+        return s:sub(1, 1):upper() .. s:sub(2):lower()
+    end
+
+    local seen = {}
+    for lineNum = 1, #lines do
+        if #entries >= L.MAX_ENTRIES then
+            addError("Entry limit (" .. L.MAX_ENTRIES .. ") reached; remaining lines ignored")
+            break
+        end
+        local line = trim(lines[lineNum])
+        if line ~= "" and not line:match("^#") then  -- Skip empty lines and comments
+            if #line > L.MAX_LINE_BYTES then
+                addError("Line " .. lineNum .. ": too long, skipped")
+            else
+                local rawName, reason, source, notes
+                if format == "csv" then
+                    local fields = parseCSV(line)
+                    rawName, reason, source, notes = fields[1], fields[2], fields[3], fields[4]
+                elseif format == "full" then
+                    -- Name|Reason|Source|Notes|Timestamp (timestamp ignored; import time is used)
+                    local parts = {strsplit("|", line, 5)}
+                    rawName, reason, source, notes = parts[1], parts[2], parts[3], parts[4]
+                else
+                    rawName, reason = strsplit(";", line, 2)
+                end
+
+                if not rawName or trim(rawName) == "" then
+                    addError("Line " .. lineNum .. ": Empty name")
+                else
+                    local name = cleanName(rawName)
+                    if not name then
+                        addError("Line " .. lineNum .. ": Invalid player name")
+                    else
+                        local key = name:lower()
+                        if seen[key] then
+                            addError("Line " .. lineNum .. ": Duplicate name " .. name)
+                        else
+                            seen[key] = true
+                            reason = cleanText(reason, L.MAX_REASON_CHARS)
+                            notes = cleanText(notes, L.MAX_NOTES_CHARS)
+                            if format == "simple" then
+                                source = "import"
+                            else
+                                source = ((source or ""):gsub("[^%w_]", "")):sub(1, L.MAX_SOURCE_CHARS):lower()
+                            end
+                            if reason == "" then reason = "Imported" end
+                            if source == "" then source = "import" end
+                            entries[#entries + 1] = {
+                                name = name,
+                                reason = reason,
+                                source = source,
+                                notes = notes,
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if droppedErrors > 0 then
+        errors[#errors + 1] = "(" .. droppedErrors .. " more errors not shown)"
     end
 
     return entries, errors, format

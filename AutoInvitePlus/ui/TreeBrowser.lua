@@ -1384,9 +1384,22 @@ function TB.CollapseAll()
 end
 
 -- Search/filter tree
-function TB.FilterTree(nodes, searchText)
+function TB.FilterTree(nodes, searchText, _inner)
     if not searchText or searchText == "" then
+        -- Search cleared: restore the pre-search expansion state so
+        -- auto-expanded parents don't stay open.
+        if not _inner and TB.preSearchExpanded then
+            TB.TreeData.expandedNodes = TB.preSearchExpanded
+            TB.preSearchExpanded = nil
+        end
         return nodes
+    end
+
+    -- Snapshot the user's expansion state once, at the start of a search.
+    if not _inner and not TB.preSearchExpanded then
+        local snap = {}
+        for k, v in pairs(TB.TreeData.expandedNodes) do snap[k] = v end
+        TB.preSearchExpanded = snap
     end
 
     local searchLower = searchText:lower()
@@ -1403,7 +1416,7 @@ function TB.FilterTree(nodes, searchText)
 
         -- Check children
         if node.children then
-            filteredChildren = TB.FilterTree(node.children, searchText)
+            filteredChildren = TB.FilterTree(node.children, searchText, true)
             if #filteredChildren > 0 then
                 matches = true
             end

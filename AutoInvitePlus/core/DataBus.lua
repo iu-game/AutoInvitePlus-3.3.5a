@@ -379,9 +379,9 @@ end
 function DB.Deserialize(str, sender)
     if not str then return nil end
 
-    -- 3.3.5a strsplit ignores the limit arg and splits on EVERY delimiter, which
-    -- would truncate any data field containing the separator. Match instead so
-    -- the trailing capture keeps the whole remaining payload intact.
+    -- Split with a pattern match (not strsplit): the trailing (.*) capture keeps
+    -- the whole remaining payload intact even if a data field contains the
+    -- separator, and it does not depend on strsplit's piece-limit behaviour.
     local version, eventType, timestamp, dataStr = str:match("^([^;]*);([^;]*);([^;]*);(.*)$")
 
     -- Fallback to legacy | separator for backwards compatibility

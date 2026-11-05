@@ -117,4 +117,42 @@ local nn = WP.ResetPositions()
 check("reset db keys", AIP.db.guiPosition == nil and AIP.db.rotationPos == nil and AIP.db.timerBarPos == nil)
 check("reset live", nn == 1 and pts.gui[1] == "CENTER")
 
+-- Context profiles
+local inst, itype, raidN, partyN = false, "none", 0, 0
+IsInInstance = function() return inst, itype end
+GetNumRaidMembers = function() return raidN end
+GetNumPartyMembers = function() return partyN end
+local function ctx(i, t, r, p) inst, itype, raidN, partyN = i, t, r, p; return WP.Context() end
+check("ctx solo", ctx(false, "none", 0, 0) == "solo")
+check("ctx party", ctx(false, "none", 0, 2) == "party")
+check("ctx raid", ctx(false, "none", 10, 0) == "raid")
+check("ctx dungeon", ctx(true, "party", 0, 4) == "dungeon")
+check("ctx raidinstance", ctx(true, "raid", 10, 0) == "raidinstance")
+check("ctx bg", ctx(true, "pvp", 10, 0) == "battleground")
+check("ctx arena", ctx(true, "arena", 0, 2) == "arena")
+
+AIP.db = { contextProfilesEnabled = false, contextProfiles = {}, windowsPerCharMode = false }
+ctx(false, "none", 0, 0)
+check("disabled no-op", WP.EvaluateContext() == nil)
+check("set ctx profile", WP.SetContextProfile("raid", "raidleader") and AIP.db.contextProfiles.raid == "RaidLeader")
+check("bad ctx", WP.SetContextProfile("nope", "Full") == false)
+check("bad profile", WP.SetContextProfile("raid", "zzz") == false)
+WP.SetContextProfile("solo", "Minimal")
+WP.SetContextEnabled(true)
+check("solo applied", not WP.Get("tankCastEnabled") and WP.lastContext == "solo")
+WP.ApplyProfile("Full")
+check("unchanged ctx not reapplied", WP.EvaluateContext() == nil and WP.Get("tankCastEnabled"))
+ctx(false, "none", 5, 0)
+check("changed ctx applies", WP.EvaluateContext() == "RaidLeader" and not WP.Get("floatingBarEnabled"))
+ctx(false, "none", 0, 2)
+WP.ApplyProfile("Full")
+check("unmapped untouched", WP.EvaluateContext() == nil and WP.Get("floatingBarEnabled") and WP.lastContext == "party")
+ctx(false, "none", 0, 0)
+InCombatLockdown = function() return true end
+check("combat deferred", WP.EvaluateContext() == nil and WP.pendingContext == true and WP.lastContext == "party")
+InCombatLockdown = function() return false end
+check("applied after combat", WP.EvaluateContext() == "Minimal" and WP.pendingContext == false)
+WP.SetContextProfile("solo", "none")
+check("clear mapping", AIP.db.contextProfiles.solo == nil)
+
 if fails == 0 then print("windowprofiles_spec: all passed") else print(fails .. " FAILED"); os.exit(1) end

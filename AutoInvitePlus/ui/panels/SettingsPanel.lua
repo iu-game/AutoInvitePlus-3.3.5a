@@ -1451,7 +1451,7 @@ function SP.Create(parent)
     -- [8] GUI APPEARANCE
     -- ========================================================================
     do
-    local sec = BeginSection("appearance", "8", "GUI APPEARANCE", "guiAppearance", {"guiOpacity", "guiUnfocusedEnabled", "guiUnfocusedOpacity", "lfgWatch", "lfgShare", "lfgAutoRequeue", "tankCastEnabled", "raidGroupsEnabled", "autoShowOnGroup", "restoreWindowsOnLogin", "floatingBarEnabled", "timerBarsEnabled", "minimapBubbles", "assignmentToasts"})
+    local sec = BeginSection("appearance", "8", "GUI APPEARANCE", "guiAppearance", {"guiOpacity", "guiUnfocusedEnabled", "guiUnfocusedOpacity", "lfgWatch", "lfgShare", "lfgAutoRequeue", "tankCastEnabled", "raidGroupsEnabled", "autoShowOnGroup", "restoreWindowsOnLogin", "floatingBarEnabled", "timerBarsEnabled", "minimapBubbles", "assignmentToasts", "contextProfilesEnabled", "contextProfiles"})
 
     -- Opacity slider (WotLK 3.3.5a compatible - manual slider creation)
     local opacityLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1691,6 +1691,52 @@ function SP.Create(parent)
     winCheck("timerBarsEnabled", "Show countdown timer bars (pull / break / boss abilities)")
     winCheck("minimapBubbles", "Show minimap bubbles (\"VOA Listed\", \"Favorites Listed\")")
     winCheck("assignmentToasts", "Show Raid Groups assignment / note toasts")
+
+    -- Context-aware automatic profiles (multiboxers / raid leaders). Manual
+    -- changes above stick until the next context change.
+    y = y - 4
+    local ctxCheck = CreateCheckbox(content, 15, y, "contextProfilesEnabled", "Auto-switch profile by context (manual changes last until the context changes)", function(self)
+        local on = (self:GetChecked() == 1 or self:GetChecked() == true)
+        local WP = AIP.WindowProfiles
+        if WP and WP.SetContextEnabled then WP.SetContextEnabled(on)
+        elseif AIP.db then AIP.db.contextProfilesEnabled = on end
+        SP.Update()
+    end)
+    ctxCheck:SetChecked(DbBool("contextProfilesEnabled"))
+    frame.checks.contextProfilesEnabled = ctxCheck
+    y = y - 26
+    local CTX_CYCLE = {"", "Minimal", "RaidLeader", "Full", "Multibox"}
+    local ctxBtns = {}
+    local WPc = AIP.WindowProfiles
+    local ctxList = (WPc and WPc.CONTEXTS) or {"solo", "party", "raid", "dungeon", "raidinstance", "battleground", "arena"}
+    for _, ctx in ipairs(ctxList) do
+        local lbl = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOPLEFT", 40, y - 3)
+        lbl:SetText((WPc and WPc.CONTEXT_LABELS and WPc.CONTEXT_LABELS[ctx]) or ctx)
+        local btn
+        btn = AIP.UI.FlatButton(content, "-", 90, 18, function()
+            local WP = AIP.WindowProfiles
+            if not (WP and WP.SetContextProfile and AIP.db) then return end
+            local cur = (AIP.db.contextProfiles and AIP.db.contextProfiles[ctx]) or ""
+            local idx = 1
+            for i, n in ipairs(CTX_CYCLE) do if n == cur then idx = i end end
+            idx = (idx % #CTX_CYCLE) + 1
+            WP.SetContextProfile(ctx, CTX_CYCLE[idx])
+            WP.lastContext = nil
+            SP.Update()
+        end, "Window profile applied when you enter this context (- = leave windows alone). Click to cycle.")
+        btn:SetPoint("TOPLEFT", 160, y)
+        ctxBtns[ctx] = btn
+        y = y - 22
+    end
+    frame.ctxRefresh = function()
+        local map = AIP.db and AIP.db.contextProfiles
+        for ctx, btn in pairs(ctxBtns) do
+            local n = map and map[ctx]
+            if btn.SetText then btn:SetText((n and n ~= "") and n or "-") end
+        end
+    end
+    frame.ctxRefresh()
     y = y - 8
 
     EndSection(sec)
@@ -2068,6 +2114,7 @@ function SP.Update()
     end
 
     if SP.Frame.perCharCheck then SP.Frame.perCharCheck:SetChecked(DbBool("windowsPerCharMode")) end
+    if SP.Frame.ctxRefresh then SP.Frame.ctxRefresh() end
 
     -- Update smart invite settings (nested in smartInvite table)
     if db.smartInvite then

@@ -13,6 +13,13 @@ local defaultRosterDB = {
     waitlist = {},        -- {name, role, class, time, priority}
 }
 
+local function DeepCopy(v)
+    if type(v) ~= "table" then return v end
+    local out = {}
+    for k, x in pairs(v) do out[k] = DeepCopy(x) end
+    return out
+end
+
 -- Canonical key for per-player records (chat/UI deliver inconsistent casing)
 local function Key(name)
     if type(name) ~= "string" then return name end
@@ -57,7 +64,7 @@ function Roster.InitDB()
 
     for k, v in pairs(defaultRosterDB) do
         if AIP.db.rosters[k] == nil then
-            AIP.db.rosters[k] = v
+            AIP.db.rosters[k] = DeepCopy(v)
         end
     end
 

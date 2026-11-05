@@ -146,6 +146,24 @@ Search, filter, and share blacklists with your guild (Simple / Full / CSV), with
 
 ---
 
+### Windows & Bars
+Every popup, window and bar that opens by itself can be switched off permanently (Settings > Windows & Bars, or `/aip windows`). A window whose switch is off never opens - not on joining a group, not at login, not from a menu - until you turn it back on.
+- **Toggles** (8): Tank Cast window, Raid Groups window, auto-open those windows when you join or form a group, re-open them at login if they were open last session, floating announcement bar (off by default), countdown timer bars (pull / break / boss abilities), minimap bubbles ("VOA Listed" / "Favorites Listed"), Raid Groups assignment/note toasts.
+- **Profiles**: Minimal and Multibox turn all eight off; Raid Leader turns on Tank Cast, Raid Groups, auto-open, restore at login, timer bars and toasts; Full turns all eight on. Apply them from the Settings buttons, `/aip windows profile <name>`, or the minimap right-click menu (Window Profile).
+- **This character only**: tick it in Settings (or add `char` to the slash command) and the toggles/profiles are stored as an override for the character you are on; every other character keeps the account-wide values. Applying a profile account-wide also clears this character's overrides.
+- **Auto-switch by context**: optionally pick a profile for each of solo / party / raid group / dungeon / raid instance / battleground / arena. It applies only when the context changes (a manual change sticks until then) and never while in combat.
+- **Reset window positions**: Settings button, `/aip resetpos`, or the minimap menu. Tank Cast and Raid Groups cannot be moved in combat; any skipped are reported - run it again out of combat.
+- **Export / import**: `/aip export` shows a copyable string of your settings (`AIPS1:...`); `/aip import <string>` (or the Import button) applies it. The string is parsed, never executed; window positions, logs, caches and debug flags are not included. `/reload` after importing.
+- **Settings tab**: sections can be collapsed with the `-` / `+` button (remembered between sessions), each section with defaults has a Reset button, and the search box at the top filters sections and options by their label text.
+
+### Activity Log
+A 200-entry in-memory log (not saved between sessions) of what AIP did for you: invites, whispers, broadcasts, timers, queue/waitlist adds. Open it with `/aip activity window`, or "Activity Log" in the minimap right-click menu; filter chips narrow it by kind. `/aip activity [n]` prints the last n entries to chat instead.
+
+### Chat-Safety Indicator
+The footer of the main window (both Full and Simplified view) shows `Chat: OK`, `Chat: n/min` (yellow when near the limit, queued, or reject whispers were dropped) or `Chat: BACKOFF` (red when muted or backing off). Hover it for public sends in the last minute versus the allowed limit, queue length, whether auto-spam is running, and reject-whisper counts. Reject whispers ("Sorry, the raid is full") are limited by a per-sender cooldown (`rejectWhisperCooldown`, default 120s) and a global cap (`rejectWhisperMaxPerMin`, default 6 per minute); whispers over the cap are dropped silently and counted as suppressed.
+
+---
+
 ## Installation
 
 1. Download and extract to `Interface/AddOns/AutoInvitePlus`
@@ -176,6 +194,12 @@ Search, filter, and share blacklists with your guild (Simple / Full / CSV), with
 | `/aip check` | Pre-pull readiness check (flask/food/durability/talents) |
 | `/aip pull` / `/aip break` | Broadcast a pull/break timer (DBM-compatible) |
 | `/aip postpull` | Post-boss DPS/HPS report (Skada/Recount) |
+| `/aip windows` | Show which popups/bars are on; `/aip windows off` / `on` switches all of them |
+| `/aip windows profile <Minimal\|RaidLeader\|Full\|Multibox> [char]` | Apply a window profile (add `char` for this character only) |
+| `/aip windows context [on\|off \| <context> <profile\|none>]` | Auto-switch profile by solo / party / raid / dungeon / raidinstance / battleground / arena |
+| `/aip resetpos` | Move every AIP window back to its default position |
+| `/aip export` / `/aip import <string>` | Copy settings between characters or accounts |
+| `/aip activity [n]` / `/aip activity window` | Last n things AIP sent/did, or open the Activity Log window |
 | `/aip update` | Run the in-game update checker |
 | `/aip status` | Show current addon state |
 | `/aip help` | List all commands |
@@ -302,10 +326,20 @@ Customize automatic whisper responses:
 - Check that keywords match what players are whispering
 - Ensure listening channels include Whisper
 
+### New files or a new version do not load after /reload
+The 3.3.5a client reads the `.toc` file only when the game launches. If an update added a new `.lua` file, `/reload` and relogging will not load it - fully exit and restart the client.
+
 ### Panel not loading
 - Check for Lua errors with `/script` or BugGrabber addon
 - Ensure all addon files are present
 - Try `/reload` to refresh the UI
+
+### Popups reappear every login (Tank Cast, Raid Groups, announcement bar, timer bars)
+These windows used to re-open on every login and every time you joined a group. Each one now has a permanent switch:
+- `/aip windows off` turns all of them off at once; `/aip windows` lists the current state. Or open Settings > Windows & Bars and untick them individually (or apply the Minimal profile).
+- To stop only the "re-open at login" behaviour, untick "Re-open them at login if they were open last session"; to stop them appearing when you join a group, untick "Auto-open those windows when I join or form a group".
+- Multiboxing or playing alts? Tick "This character only" first so other characters keep their settings.
+- If a window still appears, check `/aip windows`: a per-character override (marked "this character") wins over the account-wide value.
 
 ### Buff checker not finding buffs
 - Make sure you're in a raid or party

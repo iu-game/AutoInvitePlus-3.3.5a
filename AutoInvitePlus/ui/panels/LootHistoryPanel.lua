@@ -182,15 +182,61 @@ function LH.GetHistory()
     return AIP.db.lootHistory
 end
 
--- Pending items waiting for item info
+-- Entries captured while GetItemInfo had no cache for the item (we fall back to
+-- the name/quality parsed from the link). Each element is {entry=<the stored
+-- history entry>, timestamp=time()}; LH.ResolvePending re-resolves them IN
+-- PLACE (item level / quality / name) - never re-adds, which would duplicate.
 LH.PendingItems = LH.PendingItems or {}
+local MAX_PENDING_ITEMS = 100
+
+-- Re-resolve captures whose item info wasn't cached yet. 3.3.5a has no
+-- GET_ITEM_INFO_RECEIVED event (it is registered below only for cores that do
+-- fire it), so AddLootEntry also polls this with a short DelayedCall.
+local pollScheduled = false
+function LH.ResolvePending()
+    local pending = LH.PendingItems
+    if not pending or #pending == 0 then return end
+    local keep = {}
+    local now = time()
+    local PENDING_TIMEOUT = 300  -- 5 minutes max wait for item info
+    local changed = false
+    for _, item in ipairs(pending) do
+        local e = item.entry
+        if e and e.itemLink and item.timestamp and (now - item.timestamp) < PENDING_TIMEOUT then
+            local name, _, quality, ilvl = GetItemInfo(e.itemLink)
+            if name then
+                -- Resolve in place; the entry was already stored.
+                e.itemName = name
+                if quality then e.itemQuality = quality end
+                if ilvl then e.itemLevel = ilvl end
+                changed = true
+            else
+                keep[#keep + 1] = item
+            end
+        end
+    end
+    LH.PendingItems = keep
+    if changed then LH.RefreshAll() end
+end
+
+local function schedulePendingPoll()
+    if pollScheduled or not (AIP.Utils and AIP.Utils.DelayedCall) then return end
+    pollScheduled = true
+    AIP.Utils.DelayedCall(3, function()
+        pollScheduled = false
+        LH.ResolvePending()
+        if LH.PendingItems and #LH.PendingItems > 0 then schedulePendingPoll() end
+    end)
+end
 
 function LH.AddLootEntry(itemLink, looter, source, zone, category)
     if not AIP.db then return end
     if not AIP.db.lootHistory then AIP.db.lootHistory = {} end
 
     local itemName, _, itemQuality, itemLevel = GetItemInfo(itemLink)
+    local needsResolve = false
     if not itemName then
+        needsResolve = true
         -- Item isn't cached client-side (common for OTHER players' loot on
         -- 3.3.5a). Fall back to the name/quality embedded in the link so the
         -- pick still registers instead of being lost waiting on item info.
@@ -217,6 +263,13 @@ function LH.AddLootEntry(itemLink, looter, source, zone, category)
     }
 
     table.insert(AIP.db.lootHistory, 1, entry)
+
+    if needsResolve then
+        local pend = LH.PendingItems
+        if #pend >= MAX_PENDING_ITEMS then table.remove(pend, 1) end
+        pend[#pend + 1] = { entry = entry, timestamp = time() }
+        schedulePendingPoll()
+    end
 
     -- Keep max 500 entries
     while #AIP.db.lootHistory > 500 do
@@ -1662,16 +1715,42 @@ function LH.ExportLootToChat()
         return
     end
 
-    AIP.Print("Exporting " .. #session.loot .. " items to raid chat...")
+    -- Send to raid or party (never solo: nobody to read it)
+    local chatType = GetNumRaidMembers() > 0 and "RAID" or (GetNumPartyMembers() > 0 and "PARTY" or nil)
+    if not chatType then
+        AIP.Print("You must be in a party or raid to post loot to chat.")
+        return
+    end
 
-    -- Send to raid or party
-    local chatType = GetNumRaidMembers() > 0 and "RAID" or "PARTY"
+    AIP.Print("Exporting " .. #session.loot .. " items to " .. chatType .. " chat...")
 
-    SendChatMessage("=== Loot Distribution (" .. (session.zone or "Unknown") .. ") ===", chatType)
-
+    local lines = { "=== Loot Distribution (" .. (session.zone or "Unknown") .. ") ===" }
     for _, entry in ipairs(session.loot) do
-        local msg = (entry.itemLink or entry.itemName or "?") .. " - " .. (entry.winner or "?")
-        SendChatMessage(msg, chatType)
+        lines[#lines + 1] = (entry.itemLink or entry.itemName or "?") .. " - " .. (entry.winner or "?")
+    end
+
+    -- All sends go through ChatGate (central budget). RAID/PARTY are its bypass
+    -- lane (sent immediately), so a long session would still be a same-frame
+    -- burst the server can mute for - pace the lines out ourselves.
+    local LINE_GAP = 0.5
+    local function sendLine(msg)
+        if AIP.ChatGate and AIP.ChatGate.Send then
+            AIP.ChatGate.Send(msg, chatType, nil, {owner = "LootHistory", sequence = true, staleAfter = 600})
+        else
+            SendChatMessage(msg, chatType)
+        end
+    end
+    for i, msg in ipairs(lines) do
+        if i == 1 or not (AIP.Utils and AIP.Utils.DelayedCall) then
+            sendLine(msg)
+        else
+            AIP.Utils.DelayedCall((i - 1) * LINE_GAP, function()
+                -- Abort the rest if the group disbanded mid-dump
+                local stillGrouped = (chatType == "RAID" and GetNumRaidMembers() > 0)
+                    or (chatType == "PARTY" and GetNumPartyMembers() > 0)
+                if stillGrouped then sendLine(msg) end
+            end)
+        end
     end
 end
 
@@ -1748,18 +1827,7 @@ lootFrame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 lootFrame:SetScript("OnEvent", function(self, event, ...)
     -- Handle pending items when item info becomes available
     if event == "GET_ITEM_INFO_RECEIVED" then
-        if LH.PendingItems and #LH.PendingItems > 0 then
-            local pending = LH.PendingItems
-            LH.PendingItems = {}
-            local now = time()
-            local PENDING_TIMEOUT = 300  -- 5 minutes max wait for item info
-            for _, item in ipairs(pending) do
-                -- Skip items that have been pending too long
-                if item.timestamp and (now - item.timestamp) < PENDING_TIMEOUT then
-                    LH.AddLootEntry(item.itemLink, item.looter, item.source, item.zone, item.category)
-                end
-            end
-        end
+        LH.ResolvePending()
         return
     end
     -- Only accept a source that is an actual known boss. Trash, adds and intro

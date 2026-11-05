@@ -327,7 +327,16 @@ function CG.Pump()
     for i = #queue, 1, -1 do
         local r = queue[i]
         local stale = (now - r.enqueuedAt) > r.staleAfter
-        local invalid = r.validate and not r.validate()
+        local invalid = false
+        if r.validate then
+            local ok, res = pcall(r.validate)
+            if not ok then
+                invalid = true
+                dbg("validate() threw, dropping record from " .. (r.owner or "?") .. ": " .. tostring(res))
+            else
+                invalid = not res
+            end
+        end
         if stale or invalid then
             table.remove(queue, i)
             CG.State.dropped = CG.State.dropped + 1
