@@ -155,6 +155,8 @@ local defaults = {
     -- Response messages
     responseInvite = "[AutoInvite+] You have been invited!",
     responseReject = "[AutoInvite+] Sorry, the raid is full.",
+    rejectWhisperCooldown = 120,   -- seconds before the same sender can get another reject whisper
+    rejectWhisperMaxPerMin = 6,    -- global cap on reject whispers per rolling minute (extras dropped silently)
     responseWaitlist = "[AutoInvite+] Added to waitlist, position: #%d",
     responseWaitlistPosition = "[AutoInvite+] Your waitlist position changed to: #%d",
 
@@ -217,6 +219,17 @@ local defaults = {
     -- Auto-open the Tank Cast and Raid Groups windows the moment you form or
     -- join a group (solo -> party/raid). Toggle with /aip autoshow.
     autoShowOnGroup = true,
+    -- Per-feature master switches for popup windows / bars (Settings > Windows &
+    -- Bars). A window whose switch is off never opens - not on group join, not
+    -- on login, not from a menu - until it is turned back on.
+    tankCastEnabled = true,         -- Tank Cast window
+    raidGroupsEnabled = true,       -- Raid Groups window
+    restoreWindowsOnLogin = true,   -- re-open Tank Cast / Raid Groups at login if they were open
+    minimapBubbles = true,          -- "VOA Listed" / "Favorites Listed" bubbles by the minimap icon
+    assignmentToasts = true,        -- Raid Groups assignment/note toast
+    settingsCollapsed = {},         -- Settings tab: [sectionId] = true when collapsed
+    timerBarsEnabled = true,        -- pull/break/boss-ability countdown bars
+    windowsTipShown = false,        -- one-time "/aip windows off" login tip (AIP.WindowProfiles)
 
     rollDuration = 10,              -- Roll countdown seconds
 
@@ -569,7 +582,10 @@ local function InvitePlayer(name)
     -- Check if group is full
     if IsGroupFull() then
         local reject = (AIP.db.responseReject and AIP.db.responseReject ~= "") and AIP.db.responseReject or "[AutoInvite+] Sorry, no spots available."
-        SendChatMessage(reject, "WHISPER", nil, name)
+        if not (AIP.ChatGate and AIP.ChatGate.AllowRejectWhisper) or AIP.ChatGate.AllowRejectWhisper(name) then
+            SendChatMessage(reject, "WHISPER", nil, name)
+            if AIP.ActivityLog then AIP.ActivityLog.Add("whisper", "full-notice -> " .. name) end
+        end
         return false
     end
 
@@ -587,6 +603,7 @@ local function InvitePlayer(name)
     local invited = (AIP.db.responseInvite and AIP.db.responseInvite ~= "") and AIP.db.responseInvite or "[AutoInvite+] Sending invite!"
     SendChatMessage(invited, "WHISPER", nil, name)
     Print("Invited: " .. name)
+    if AIP.ActivityLog then AIP.ActivityLog.Add("invite", name) end
 
     -- Truthful application status: if this player applied via the DataBus
     -- Apply protocol, tell their addon they were invited.
@@ -676,6 +693,8 @@ end
 -- Reset all settings to defaults while PRESERVING user data collections.
 -- Used by Settings > "Reset to Defaults". Previously referenced but never
 -- defined, so the button silently did nothing while claiming success.
+AIP.Defaults = defaults   -- read-only view for per-section "Reset" in Settings
+
 function AIP.ResetDefaults()
     if not AIP.db then return false end
 
@@ -694,9 +713,10 @@ function AIP.ResetDefaults()
         blacklist = true, whitelist = true, queue = true, waitlist = true,
         inviteHistory = true, lootHistory = true, raidSessions = true,
         nextRaidSessionId = true, currentRaidSessionId = true,
-        raidWarningTemplates = true, lfmTemplates = true,
+        raidWarningTemplates = true, raidWarningTemplatesInit = true, lfmTemplates = true,
         lootBans = true, msTracking = true, customCompTemplates = true,
         announceDefaultsFixed = true,   -- keep the one-time announcer-migration flag
+        tankCastByChar = true, raidGroupsByChar = true,   -- per-character tank lists / notes / quick-cast
     }
 
     -- Drop every non-preserved key, then re-seed from defaults.
@@ -896,7 +916,10 @@ local function ProcessMessage(author, message, channel)
         Debug("ProcessMessage: " .. author .. " rejected - " .. (rejectReason or "unknown"))
         if AIP.db.responseReject and AIP.db.responseReject ~= "" then
             local msg = rejectReason and ("[AutoInvite+] " .. rejectReason) or AIP.db.responseReject
-            SendChatMessage(msg, "WHISPER", nil, author)
+            if not (AIP.ChatGate and AIP.ChatGate.AllowRejectWhisper) or AIP.ChatGate.AllowRejectWhisper(author) then
+                SendChatMessage(msg, "WHISPER", nil, author)
+                if AIP.ActivityLog then AIP.ActivityLog.Add("whisper", "reject -> " .. author) end
+            end
         end
         return
     end
@@ -1004,6 +1027,9 @@ function AIP.SpamInvite()
     local function queueChannel(displayName)
         if not displayName or displayName == "" then return end
         local key = displayName:lower()
+        -- Never broadcast the ad into the hidden DataBus sync channel.
+        if AIP.DataBus and AIP.DataBus.Config and AIP.DataBus.Config.channelName
+            and key:find(AIP.DataBus.Config.channelName:lower(), 1, true) then return end
         if seen[key] then return end
         seen[key] = true
         if CG.Send(msg, "CHANNEL", nil, { channelName = displayName, owner = "spam", staleAfter = 180 }) then
@@ -1083,16 +1109,15 @@ function AIP.InviteGuild()
 
     AIP.db.enabled = true
     GuildRoster()
-    SetGuildRosterShowOffline(false)
 
-    -- 3.3.5a GetNumGuildMembers returns only the total; with ShowOffline(false)
-    -- the roster is filtered to online members, so iterate the single count.
+    -- Don't call SetGuildRosterShowOffline: it permanently changes the player's
+    -- guild-frame setting. Filter on the 9th return (online) instead.
     local numMembers = GetNumGuildMembers()
     local invited = 0
 
     for i = 1, numMembers do
-        local name = GetGuildRosterInfo(i)
-        if name and name ~= UnitName("player") then
+        local name, _, _, _, _, _, _, _, online = GetGuildRosterInfo(i)
+        if name and online and name ~= UnitName("player") then
             if not UnitInRaid(name) and not UnitInParty(name) then
                 if AIP.db.useQueue and AIP.AddToQueue then
                     AIP.AddToQueue(name, "Guild invite")
@@ -1500,6 +1525,9 @@ local function SlashHandler(msg)
             Print("LootHistory panel not loaded")
         end
 
+    elseif cmd == "activity" then
+        if AIP.ActivityLog then AIP.ActivityLog.Print(tonumber(rest) or 20) else Print("ActivityLog not loaded") end
+
     -- Debug log
     elseif cmd == "log" then
         if rest:lower():trim() == "clear" then
@@ -1529,6 +1557,9 @@ local function SlashHandler(msg)
         if AIP.TankCast and AIP.TankCast.SlashHandler then AIP.TankCast.SlashHandler(rest) end
     elseif cmd == "groups" or cmd == "raidgroups" then
         if AIP.RaidGroups and AIP.RaidGroups.SlashHandler then AIP.RaidGroups.SlashHandler(rest) end
+    elseif cmd == "windows" or cmd == "resetpos" or cmd == "export" or cmd == "import" then
+        if AIP.WindowProfiles and AIP.WindowProfiles.SlashHandler then AIP.WindowProfiles.SlashHandler(cmd, rest)
+        else Print("Window profiles module not loaded.") end
     elseif cmd == "autoshow" then
         AIP.db.autoShowOnGroup = not AIP.db.autoShowOnGroup
         Print("Auto-open Tank Cast/Raid Groups on joining a group: " .. (AIP.db.autoShowOnGroup and "ON" or "OFF"))
@@ -1880,6 +1911,7 @@ local function SlashHandler(msg)
         Print("  /aip enable/disable - Toggle auto-invite")
         Print("  /aip spam - Send invite spam (paced by the ChatGate)")
         Print("  /aip gate - Show chat-budget status | /aip gate profile <relaxed|safe|paranoid>")
+        Print("  /aip activity [n] - Show the last n things AIP sent/did (invites, whispers, broadcasts)")
         Print("  /aip weekly - Show this week's raid quest status")
         Print("  /aip fit <name> - Fit verdict for a queued player or a scanned listing")
         Print("  /aip auto - Matchmaking automation toggles (alerts/invite/apply/max)")
@@ -1906,6 +1938,9 @@ local function SlashHandler(msg)
         Print("  /aip groups - Toggle the Raid Groups window (right-click a name or the title bar for options)")
         Print("  /aip groups lock | unlock")
         Print("  /aip autoshow - Toggle auto-opening Tanks/Groups when you join a group")
+        Print("  /aip windows [on|off|profile <Minimal|RaidLeader|Full|Multibox> [char]] - Popup/bar switches")
+        Print("  /aip resetpos - Reset every AIP window to its default position")
+        Print("  /aip export | import <string> - Copy settings between accounts")
         Print("  /aip roll [item] - Start a roll / toggle roll window")
         Print("  /aip rw - Announce reserved loot")
         Print("  /aip rc - Start a ready check")

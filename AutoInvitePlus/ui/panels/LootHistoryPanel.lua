@@ -1601,7 +1601,9 @@ function LH.ShowPlayerContextMenu(row, playerName, lootContext)
     if not playerName then return end
 
     -- Simple context menu via dropdown
-    local menu = CreateFrame("Frame", "AIPPlayerContextMenu", UIParent, "UIDropDownMenuTemplate")
+    -- Create the menu frame once (frames can't be destroyed in WoW)
+    LH.ContextMenu = LH.ContextMenu or CreateFrame("Frame", "AIPPlayerContextMenu", UIParent, "UIDropDownMenuTemplate")
+    local menu = LH.ContextMenu
     UIDropDownMenu_Initialize(menu, function()
         local info = UIDropDownMenu_CreateInfo()
         info.text = playerName
@@ -1704,7 +1706,7 @@ function LH.PostBossLootToChat(chatType)
     -- sends in one frame risks a server chat-mute.
     local function post(msg)
         if AIP.ChatGate and AIP.ChatGate.Send then
-            AIP.ChatGate.Send(msg, chatType, nil, {owner = "LootHistory"})
+            AIP.ChatGate.Send(msg, chatType, nil, {owner = "LootHistory", sequence = true, staleAfter = 600})
         else
             SendChatMessage(msg, chatType)
         end

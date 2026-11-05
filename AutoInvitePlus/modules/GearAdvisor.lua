@@ -62,6 +62,7 @@ local EMPTY_SOCKET_TEXTS = {
 
 local function emptySockets(slot)
     local t = ensureTip()
+    t:SetOwner(UIParent, "ANCHOR_NONE")   -- re-own every scan: the owner can be released (e.g. UI hidden), leaving SetInventoryItem a no-op
     t:ClearLines()
     local link = GetInventoryItemLink("player", slot)
     if not link then return 0 end

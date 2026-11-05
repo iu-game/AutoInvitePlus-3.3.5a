@@ -638,7 +638,20 @@ function TB.IsLockedToInstance(raidStr)
             -- (player might be doing the other size which isn't locked)
             return false
         end
-        return lock.maxPlayers == wantedSize
+        if lock.maxPlayers ~= wantedSize then return false end
+        -- 10N/25N/10H/25H are separate lockouts: when the raid string carries
+        -- an explicit H/HC or N suffix, the lock's difficulty must agree.
+        local suffix = raidUpper:match("%d%d(%a+)$")
+        local diff = lock.difficulty
+        if suffix and diff then
+            local c = suffix:sub(1, 1)
+            if c == "H" then
+                return diff == 3 or diff == 4
+            elseif c == "N" then
+                return diff == 1 or diff == 2
+            end
+        end
+        return true
     end
 
     -- Helper function to check locks for an instance name
@@ -947,6 +960,15 @@ function TB.BuildLFMTree(preserveState)
 
     -- Guild Recruitment category (guild promotions, kept separate from raids).
     -- Collapsed by default so it stays out of the way.
+    do
+        local visibleRecruit = {}
+        for _, group in ipairs(recruitmentGroups) do
+            if group.isOwn or (not TB.IsGroupHidden(group) and TB.PassesTagFilters(group)) then
+                table.insert(visibleRecruit, group)
+            end
+        end
+        recruitmentGroups = visibleRecruit
+    end
     if #recruitmentGroups > 0 then
         local recruitNode = {
             id = "lfm_guild_recruit",
@@ -976,6 +998,7 @@ function TB.BuildLFMTree(preserveState)
                 isLeaf = true,
                 data = group,
             }
+            TB.ApplyListingDecor(groupNode, group)
             table.insert(recruitNode.children, groupNode)
         end
 
@@ -1520,6 +1543,10 @@ function TB.CreateTreeView(parent, width, height)
         scrollOffset = scrollOffset or 0
         local flatList = TB.FlattenTree(treeData or {})
         local numItems = #flatList
+
+        -- Clamp a stale offset (list may have shrunk since the caller read it)
+        local maxOff = math.max(0, numItems - self.numRows)
+        if scrollOffset > maxOff then scrollOffset = maxOff end
 
         FauxScrollFrame_Update(self.scrollFrame, numItems, self.numRows, TB.Config.rowHeight)
 

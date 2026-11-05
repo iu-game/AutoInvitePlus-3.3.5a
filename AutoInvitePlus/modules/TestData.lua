@@ -345,13 +345,14 @@ function TD.GenerateBlacklist(count)
     for i = 1, count do
         local player = TEST_NAMES[((i - 1) % #TEST_NAMES) + 1] .. "Blocked" .. i
 
-        table.insert(AIP.db.blacklist, {
+        AIP.db.blacklist[player:lower()] = {
             name = player,
             reason = reasons[((i - 1) % #reasons) + 1],
             source = "manual",
-            timestamp = time() - math.random(0, 2592000),  -- Within last month
+            addedTime = time() - math.random(0, 2592000),  -- Within last month
+            notes = "",
             _testData = true,
-        })
+        }
     end
 end
 
@@ -512,10 +513,11 @@ function TD.GenerateRollData()
     if RT then
         RT.manualItems = RT.manualItems or {}
         table.insert(RT.manualItems, { name = "Shadowmourne", quality = 5,
-            link = "|cffe6cc80|Hitem:49623::::::::80:::::|h[Shadowmourne]|h|r", timestamp = now })
+            link = "|cffe6cc80|Hitem:49623::::::::80:::::|h[Shadowmourne]|h|r", timestamp = now, _testData = true })
         table.insert(RT.manualItems, { name = "Invincible's Reins", quality = 5,
-            link = "|cffe6cc80|Hitem:50818::::::::80:::::|h[Invincible's Reins]|h|r", timestamp = now })
+            link = "|cffe6cc80|Hitem:50818::::::::80:::::|h[Invincible's Reins]|h|r", timestamp = now, _testData = true })
 
+        RT._testRoll = true
         RT.rolls = {}
         for j = 1, 9 do
             RT.rolls[names[j]] = math.random(1, 100)
@@ -713,7 +715,7 @@ function TD.ClearTestData()
     if AIP.db then
         RemoveTestEntries(AIP.db.raidSessions)
         RemoveTestEntries(AIP.db.lootBans)
-        RemoveTestEntries(AIP.db.blacklist)
+        RemoveTestEntriesKeyed(AIP.db.blacklist)
         RemoveTestEntries(AIP.db.queue)
         RemoveTestEntries(AIP.db.waitlist)
         RemoveTestEntriesKeyed(AIP.db.whitelist)
@@ -728,12 +730,14 @@ function TD.ClearTestData()
 
     -- Clear the roll-window test state
     if AIP.RaidTools then
-        AIP.RaidTools.manualItems = {}
-        AIP.RaidTools.rolls = {}
-        AIP.RaidTools.rollItem = nil
-        AIP.RaidTools.rollItemLink = nil
-        AIP.RaidTools.rollActive = false
-        AIP.RaidTools.warnedItems = {}
+        RemoveTestEntries(AIP.RaidTools.manualItems)
+        if AIP.RaidTools._testRoll then
+            AIP.RaidTools._testRoll = nil
+            AIP.RaidTools.rolls = {}
+            AIP.RaidTools.rollItem = nil
+            AIP.RaidTools.rollItemLink = nil
+            AIP.RaidTools.rollActive = false
+        end
         if AIP.RaidTools.RefreshRollWindow then AIP.RaidTools.RefreshRollWindow() end
     end
 

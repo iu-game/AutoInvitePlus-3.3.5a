@@ -31,7 +31,12 @@ function AIP.HandlePromote(author, key)
 
     if expectedKey == "" or providedKey == expectedKey then
         if AIP.db.promoteAutoAssist then
-            -- Automatically promote to assistant
+            -- Automatically promote to assistant (only if they are in the raid)
+            if not UnitInRaid(author) then
+                AIP.Debug(author .. " is not in the raid, can't promote")
+                SendChatMessage("[AutoInvite+] Join the raid first.", "WHISPER", nil, author)
+                return
+            end
             PromoteToAssistant(author)
             AIP.Print("Promoted " .. author .. " to raid assistant")
             SendChatMessage("[AutoInvite+] You have been promoted to assistant.", "WHISPER", nil, author)
@@ -84,7 +89,7 @@ local function CreatePromoteUI()
     local enableCheck = CreateFrame("CheckButton", "AIPPromoteEnable", frame, "UICheckButtonTemplate")
     enableCheck:SetPoint("TOPLEFT", 20, -50)
     enableCheck:SetScript("OnClick", function(self)
-        AIP.db.promoteEnabled = self:GetChecked()
+        AIP.db.promoteEnabled = (self:GetChecked() and true or false)
     end)
 
     local enableLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -124,7 +129,7 @@ local function CreatePromoteUI()
     local autoAssistCheck = CreateFrame("CheckButton", "AIPPromoteAutoAssist", frame, "UICheckButtonTemplate")
     autoAssistCheck:SetPoint("TOPLEFT", 20, -150)
     autoAssistCheck:SetScript("OnClick", function(self)
-        AIP.db.promoteAutoAssist = self:GetChecked()
+        AIP.db.promoteAutoAssist = (self:GetChecked() and true or false)
         _G["AIPPromoteNotifyOnly"]:SetChecked(not self:GetChecked())
     end)
 

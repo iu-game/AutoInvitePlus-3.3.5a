@@ -151,6 +151,7 @@ function AIP.AddToWaitlist(name, role, note, class, gs, silent)
         blacklistReason = blacklistEntry and blacklistEntry.reason or nil,
     })
 
+    if AIP.ActivityLog then AIP.ActivityLog.Add("waitlist", "added " .. properName .. " (#" .. priority .. ")") end
     if not silent then
         AIP.Print("Added " .. properName .. " to waitlist (position #" .. priority .. ")")
     end

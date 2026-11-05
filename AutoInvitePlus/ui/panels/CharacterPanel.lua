@@ -89,7 +89,20 @@ local function buildGear()
             e[#e+1] = { link = link, icon = itemIcon(link),
                 right = (ilvl > 0 and ("iLvl " .. ilvl) or "?") .. flag, rightColor = {0.78,0.78,0.82} }
         else
-            e[#e+1] = { text = "  " .. sname .. ":  |cffff5555EMPTY|r", rcolor = {1,0.5,0.5} }
+            -- Offhand is legitimately empty with a two-hander; the ranged/relic slot is
+            -- optional for everyone except hunters - don't flag those as missing gear.
+            local unused = false
+            if slot == 17 then
+                local mh = GetInventoryItemLink("player", 16)
+                local equipLoc = mh and select(9, GetItemInfo(mh))
+                unused = (equipLoc == "INVTYPE_2HWEAPON")
+            elseif slot == 18 then
+                local _, cls = UnitClass("player")
+                unused = (cls ~= "HUNTER")
+            end
+            if not unused then
+                e[#e+1] = { text = "  " .. sname .. ":  |cffff5555EMPTY|r", rcolor = {1,0.5,0.5} }
+            end
         end
     end
     e[#e+1] = { text = " " }
@@ -108,7 +121,8 @@ local function buildGear()
         if D.keyItems then e[#e+1] = { text = "  " .. D.keyItems, rcolor = {0.82,0.82,0.88} } end
         e[#e+1] = { text = " " }
         header(e, "PvP GEMS & ENCHANTS")
-        local gplan, gnuance = AIP.PvPData.GemPlanForPlayer and AIP.PvPData.GemPlanForPlayer()
+        local gplan, gnuance
+        if AIP.PvPData.GemPlanForPlayer then gplan, gnuance = AIP.PvPData.GemPlanForPlayer() end
         if gplan then
             e[#e+1] = { text = "  Meta: " .. gplan.meta, rcolor = {0.7,0.85,1} }
             e[#e+1] = { text = "  " .. gplan.gems, rcolor = {0.7,0.85,1} }

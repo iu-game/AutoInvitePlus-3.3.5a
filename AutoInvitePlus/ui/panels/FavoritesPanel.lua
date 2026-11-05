@@ -183,6 +183,8 @@ function FP.Create(parent)
     searchBox:SetScript("OnEscapePressed", function(self)
         self:SetText("")
         self:ClearFocus()
+        FP.SearchFilter = ""
+        FP.Update()
     end)
     if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(searchBox) end
     frame.searchBox = searchBox

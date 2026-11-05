@@ -852,6 +852,13 @@ local function anchorTopLeft()
     end
 end
 
+-- Effective window switch: per-character override > account-wide setting (AIP.WindowProfiles).
+local function winOn(k)
+    local WP = AIP.WindowProfiles
+    if WP and WP.Get then return WP.Get(k) end
+    return not (AIP.db and AIP.db[k] == false)
+end
+
 local function restorePosition()
     local c = TK.Cfg()
     local pos = c and c.pos
@@ -982,7 +989,7 @@ local function ensureWindow()
         -- event to retry on - see the PLAYER_REGEN_ENABLED handler below,
         -- which re-runs this check once combat ends. "already shown" is
         -- checked last so it never blocks the latch from updating.
-        if not InCombatLockdown() and TK.JustFormedGroup() and AIP.db and AIP.db.autoShowOnGroup and not TK.IsWindowShown() then
+        if not InCombatLockdown() and TK.JustFormedGroup() and AIP.db and winOn("autoShowOnGroup") and winOn("tankCastEnabled") and not TK.IsWindowShown() then
             TK.ShowWindow()
         end
     end)
@@ -993,6 +1000,10 @@ local function ensureWindow()
 end
 
 function TK.ShowWindow()
+    if not winOn("tankCastEnabled") then
+        AIP.Print("The Tank Cast window is disabled - enable it in Settings > Windows & Bars.")
+        return
+    end
     if InCombatLockdown() then
         AIP.Print("The tank window can't be opened during combat - open it before the pull.")
         return
@@ -1031,7 +1042,7 @@ local function initWindow()
     pendingInit = false
     ensureWindow()
     local c = TK.Cfg()
-    if c and c.shown then win:Show(); refresh() end
+    if c and c.shown and AIP.db and winOn("tankCastEnabled") and winOn("restoreWindowsOnLogin") then win:Show(); refresh() end
 end
 
 if AIP.Utils and AIP.Utils.Events and AIP.Utils.Events.Register then

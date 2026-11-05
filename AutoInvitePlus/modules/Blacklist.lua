@@ -528,7 +528,7 @@ function AIP.ShareBlacklist(target)
         list[#list + 1] = { n = entry.name, r = (entry.reason or ""):gsub("[;|\n\r]", " "):sub(1, 40) }
     end
     if #list == 0 then AIP.Print("Your blacklist is empty - nothing to share."); return end
-    local PAGE = 4
+    local PAGE = 2   -- keeps a page well under DB.EffectiveLimit() (~251) at 40-char reasons
     local total = math.ceil(#list / PAGE)
     local pages = {}
     for i = 1, #list, PAGE do
@@ -538,7 +538,12 @@ function AIP.ShareBlacklist(target)
     end
     local function sendPage(idx)
         local ev = AIP.DataBus.CreateEvent("BLACKLIST", { seq = idx, total = total, entries = pages[idx] })
-        if ev then AIP.DataBus.Broadcast(ev, target) end
+        if ev then
+            local ok, why = AIP.DataBus.Broadcast(ev, target)
+            if ok == false then
+                AIP.Print(string.format("Blacklist share page %d/%d failed to send (%s).", idx, total, tostring(why or "unknown")))
+            end
+        end
     end
     sendPage(1)
     -- Stagger remaining pages 5.5s apart: must clear the DataBus CHANNEL rate
@@ -566,15 +571,22 @@ local function onBlacklistShared(event)
     end
     buf.ts = time()
     buf.total = event.data.total
+    buf.got = (buf.got or 0) + 1
     buf.promptArmed = true
-    if AIP.Utils and AIP.Utils.DelayedCall then
-        AIP.Utils.DelayedCall(3, function()
-            if buf.promptArmed and #buf.entries > 0 then
-                buf.promptArmed = false
-                AIP.Print(string.format("|cFF33CCFF%s|r offers %d blacklist entr%s. Type |cFFFFD100/aip bl accept %s|r to merge them in.",
-                    event.sender, #buf.entries, #buf.entries == 1 and "y" or "ies", event.sender))
-            end
-        end)
+    local function prompt()
+        if buf.promptArmed and #buf.entries > 0 then
+            buf.promptArmed = false
+            buf.got = 0
+            AIP.Print(string.format("|cFF33CCFF%s|r offers %d blacklist entr%s. Type |cFFFFD100/aip bl accept %s|r to merge them in.",
+                event.sender, #buf.entries, #buf.entries == 1 and "y" or "ies", event.sender))
+        end
+    end
+    -- Prompt as soon as every page has arrived; otherwise fall back to a debounce
+    -- longer than the 5.5s page interval so a lost page can't stall the prompt.
+    if tonumber(buf.total) and buf.got >= buf.total then
+        prompt()
+    elseif AIP.Utils and AIP.Utils.DelayedCall then
+        AIP.Utils.DelayedCall(7, prompt)
     end
 end
 

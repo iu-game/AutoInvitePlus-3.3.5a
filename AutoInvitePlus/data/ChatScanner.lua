@@ -147,7 +147,7 @@ function CS.AddGroup(info)
         existing.composition = info.composition or existing.composition
         existing.gs = info.gs or existing.gs
         existing.message = info.message
-        existing.time = info.time
+        existing.time = info.time or existing.time or time()   -- nil time would crash Prune/age math
         existing.channel = info.channel
         existing.isOwn = info.isOwn or existing.isOwn
         existing.isDataBus = info.isDataBus or existing.isDataBus
@@ -245,7 +245,7 @@ function CS.AddGroup(info)
             gs = info.gs,
             message = info.message,
             channel = info.channel,
-            time = info.time,
+            time = info.time or time(),
             isOwn = info.isOwn,
             isDataBus = info.isDataBus,
             hasExplicitComposition = info.hasExplicitComposition,
@@ -297,7 +297,7 @@ function CS.AddPlayer(info)
     if existing then
         -- Update existing entry
         existing.message = info.message
-        existing.time = info.time
+        existing.time = info.time or existing.time or time()
         existing.channel = info.channel
 
         -- Merge raids
@@ -337,7 +337,7 @@ function CS.AddPlayer(info)
             version = info.version,
             message = info.message,
             channel = info.channel,
-            time = info.time,
+            time = info.time or time(),
             isLFG = info.isLFG,
             isLFM = info.isLFM,
             isDataBus = info.isDataBus,
@@ -392,7 +392,7 @@ function CS.MatchesMyLFM(lfgInfo)
     if not targetRaid then return false end
 
     -- Require exact raid match (ICC25H must match ICC25H, not ICC10N or RS25H)
-    if myLFM.raid:lower() ~= targetRaid:lower() then
+    if not myLFM.raid or tostring(myLFM.raid):lower() ~= tostring(targetRaid):lower() then
         return false
     end
 
@@ -1037,8 +1037,8 @@ local function OnDataBusLFM(event)
     -- Note: tanks/healers/mdps/rdps must be at top level for tree view display
     local info = {
         author = event.sender,
-        raid = data.raid,
-        raidCategory = data.raidCategory,
+        raid = type(data.raid) == "string" and data.raid or nil,   -- untrusted peer payload
+        raidCategory = type(data.raidCategory) == "string" and data.raidCategory or nil,
         -- Role composition at top level (required for tree view)
         tanks = tanks,
         healers = healers,
@@ -1091,23 +1091,35 @@ local function OnDataBusLFG(event)
     -- Skip own events
     if event.sender == UnitName("player") then return end
 
+    -- Peer payloads are untrusted: type-check every field the rest of the addon
+    -- indexes/calls methods on (ipairs(raids), role:upper(), ...).
+    local d = event.data
+    local function str(v) return type(v) == "string" and v or nil end
+    local function num(v) return type(v) == "number" and v or nil end
+    local raidList = {}
+    if type(d.raids) == "table" then
+        for _, r in ipairs(d.raids) do
+            if type(r) == "string" then raidList[#raidList + 1] = r end
+        end
+    end
+
     -- Create player info from DataBus event
     local info = {
         author = event.sender,
         name = event.sender,
-        raids = event.data.raids or {},
-        raid = event.data.raids and event.data.raids[1] or nil,
-        role = event.data.role,
-        class = event.data.class,
-        spec = event.data.spec,
-        gs = event.data.gs,
-        ilvl = event.data.ilvl,
-        message = event.data.note or "",
+        raids = raidList,
+        raid = raidList[1],
+        role = str(d.role),
+        class = str(d.class),
+        spec = str(d.spec),
+        gs = num(d.gs),
+        ilvl = num(d.ilvl),
+        message = str(d.note) or "",
         channel = "DataBus",
         time = event.timestamp,
         isLFG = true,
         isDataBus = true,           -- Mark as coming from DataBus
-        weekly = event.data.weekly,
+        weekly = d.weekly,
         version = event.version,
     }
 

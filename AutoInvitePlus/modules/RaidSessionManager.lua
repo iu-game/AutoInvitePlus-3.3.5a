@@ -192,6 +192,20 @@ function RSM.AddBossKill(bossName, mode, zone)
     if prev and prev.name == bossName and prev.killTime and (time() - prev.killTime) < 60 then
         return prev
     end
+    -- Multi-unit encounters (aliases) can have deaths minutes apart: dedup against
+    -- any earlier kill of the same encounter within 15 minutes.
+    local isAlias = false
+    for _, info in pairs(RSM.BossAliases) do
+        if info.name == bossName then isAlias = true break end
+    end
+    if isAlias then
+        for i = #session.bosses, 1, -1 do
+            local b = session.bosses[i]
+            if b.name == bossName and b.killTime and (time() - b.killTime) < 900 then
+                return b
+            end
+        end
+    end
 
     local bossId = #session.bosses + 1
     local attendees = RSM.GetCurrentRosterNames()
@@ -436,6 +450,11 @@ end
 
 -- Get difficulty mode (WotLK)
 function RSM.GetDifficultyMode()
+    -- 5-man dungeons: GetInstanceDifficulty() is 1 (normal) / 2 (heroic)
+    local _, instType = IsInInstance()
+    if instType == "party" then
+        return (GetDungeonDifficulty and GetDungeonDifficulty() == 2) and "heroic" or "normal"
+    end
     local diff = GetInstanceDifficulty() or 1
     -- 1 = 10N, 2 = 25N, 3 = 10HC, 4 = 25HC
     if diff == 3 or diff == 4 then
@@ -556,7 +575,12 @@ end
 
 function RSM.MigrateOldLootHistory()
     if not AIP.db then return end
-    if not AIP.db.lootHistory or #AIP.db.lootHistory == 0 then return end
+    if not AIP.db.lootHistory or #AIP.db.lootHistory == 0 then
+        -- Nothing to migrate; mark done so later drops (still mirrored into
+        -- lootHistory) are never re-imported as fake sessions.
+        AIP.db.lootHistoryMigrated = true
+        return
+    end
 
     -- Check if already migrated
     if AIP.db.lootHistoryMigrated then return end

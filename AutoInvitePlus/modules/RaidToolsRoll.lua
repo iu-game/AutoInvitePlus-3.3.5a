@@ -168,19 +168,16 @@ local ROLL_PATTERN = (function()
     local fmt = RANDOM_ROLL_RESULT or "%s rolls %d (%d-%d)"
     fmt = fmt:gsub("([%(%)%.%+%-%*%?%[%]%^%$])", "%%%1")   -- escape magic chars (leave % specifiers)
     fmt = fmt:gsub("%%s", "(.-)", 1)                        -- name capture
-    local seen = false
-    fmt = fmt:gsub("%%d", function()                        -- first %d = roll capture, rest = digits
-        if not seen then seen = true; return "(%d+)" end
-        return "%d+"
-    end)
+    fmt = fmt:gsub("%%d", "(%%d+)")                         -- roll, min, max captures
     return "^" .. fmt .. "$"
 end)()
 
 -- Scan system messages for "<name> rolls <n> (1-100)" while a roll is active.
 function RT.OnSystemMessage(message)
     if not RT.rollActive or not message then return end
-    local name, roll = message:match(ROLL_PATTERN)
+    local name, roll, minRoll, maxRoll = message:match(ROLL_PATTERN)
     if not name then return end
+    if tonumber(minRoll) ~= 1 or tonumber(maxRoll) ~= 100 then return end   -- only /roll (1-100) counts
     roll = tonumber(roll)
     if roll and not RT.rolls[name] then
         RT.rolls[name] = roll

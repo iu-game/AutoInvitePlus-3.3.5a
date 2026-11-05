@@ -151,7 +151,9 @@ local function recentPublicCount(now)
 end
 
 -- Can a send of this shape go out right now?
-function CG.IsEligible(chatType, channelName)
+-- skipChannelGap: multi-line user-initiated dumps (opts.sequence) are paced by
+-- publicGap/perMinute only, not the long same-channel promo gap.
+function CG.IsEligible(chatType, channelName, skipChannelGap)
     local now = GetTime()
     local publicGap, channelGap, perMinute, guildGap = budgets()
 
@@ -164,7 +166,7 @@ function CG.IsEligible(chatType, channelName)
         if (now - CG.State.lastPublic) < publicGap then return false end
         if recentPublicCount(now) >= perMinute then return false end
         local last = CG.State.perChannel[channelKey(chatType, channelName)]
-        if last and (now - last) < channelGap then return false end
+        if last and not skipChannelGap and (now - last) < channelGap then return false end
         if chatType == "CHANNEL" and not CG.ResolveChannel(channelName) then return false end
         return true
     end
@@ -216,6 +218,7 @@ local function doSend(record)
     elseif record.chatType == "GUILD" then
         CG.State.lastGuild = now
     end
+    if AIP.ActivityLog then AIP.ActivityLog.Add("broadcast", (record.owner or "?") .. " -> " .. record.chatType .. (record.channelName and (":" .. record.channelName) or "")) end
     dbg("sent [" .. record.chatType .. (record.channelName and (":" .. record.channelName) or "") .. "] " .. (record.owner or "?"))
     return true
 end
@@ -225,6 +228,7 @@ end
 --   owner       = "broadcast"      (tag for CancelOwner)
 --   staleAfter  = 120              (seconds; queued longer than this -> dropped)
 --   validate    = function() end   (re-checked at drain; false -> dropped)
+--   sequence    = true             (multi-line user dump: skips the same-channel gap)
 -- }
 -- Returns true if sent or queued, false if refused outright.
 function CG.Send(msg, chatType, _legacyTarget, opts)
@@ -255,6 +259,7 @@ function CG.Send(msg, chatType, _legacyTarget, opts)
         channelName = opts.channelName,
         owner = opts.owner or "misc",
         validate = opts.validate,
+        sequence = opts.sequence,
         enqueuedAt = GetTime(),
         staleAfter = opts.staleAfter or 120,
     }
@@ -333,7 +338,7 @@ function CG.Pump()
     -- Send the FIRST eligible record (FIFO with skip-over, one per pass)
     for i = 1, #queue do
         local r = queue[i]
-        if CG.IsEligible(r.chatType, r.channelName) then
+        if CG.IsEligible(r.chatType, r.channelName, r.sequence) then
             table.remove(queue, i)
             doSend(r)
             break
@@ -422,6 +427,76 @@ do
     end
     scheduleDecayTick()
 end
+
+-- ============================================================================
+-- REJECT-WHISPER LIMITER + STATS (chat-safety indicator)
+-- ============================================================================
+-- Reject whispers ("Sorry, the raid is full") go out via raw SendChatMessage to
+-- every non-qualifying keyword sender. A busy trade/LFG channel can therefore
+-- make us whisper dozens of strangers a minute - a classic mute trigger. This
+-- limiter applies a per-sender cooldown and a global per-minute cap; over the
+-- cap the whisper is silently dropped and counted.
+CG.Reject = CG.Reject or { perSender = {}, recent = {}, suppressed = {}, sentTotal = 0, suppressedTotal = 0 }
+
+local function pruneTimes(list, now, window)
+    local kept = {}
+    for i = 1, #list do
+        if now - list[i] < window then kept[#kept + 1] = list[i] end
+    end
+    return kept
+end
+
+-- Returns true if a reject whisper to `name` may be sent now (and records it);
+-- false if it must be dropped (counted as suppressed).
+function CG.AllowRejectWhisper(name, now)
+    now = now or GetTime()
+    local R = CG.Reject
+    local db = AIP.db or {}
+    local cooldown = tonumber(db.rejectWhisperCooldown) or 120
+    local maxPerMin = tonumber(db.rejectWhisperMaxPerMin) or 6
+    local key = tostring(name or ""):lower()
+
+    R.recent = pruneTimes(R.recent, now, 60)
+    local last = R.perSender[key]
+    if (last and (now - last) < cooldown) or #R.recent >= maxPerMin then
+        R.suppressed[#R.suppressed + 1] = now
+        R.suppressedTotal = R.suppressedTotal + 1
+        return false
+    end
+    R.perSender[key] = now
+    R.recent[#R.recent + 1] = now
+    R.sentTotal = R.sentTotal + 1
+    -- keep the per-sender table bounded
+    if R.sentTotal % 50 == 0 then
+        for k, t in pairs(R.perSender) do
+            if now - t >= cooldown then R.perSender[k] = nil end
+        end
+    end
+    return true
+end
+
+-- Compact snapshot for the footer indicator / tooltip.
+function CG.GetStats(now)
+    now = now or GetTime()
+    local S, R = CG.State, CG.Reject
+    local _, _, perMinute = budgets()
+    local sentLastMinute = recentPublicCount(now)
+    R.recent = pruneTimes(R.recent, now, 60)
+    R.suppressed = pruneTimes(R.suppressed, now, 60)
+    local muted = now < S.blackoutUntil
+    return {
+        queued = #S.queue,
+        sentLastMinute = sentLastMinute,
+        limit = perMinute,
+        backoff = S.backoff,
+        muted = muted,
+        mutedFor = muted and math.ceil(S.blackoutUntil - now) or 0,
+        rejectSent = #R.recent,
+        rejectSuppressed = #R.suppressed,
+        rejectLimit = tonumber(AIP.db and AIP.db.rejectWhisperMaxPerMin) or 6,
+    }
+end
+
 
 -- ============================================================================
 -- STATUS (for /aip gate)

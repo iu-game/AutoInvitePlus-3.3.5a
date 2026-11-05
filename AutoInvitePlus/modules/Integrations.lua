@@ -777,7 +777,11 @@ local function OnTooltipSetUnit(tooltip)
     -- Kick off an inspect for a fresh GS if this isn't ourselves - the
     -- INSPECT_TALENT_READY handler below fills the line in once it lands.
     if not UnitIsUnit(unit, "player") and CanInspect(unit) then
-        NotifyInspect(unit)
+        if AIP.InspectionEngine and AIP.InspectionEngine.SafeNotify then
+            AIP.InspectionEngine.SafeNotify(unit)
+        else
+            NotifyInspect(unit)
+        end
     end
 
     -- Add player notes if available. Only reflow (Show) when one of these
@@ -791,7 +795,9 @@ local function OnTooltipSetUnit(tooltip)
             addedLine = true
         end
 
-        local rating = AIP.Roster.GetPlayerRating(name)
+        -- GetPlayerRating defaults to 5, so only show it for players with saved data
+        local saved = AIP.db.rosters and AIP.db.rosters.playerNotes and AIP.db.rosters.playerNotes[name]
+        local rating = saved and AIP.Roster.GetPlayerRating and AIP.Roster.GetPlayerRating(name)
         if rating then
             tooltip:AddLine("Rating: " .. rating .. "/5", 0.7, 0.7, 0.7)
             addedLine = true
@@ -989,7 +995,7 @@ function Int.ImportRaidBrowserToLFG()
         -- Add to our LFG enrollments if not already present
         if AIP.CentralGUI.LfgEnrollments then
             local existing = AIP.CentralGUI.LfgEnrollments[listing.name]
-            if not existing or (existing.source ~= "RaidBrowser" and existing.time < listing.time - 60) then
+            if not existing or (existing.source ~= "RaidBrowser" and (existing.time or 0) < (listing.time or 0) - 60) then
                 AIP.CentralGUI.LfgEnrollments[listing.name] = entry
                 imported = imported + 1
             end

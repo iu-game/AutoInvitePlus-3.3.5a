@@ -1115,6 +1115,12 @@ function RT.StartTimer(key, label, duration, r, g, b, prewarn, icon)
     -- calling, while pull/break bars (DBM bridge) and /aip timertest must render
     -- regardless of the mechanic-announcer toggle.
     if not duration or duration <= 0 then return end
+    do
+        local WP = AIP.WindowProfiles
+        if WP and WP.Get then
+            if not WP.Get("timerBarsEnabled") then return end
+        elseif AIP.db and AIP.db.timerBarsEnabled == false then return end
+    end
     if not icon then
         icon = select(3, GetSpellInfo(label))  -- nil for non-player spells; that's fine
     end
@@ -1234,8 +1240,10 @@ end
 function RT.CheckExpirations()
     local items = RT.GetRollItems()
     for _, it in ipairs(items) do
-        if it.expiring and not it.winner and not RT.warnedItems[it.key] then
-            RT.warnedItems[it.key] = true
+        -- Index keys ("s1"/"m1") are reused across sessions/removals; add the timestamp so each item warns once
+        local wkey = tostring(it.key) .. ":" .. tostring(it.timestamp)
+        if it.expiring and not it.winner and not RT.warnedItems[wkey] then
+            RT.warnedItems[wkey] = true
             AIP.Print("|cFFFF6060Loot warning:|r " .. (it.link or it.name) ..
                 " expires in " .. RT.FormatRemaining(it.remaining) .. " (trade window).")
         end

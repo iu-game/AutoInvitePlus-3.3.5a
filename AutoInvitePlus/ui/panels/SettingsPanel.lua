@@ -222,8 +222,9 @@ local function CreateSectionHeader(parent, x, y, num, text)
     titleText:SetPoint("LEFT", numText, "RIGHT", 8, 0)
     titleText:SetText(text)
     titleText:SetTextColor(1, 0.82, 0)
+    frame.titleText = titleText
 
-    return frame
+    return frame, titleText
 end
 
 -- Helper: Create checkbox with label
@@ -251,6 +252,87 @@ local function CreateCheckbox(parent, x, y, key, labelText, onClick)
     return check, label
 end
 
+-- Shared popup for settings export (read-only, selectable) and import (paste +
+-- Apply). Every dimension is derived from the content it holds.
+local textPopup
+function SP.ShowTextPopup(mode, text)
+    local PAD, EDIT_W = 12, 480
+    if not textPopup then
+        local f = CreateFrame("Frame", "AIPSettingsTextPopup", UIParent)
+        f:SetFrameStrata("DIALOG")
+        f:SetBackdrop(AIP.UI.FlatPanelBackdrop)
+        f:SetBackdropColor(0.06, 0.07, 0.10, 0.98)
+        f:SetBackdropBorderColor(unpack(AIP.UI.Colors.borderRGB))
+        f:SetPoint("CENTER")
+        f:EnableMouse(true)
+        f:SetMovable(true)
+        f:RegisterForDrag("LeftButton")
+        f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+        f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+        tinsert(UISpecialFrames, "AIPSettingsTextPopup")
+
+        f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        f.title:SetPoint("TOPLEFT", PAD, -PAD)
+        f.hint = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        f.hint:SetPoint("TOPLEFT", f.title, "BOTTOMLEFT", 0, -4)
+        f.hint:SetWidth(EDIT_W)
+        f.hint:SetJustifyH("LEFT")
+
+        f.edit, f.editBox = CreateStyledEditBox(f, EDIT_W - 10, 16, false)
+        f.editBox:SetPoint("TOPLEFT", f.hint, "BOTTOMLEFT", 0, -8)
+        f.edit:SetMaxLetters(0)
+        f.edit:SetScript("OnTextChanged", function(self, userInput)
+            if userInput and f.mode == "export" and f.exportText then
+                self:SetText(f.exportText)  -- read-only
+                self:HighlightText()
+            end
+        end)
+
+        f.applyBtn = AIP.UI.FlatButton(f, "Apply", 80, 22, function()
+            local str = f.edit:GetText() or ""
+            str = string.gsub(str, "^%s+", "")
+            str = string.gsub(str, "%s+$", "")
+            local WP = AIP.WindowProfiles
+            if str == "" then
+                AIP.Print("Paste a settings string first.")
+            elseif WP and WP.Import then
+                local a, b = WP.Import(str)
+                local msg = (type(b) == "string" and b) or (type(a) == "string" and a)
+                    or (a and "Settings imported." or "Import failed.")
+                AIP.Print(msg)
+                if SP.Update then SP.Update() end
+                f:Hide()
+            else
+                AIP.Print("Settings import is not available (module not loaded).")
+            end
+        end)
+        f.closeBtn = AIP.UI.FlatButton(f, "Close", 80, 22, function() f:Hide() end)
+        f.closeBtn:SetPoint("TOPRIGHT", f.editBox, "BOTTOMRIGHT", 0, -10)
+        f.applyBtn:SetPoint("RIGHT", f.closeBtn, "LEFT", -8, 0)
+        textPopup = f
+    end
+
+    local f = textPopup
+    f.mode = mode
+    f.exportText = (mode == "export") and text or nil
+    if mode == "export" then
+        f.title:SetText("Export settings")
+        f.hint:SetText("Press Ctrl+C to copy the string below, then paste it into Import on another character.")
+        f.applyBtn:Hide()
+    else
+        f.title:SetText("Import settings")
+        f.hint:SetText("Paste an exported settings string below, then click Apply.")
+        f.applyBtn:Show()
+    end
+    f.edit:SetText(text or "")
+    f:SetWidth(EDIT_W + 2 * PAD + 10)
+    f:SetHeight(PAD + f.title:GetStringHeight() + 4 + f.hint:GetStringHeight() + 8
+        + f.editBox:GetHeight() + 10 + f.closeBtn:GetHeight() + PAD)
+    f:Show()
+    f.edit:SetFocus()
+    if mode == "export" then f.edit:HighlightText() end
+end
+
 -- Create the settings panel
 function SP.Create(parent)
     if SP.Frame then return SP.Frame end
@@ -258,38 +340,36 @@ function SP.Create(parent)
     local frame = CreateFrame("Frame", "AIPSettingsPanel", parent)
     frame:SetAllPoints()
 
-    -- Create scroll frame
+    -- Search bar (fixed above the scroll area; not part of the scroll child)
+    local searchBar = CreateFrame("Frame", nil, frame)
+    searchBar:SetPoint("TOPLEFT", 5, -4)
+    searchBar:SetPoint("TOPRIGHT", -28, -4)
+
+    local searchLabel = searchBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    searchLabel:SetPoint("LEFT", 4, 0)
+    searchLabel:SetText("Search settings:")
+
+    local searchBox, searchContainer = CreateStyledEditBox(searchBar, 220, 16, false)
+    searchContainer:SetPoint("LEFT", searchLabel, "RIGHT", 8, 0)
+    frame.searchBox = searchBox
+    searchBar:SetHeight(searchContainer:GetHeight())
+
+    -- Create scroll frame (sits under the search bar)
     local scrollFrame = CreateFrame("ScrollFrame", "AIPSettingsScroll", frame, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", 5, -5)
+    scrollFrame:SetPoint("TOPLEFT", searchBar, "BOTTOMLEFT", 0, -3)
     scrollFrame:SetPoint("BOTTOMRIGHT", -28, 5)
 
-    local content = CreateFrame("Frame", nil, scrollFrame)
-    -- Deliberately generous fixed height: real content today ends ~70-90px
-    -- short of this. A runtime auto-measure pass was tried here and
-    -- reverted - it destabilized the scroll child's height live (visible
-    -- row overlap in this panel), most likely from a non-content child
-    -- skewing the measured extent. A static, documented height is safer
-    -- than a live measurement that can't be fully verified against every
-    -- child this panel ever creates.
-    content:SetHeight(1822)
-    scrollFrame:SetScrollChild(content)
+    -- Scroll child. Its HEIGHT is not a constant: SP.Reflow() sums the real
+    -- heights of the section frames (header + body, collapsed or not) and sets
+    -- it, so it always matches the actual content.
+    local root = CreateFrame("Frame", nil, scrollFrame)
+    root:SetHeight(400)
+    scrollFrame:SetScrollChild(root)
 
-    -- Dynamic width - initially set and updated on resize
-    local function UpdateContentWidth()
-        local scrollWidth = scrollFrame:GetWidth() or 620
-        local newWidth = math.max(scrollWidth - 10, 580)
-        content:SetWidth(newWidth)
-    end
-
-    -- Initial width setup
-    content:SetWidth(620)
-
-    -- Hook into scroll frame size changes for dynamic width
+    -- Initial width; kept in sync with the scroll frame on resize
+    root:SetWidth(620)
     scrollFrame:HookScript("OnSizeChanged", function(self, w, h)
-        if content then
-            local newWidth = math.max(w - 10, 580)
-            content:SetWidth(newWidth)
-        end
+        root:SetWidth(math.max(w - 10, 580))
     end)
 
     -- Parent frame resize handler
@@ -301,10 +381,215 @@ function SP.Create(parent)
     frame.checks = {}
 
     -- ========================================================================
+    -- SECTION MACHINERY
+    -- Every section is a frame (header + body) stacked top-to-bottom by
+    -- Reflow(). A section's widgets keep their familiar relative layout:
+    -- BeginSection() rebinds the local `content` to that section's BODY frame
+    -- and restarts `y` at the top of it, so the widget code below is unchanged
+    -- apart from where it is parented. EndSection() measures the body from the
+    -- lowest `y` used (elastic height) and collects the label text for search.
+    -- ========================================================================
+    local content = root
+    local sections = {}
+    local filterText = ""
+    local HDR_H, HEAD_GAP, SEC_GAP = 22, 4, 8
+
+    local function CleanText(str)
+        str = string.gsub(str or "", "|c%x%x%x%x%x%x%x%x", "")
+        str = string.gsub(str, "|r", "")
+        return string.lower(str)
+    end
+
+    local function CopyVal(v)
+        if type(v) ~= "table" then return v end
+        local c = {}
+        for k, x in pairs(v) do c[k] = CopyVal(x) end
+        return c
+    end
+
+    local function IsCollapsed(id)
+        local t = AIP.db and AIP.db.settingsCollapsed
+        return (t and t[id]) and true or false
+    end
+
+    local function SetCollapsed(id, v)
+        if not AIP.db then return end
+        AIP.db.settingsCollapsed = AIP.db.settingsCollapsed or {}
+        AIP.db.settingsCollapsed[id] = v and true or nil
+    end
+
+    -- Stack the visible sections and size the scroll child from their real heights.
+    local function Reflow()
+        local searching = (filterText ~= "")
+        local prev
+        local total = 10
+        for _, s in ipairs(sections) do
+            if (not searching) or s.match then
+                local collapsed = (not searching) and IsCollapsed(s.id)
+                local sf = s.frame
+                sf:ClearAllPoints()
+                if prev then
+                    sf:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, -SEC_GAP)
+                    total = total + SEC_GAP
+                else
+                    sf:SetPoint("TOPLEFT", root, "TOPLEFT", 0, -10)
+                end
+                sf:SetPoint("RIGHT", root, "RIGHT", 0, 0)
+                local h = HDR_H
+                if collapsed then
+                    s.body:Hide()
+                else
+                    s.body:Show()
+                    h = h + HEAD_GAP + (s.bodyH or 0)
+                end
+                sf:SetHeight(h)
+                sf:Show()
+                s.toggle:SetText(collapsed and "+" or "-")
+                total = total + h
+                prev = sf
+            else
+                s.frame:Hide()
+            end
+        end
+        root:SetHeight(total + 20)
+        scrollFrame:UpdateScrollChildRect()
+    end
+    SP.Reflow = Reflow
+
+    local function ToggleSection(s)
+        if filterText ~= "" then return end  -- while searching, matches stay open
+        SetCollapsed(s.id, not IsCollapsed(s.id))
+        Reflow()
+    end
+
+    local function ApplyFilter(text)
+        local q = string.gsub(text or "", "^%s+", "")
+        q = string.lower((string.gsub(q, "%s+$", "")))
+        filterText = q
+        for _, s in ipairs(sections) do
+            s.match = false
+            if q ~= "" and string.find(s.titleLower, q, 1, true) then s.match = true end
+            for _, e in ipairs(s.texts) do
+                local hit = (q ~= "") and (string.find(e.text, q, 1, true) ~= nil)
+                if hit then s.match = true end
+                if hit ~= e.hl then
+                    e.hl = hit
+                    if hit then e.fs:SetTextColor(0.4, 1, 0.4) else e.fs:SetTextColor(e.r, e.g, e.b) end
+                end
+            end
+        end
+        Reflow()
+    end
+
+    -- Restore this section's keys to the Core defaults table (AIP.Defaults is
+    -- the very table AIP.ResetDefaults seeds from), then refresh the widgets.
+    local function ResetSection(s)
+        local D = AIP.Defaults
+        if not (D and AIP.db and s.resetKeys) then return end
+        local WP = AIP.WindowProfiles
+        for _, k in ipairs(s.resetKeys) do
+            if D[k] ~= nil then
+                if frame.winKeys and frame.winKeys[k] and WP and WP.Set then
+                    WP.Set(k, CopyVal(D[k]), false)
+                else
+                    AIP.db[k] = CopyVal(D[k])
+                end
+                if k == "chatScanEnabled" and AIP.LFMBrowser and AIP.LFMBrowser.Config then
+                    AIP.LFMBrowser.Config.enabled = AIP.db.chatScanEnabled
+                end
+            end
+        end
+        if AIP.CentralGUI and AIP.CentralGUI.UpdateStatus then AIP.CentralGUI.UpdateStatus() end
+        SP.Update()
+        AIP.Print("Settings section reset to defaults: " .. s.title)
+    end
+
+    local function BeginSection(id, num, title, tipKey, resetKeys)
+        local s = {id = id, title = title, titleLower = string.lower(title),
+                   resetKeys = resetKeys, texts = {}, match = true}
+        local sf = CreateFrame("Frame", nil, root)
+        sf:SetHeight(HDR_H)
+        s.frame = sf
+
+        local hdr, titleText = CreateSectionHeader(sf, 5, 0, num, title)
+        s.header = hdr
+        hdr:EnableMouse(true)
+        hdr:SetScript("OnMouseUp", function() ToggleSection(s) end)
+
+        s.toggle = AIP.UI.FlatButton(hdr, "-", 18, 16, function() ToggleSection(s) end, "Collapse / expand this section")
+        s.toggle:SetPoint("RIGHT", hdr, "RIGHT", -4, 0)
+        if resetKeys then
+            local rb = AIP.UI.FlatButton(hdr, "Reset", 44, 16, function() ResetSection(s) end,
+                "Restore this section's settings to their defaults")
+            rb:SetPoint("RIGHT", s.toggle, "LEFT", -6, 0)
+        end
+        if tipKey then
+            local tip = CreateTooltipButton(hdr, tipKey)
+            tip:SetPoint("LEFT", titleText, "RIGHT", 8, 0)
+        end
+
+        local body = CreateFrame("Frame", nil, sf)
+        body:SetPoint("TOPLEFT", hdr, "BOTTOMLEFT", -5, -HEAD_GAP)
+        body:SetPoint("RIGHT", sf, "RIGHT", 0, 0)
+        body:SetHeight(1)
+        s.body = body
+
+        sections[#sections + 1] = s
+        content = body
+        y = -2
+        return s
+    end
+
+    local function EndSection(s)
+        -- elastic: body height = the lowest y any widget in it reached
+        s.bodyH = math.max(1, -y)
+        s.body:SetHeight(s.bodyH)
+        -- collect searchable label strings (FontStrings + button captions)
+        local regs = {s.body:GetRegions()}
+        for _, r in ipairs(regs) do
+            if r.GetObjectType and r:GetObjectType() == "FontString" then
+                local t = r:GetText()
+                if t and t ~= "" then
+                    local cr, cg, cb = r:GetTextColor()
+                    s.texts[#s.texts + 1] = {fs = r, text = CleanText(t), r = cr, g = cg, b = cb, hl = false}
+                end
+            end
+        end
+        local kids = {s.body:GetChildren()}
+        for _, c in ipairs(kids) do
+            if c.GetObjectType and c:GetObjectType() == "Button" and c.GetFontString then
+                local fs = c:GetFontString()
+                local t = fs and fs:GetText()
+                if t and t ~= "" then
+                    local cr, cg, cb = fs:GetTextColor()
+                    s.texts[#s.texts + 1] = {fs = fs, text = CleanText(t), r = cr, g = cg, b = cb, hl = false}
+                end
+            end
+        end
+    end
+
+    searchBox:SetScript("OnTextChanged", function(self) ApplyFilter(self:GetText()) end)
+    searchBox:SetScript("OnEscapePressed", function(self)
+        self:SetText("")
+        self:ClearFocus()
+    end)
+
+    local expandAllBtn = AIP.UI.FlatButton(searchBar, "Expand all", 76, 18, function()
+        if AIP.db then AIP.db.settingsCollapsed = {} end
+        Reflow()
+    end)
+    expandAllBtn:SetPoint("RIGHT", searchBar, "RIGHT", 0, 0)
+    local collapseAllBtn = AIP.UI.FlatButton(searchBar, "Collapse all", 80, 18, function()
+        for _, s in ipairs(sections) do SetCollapsed(s.id, true) end
+        Reflow()
+    end)
+    collapseAllBtn:SetPoint("RIGHT", expandAllBtn, "LEFT", -6, 0)
+
+    -- ========================================================================
     -- UPDATES  (peer-version check; WoW addons can't download their own code)
     -- ========================================================================
-    CreateSectionHeader(content, 5, y, "U", "UPDATES")
-    y = y - 26
+    do
+    local sec = BeginSection("updates", "U", "UPDATES")
 
     local updVer = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     updVer:SetPoint("TOPLEFT", 15, y)
@@ -343,13 +628,16 @@ function SP.Create(parent)
     updNote:SetText("|cFF888888Click the link to select it, copy (Ctrl+C), download the latest zip and replace the AutoInvitePlus folder, then /reload. Addons can't auto-download.|r")
     y = y - 34
 
+    EndSection(sec)
+    end
+
     -- ========================================================================
     -- [1] AUTO-INVITE SYSTEM
     -- ========================================================================
-    local section1 = CreateSectionHeader(content, 5, y, "1", "AUTO-INVITE SYSTEM")
-    local tooltip1 = CreateTooltipButton(content, "autoInvite")
-    tooltip1:SetPoint("LEFT", section1, "RIGHT", 5, 0)
-    y = y - 30
+    do
+    local sec = BeginSection("autoinvite", "1", "AUTO-INVITE SYSTEM", "autoInvite", {
+        "enabled", "triggers", "maxRaiders", "useMaxLimit", "autoRaid", "guildOnly",
+        "useQueue", "autoQueueLFG", "blacklistMode" })
 
     local enableCheck, enableLabel = CreateCheckbox(content, 15, y, "enabled", "Enable Auto-Invite")
     enableLabel:SetFontObject("GameFontNormal")
@@ -469,13 +757,14 @@ function SP.Create(parent)
     blModeTooltip:SetPoint("LEFT", blModeDropdown, "RIGHT", 5, 3)
     y = y - 35
 
+    EndSection(sec)
+    end
+
     -- ========================================================================
     -- [2] SMART AUTO-INVITE CONDITIONS
     -- ========================================================================
-    local section2 = CreateSectionHeader(content, 5, y, "2", "SMART AUTO-INVITE CONDITIONS")
-    local tooltip2 = CreateTooltipButton(content, "smartConditions")
-    tooltip2:SetPoint("LEFT", section2, "RIGHT", 5, 0)
-    y = y - 28
+    do
+    local sec = BeginSection("smart", "2", "SMART AUTO-INVITE CONDITIONS", "smartConditions", {"smartInvite"})
 
     local smartEnableCheck = CreateCheckbox(content, 15, y, nil, "Enable Smart Conditions", function(self)
         if AIP.db and AIP.db.smartInvite then
@@ -578,13 +867,14 @@ function SP.Create(parent)
     frame.checks.prioritizeGuild = prioritizeGuildCheck
     y = y - 35
 
+    EndSection(sec)
+    end
+
     -- ========================================================================
     -- [3] QUEUE IMPROVEMENTS
     -- ========================================================================
-    local section3 = CreateSectionHeader(content, 5, y, "3", "QUEUE IMPROVEMENTS")
-    local tooltip3 = CreateTooltipButton(content, "queueSettings")
-    tooltip3:SetPoint("LEFT", section3, "RIGHT", 5, 0)
-    y = y - 28
+    do
+    local sec = BeginSection("queue", "3", "QUEUE IMPROVEMENTS", "queueSettings", {"queueTimeout", "queueAutoProcess", "queueNotifyPosition"})
 
     -- Queue timeout
     local timeoutLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -625,13 +915,14 @@ function SP.Create(parent)
     notifyPosTooltip:SetPoint("LEFT", notifyPosLabel, "RIGHT", 2, 0)
     y = y - 35
 
+    EndSection(sec)
+    end
+
     -- ========================================================================
     -- [4] LISTEN CHANNELS
     -- ========================================================================
-    local section4 = CreateSectionHeader(content, 5, y, "4", "LISTEN CHANNELS")
-    local tooltip4 = CreateTooltipButton(content, "listenChannels")
-    tooltip4:SetPoint("LEFT", section4, "RIGHT", 5, 0)
-    y = y - 20
+    do
+    local sec = BeginSection("listen", "4", "LISTEN CHANNELS", "listenChannels", {"listenWhisper", "listenSay", "listenYell", "listenGuild", "listenGeneral", "listenTrade", "listenLFG", "listenDefense", "listenGlobal", "listenWorld", "listenAllJoined"})
 
     local section4Subtitle = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     section4Subtitle:SetPoint("TOPLEFT", 15, y)
@@ -690,13 +981,14 @@ function SP.Create(parent)
     allJoinedTooltip:SetText("|cFF888888(auto-detect all channels)|r")
     y = y - 30
 
+    EndSection(sec)
+    end
+
     -- ========================================================================
     -- [5] BROADCAST SETTINGS
     -- ========================================================================
-    local section5 = CreateSectionHeader(content, 5, y, "5", "BROADCAST SETTINGS - Spam your LFM message")
-    local tooltip5 = CreateTooltipButton(content, "broadcastSettings")
-    tooltip5:SetPoint("LEFT", section5, "RIGHT", 5, 0)
-    y = y - 28
+    do
+    local sec = BeginSection("broadcast", "5", "BROADCAST SETTINGS - Spam your LFM message", "broadcastSettings", {"spamSay", "spamYell", "spamGuild", "spamGeneral", "spamTrade", "spamLFG", "spamDefense", "spamGlobal", "spamWorld", "spamAllJoined", "spamMessage", "spamChannelCooldown", "autoSpamInterval"})
 
     -- Spam channels Row 1: Basic channels (matching listen layout)
     local spamChannelsRow1 = {
@@ -840,13 +1132,14 @@ function SP.Create(parent)
     frame.autoStatus = autoStatus
     y = y - 40
 
+    EndSection(sec)
+    end
+
     -- ========================================================================
     -- [6] LFM/LFG SCANNER
     -- ========================================================================
-    local section6 = CreateSectionHeader(content, 5, y, "6", "LFM/LFG SCANNER")
-    local tooltip6 = CreateTooltipButton(content, "lfmScanner")
-    tooltip6:SetPoint("LEFT", section6, "RIGHT", 5, 0)
-    y = y - 28
+    do
+    local sec = BeginSection("scanner", "6", "LFM/LFG SCANNER", "lfmScanner", {"chatScanEnabled", "hideBlacklistedListings", "cacheDuration", "lootHistoryRetentionDays"})
 
     local scanCheck = CreateCheckbox(content, 15, y, nil, "Enable chat scanning for LFM/LFG browser", function(self)
         local checked = self:GetChecked() == 1 or self:GetChecked() == true
@@ -944,13 +1237,14 @@ function SP.Create(parent)
     lootRetSuffix:SetText("days |cFF888888(0 = keep forever)|r")
     y = y - 40
 
+    EndSection(sec)
+    end
+
     -- ========================================================================
     -- [7] RESPONSE MESSAGES
     -- ========================================================================
-    local section7 = CreateSectionHeader(content, 5, y, "7", "RESPONSE MESSAGES")
-    local tooltip7 = CreateTooltipButton(content, "responses")
-    tooltip7:SetPoint("LEFT", section7, "RIGHT", 5, 0)
-    y = y - 28
+    do
+    local sec = BeginSection("responses", "7", "RESPONSE MESSAGES", "responses", {"responseInvite", "responseReject", "responseWaitlist", "responseWaitlistPosition"})
 
     -- Invite response
     local invRespLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1038,13 +1332,14 @@ function SP.Create(parent)
     posRespHelp:SetTextColor(0.5, 0.5, 0.5)
     y = y - 40
 
+    EndSection(sec)
+    end
+
     -- ========================================================================
     -- [8] GUI APPEARANCE
     -- ========================================================================
-    local section8 = CreateSectionHeader(content, 5, y, "8", "GUI APPEARANCE")
-    local tooltip8 = CreateTooltipButton(content, "guiAppearance")
-    tooltip8:SetPoint("LEFT", section8, "RIGHT", 5, 0)
-    y = y - 28
+    do
+    local sec = BeginSection("appearance", "8", "GUI APPEARANCE", "guiAppearance", {"guiOpacity", "guiUnfocusedEnabled", "guiUnfocusedOpacity", "lfgWatch", "lfgShare", "lfgAutoRequeue", "tankCastEnabled", "raidGroupsEnabled", "autoShowOnGroup", "restoreWindowsOnLogin", "floatingBarEnabled", "timerBarsEnabled", "minimapBubbles", "assignmentToasts"})
 
     -- Opacity slider (WotLK 3.3.5a compatible - manual slider creation)
     local opacityLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1195,13 +1490,102 @@ function SP.Create(parent)
     frame.checks.lfgAutoRequeue = rdfRequeueCheck
     y = y - 34
 
+    -- Windows & Bars: permanent on/off switches for every auto-appearing popup,
+    -- window and bar (GitHub issue #6 - they used to reappear on every login
+    -- and every time you joined a group).
+    local winHdr = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    winHdr:SetPoint("TOPLEFT", 15, y)
+    winHdr:SetText("Windows & Bars (turn off to remove permanently)")
+    y = y - 24
+
+    -- Profile presets (AIP.WindowProfiles, guarded - the module may be absent)
+    frame.winKeys = {}
+    local perCharCheck
+    local function perCharOn()
+        return perCharCheck and (perCharCheck:GetChecked() == 1 or perCharCheck:GetChecked() == true) or false
+    end
+    local profLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    profLabel:SetPoint("TOPLEFT", 15, y - 4)
+    profLabel:SetText("Profile:")
+    local prevProfBtn
+    for _, profName in ipairs({"Minimal", "Raid Leader", "Full", "Multibox"}) do
+        local pb = AIP.UI.FlatButton(content, profName, 86, 20, function()
+            local WP = AIP.WindowProfiles
+            if WP and WP.ApplyProfile then
+                WP.ApplyProfile(profName, perCharOn())
+                SP.Update()
+            else
+                AIP.Print("Window profiles are not available (module not loaded).")
+            end
+        end, "Apply the \"" .. profName .. "\" window / bar preset")
+        if prevProfBtn then
+            pb:SetPoint("LEFT", prevProfBtn, "RIGHT", 6, 0)
+        else
+            pb:SetPoint("LEFT", profLabel, "RIGHT", 10, 0)
+        end
+        prevProfBtn = pb
+    end
+    y = y - 28
+
+    local perCharLabel
+    perCharCheck, perCharLabel = CreateCheckbox(content, 15, y, nil, "This character only (applies to profiles and the toggles below)")
+    frame.perCharCheck = perCharCheck
+    local resetPosBtn = AIP.UI.FlatButton(content, "Reset window positions", 150, 20, function()
+        local WP = AIP.WindowProfiles
+        if WP and WP.ResetPositions then
+            WP.ResetPositions()
+        else
+            AIP.Print("Window profiles are not available (module not loaded).")
+        end
+    end, "Move every AutoInvite+ window back to its default position")
+    resetPosBtn:SetPoint("LEFT", perCharLabel, "RIGHT", 24, 0)
+    y = y - 28
+
+    local function winGet(key)
+        local WP = AIP.WindowProfiles
+        if WP and WP.Get then return WP.Get(key) end
+        return AIP.db and AIP.db[key]
+    end
+    local function winCheck(key, text, apply)
+        local chk = CreateCheckbox(content, 15, y, key, text, function(self)
+            local val = (self:GetChecked() == 1 or self:GetChecked() == true)
+            local WP = AIP.WindowProfiles
+            if WP and WP.Set then
+                WP.Set(key, val, perCharOn())
+            elseif AIP.db then
+                AIP.db[key] = val
+            end
+            if apply then apply(val) end
+        end)
+        chk:SetChecked(winGet(key) and true or false)
+        frame.checks[key] = chk
+        frame.winKeys[key] = true
+        y = y - 26
+    end
+    winCheck("tankCastEnabled", "Enable the Tank Cast window", function(on)
+        if not on and AIP.TankCast and AIP.TankCast.HideWindow then AIP.TankCast.HideWindow() end
+    end)
+    winCheck("raidGroupsEnabled", "Enable the Raid Groups window", function(on)
+        if not on and AIP.RaidGroups and AIP.RaidGroups.HideWindow then AIP.RaidGroups.HideWindow() end
+    end)
+    winCheck("autoShowOnGroup", "Auto-open those windows when I join or form a group")
+    winCheck("restoreWindowsOnLogin", "Re-open them at login if they were open last session")
+    winCheck("floatingBarEnabled", "Show the floating announcement bar", function()
+        if AIP.RaidTools and AIP.RaidTools.UpdateBar then AIP.RaidTools.UpdateBar() end
+    end)
+    winCheck("timerBarsEnabled", "Show countdown timer bars (pull / break / boss abilities)")
+    winCheck("minimapBubbles", "Show minimap bubbles (\"VOA Listed\", \"Favorites Listed\")")
+    winCheck("assignmentToasts", "Show Raid Groups assignment / note toasts")
+    y = y - 8
+
+    EndSection(sec)
+    end
+
     -- ========================================================================
     -- [9] DEBUG & DATA
     -- ========================================================================
-    local section9 = CreateSectionHeader(content, 5, y, "9", "DEBUG & DATA")
-    local tooltip9 = CreateTooltipButton(content, "debugMode")
-    tooltip9:SetPoint("LEFT", section9, "RIGHT", 5, 0)
-    y = y - 28
+    do
+    local sec = BeginSection("debug", "9", "DEBUG & DATA", "debugMode", {"debug", "debugLogging", "debuffAnnounce", "debuffAnnounceChannel", "mechanicAnnounce", "mechanicAnnounceChannel", "classDutyAnnounce"})
 
     local debugCheck, debugLabel = CreateCheckbox(content, 15, y, "debug", "Enable debug messages")
     frame.checks.debug = debugCheck
@@ -1375,15 +1759,40 @@ function SP.Create(parent)
         if AIP.InviteFriends then AIP.InviteFriends() end
     end)
     invFriendsBtn:SetPoint("LEFT", invGuildBtn, "RIGHT", 10, 0)
-    y = y - 40
+    y = y - 34
+
+    -- Settings export / import (AIP.WindowProfiles, guarded)
+    local portLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    portLabel:SetPoint("TOPLEFT", 15, y - 4)
+    portLabel:SetText("Settings export / import:")
+    local exportBtn = AIP.UI.FlatButton(content, "Export", 70, 22, function()
+        local WP = AIP.WindowProfiles
+        if WP and WP.Export then
+            local str = WP.Export()
+            if type(str) == "string" then
+                SP.ShowTextPopup("export", str)
+            else
+                AIP.Print("Nothing to export.")
+            end
+        else
+            AIP.Print("Settings export is not available (module not loaded).")
+        end
+    end, "Show a copyable string of your settings")
+    exportBtn:SetPoint("LEFT", portLabel, "RIGHT", 10, 0)
+    local importBtn = AIP.UI.FlatButton(content, "Import", 70, 22, function()
+        SP.ShowTextPopup("import", "")
+    end, "Paste a settings string exported from another character")
+    importBtn:SetPoint("LEFT", exportBtn, "RIGHT", 8, 0)
+    y = y - 34
+
+    EndSection(sec)
+    end
 
     -- ========================================================================
     -- [10] TEST MODE
     -- ========================================================================
-    local section10 = CreateSectionHeader(content, 5, y, "10", "TEST MODE")
-    local tooltip10 = CreateTooltipButton(content, "testMode")
-    tooltip10:SetPoint("LEFT", section10, "RIGHT", 5, 0)
-    y = y - 28
+    do
+    local sec = BeginSection("test", "10", "TEST MODE", "testMode", nil)
 
     local testModeInfo = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     testModeInfo:SetPoint("TOPLEFT", 15, y)
@@ -1410,6 +1819,11 @@ function SP.Create(parent)
         end
     end)
     clearTestBtn:SetPoint("LEFT", populateTestBtn, "RIGHT", 10, 0)
+
+    EndSection(sec)
+    end
+
+    Reflow()
 
     SP.Frame = frame
     return frame
@@ -1526,6 +1940,11 @@ function SP.Update()
             if AIP.LFMBrowser then
                 check:SetChecked(AIP.LFMBrowser.Config.enabled)
             end
+        elseif SP.Frame.winKeys and SP.Frame.winKeys[key] then
+            local WP = AIP.WindowProfiles
+            local v
+            if WP and WP.Get then v = WP.Get(key) else v = db[key] end
+            check:SetChecked(v and true or false)
         elseif db[key] ~= nil then
             check:SetChecked(db[key])
         end
@@ -1643,6 +2062,9 @@ function SP.Update()
             SP.Frame.unfocusedValue:SetText(math.floor(unfocusedVal) .. "%")
         end
     end
+
+    -- Re-apply saved collapse state (db may have changed, e.g. after a reset)
+    if SP.Reflow then SP.Reflow() end
 end
 
 -- Show/Hide

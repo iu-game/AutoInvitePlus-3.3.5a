@@ -60,8 +60,10 @@ local function readDungeons()
     local out = {}
     if not (GetLFGQueuedList and GetLFGDungeonInfo) then return out end
     for k in pairs(queuedScratch) do queuedScratch[k] = nil end
-    pcall(GetLFGQueuedList, queuedScratch)
-    for id, state in pairs(queuedScratch) do
+    local ok, ret = pcall(GetLFGQueuedList, queuedScratch)
+    -- Some cores return the filled table instead of (or as well as) filling the arg.
+    local src = (ok and type(ret) == "table") and ret or queuedScratch
+    for id, state in pairs(src) do
         if state then
             local name = asStr(GetLFGDungeonInfo(id))
             out[#out + 1] = { id = id, name = name or ("Dungeon " .. tostring(id)) }
@@ -70,25 +72,59 @@ local function readDungeons()
     return out
 end
 
+-- Pure parser for GetLFGProposal() returns. The signature differs between
+-- cores/builds (11 vs 12 values: subtypeID is not always present), so fields are
+-- picked by TYPE and position-from-the-end, never by a fixed count:
+--   exists, id, typeID, [subtypeID], name, texture, role, hasResponded,
+--   totalEncounters, completedEncounters, numMembers, isLeader
+-- Never errors on nil/short returns. Returns nil when no proposal exists.
+local ROLE_WORDS = { TANK = true, HEALER = true, DAMAGER = true, NONE = true, LEADER = true }
+function LW.ParseProposal(...)
+    local n = select("#", ...)
+    local exists = ...
+    if not exists then return nil end
+    local nums, strs, bools = {}, {}, {}
+    for i = 2, n do
+        local v = select(i, ...)
+        local t = type(v)
+        if t == "number" then nums[#nums + 1] = v
+        elseif t == "string" then strs[#strs + 1] = v
+        elseif t == "boolean" then bools[#bools + 1] = v end
+    end
+    local name, role
+    for _, v in ipairs(strs) do
+        if ROLE_WORDS[v] then role = role or v
+        elseif not name and not v:find("\\") then name = v end   -- skip texture paths
+    end
+    local c = #nums
+    local id = nums[1]
+    local numMembers, completed, total
+    if c >= 4 then
+        numMembers, completed, total = nums[c], nums[c - 1], nums[c - 2]
+    end
+    return { id = id, name = name, role = role, hasResponded = bools[1],
+        totalEncounters = total, completedEncounters = completed,
+        numMembers = numMembers, isLeader = bools[2] }
+end
+
 local function readProposal()
     if not GetLFGProposal then return nil end
-    local exists, id, _typeID, _subtypeID, name, _texture, role, hasResponded,
-        totalEncounters, completedEncounters, numMembers, isLeader = GetLFGProposal()
-    if not exists then return nil end
+    local okc, p = pcall(function() return LW.ParseProposal(GetLFGProposal()) end)
+    if not okc or not p then return nil end
     local members = {}
-    -- Some 3.3.5a cores return numMembers as a non-number; tonumber-guard so it
-    -- can never be used as a raw 'for' limit (which errors). Dungeon proposals are
-    -- always 5, so fall back to 5 (members past the real count just read as nil).
-    local n = tonumber(numMembers) or 5
+    -- numMembers may be missing/non-number; fall back to 5 (dungeon proposals are
+    -- always 5; members past the real count just read as nil) so it's never a raw 'for' limit.
+    local n = tonumber(p.numMembers) or 5
     if GetLFGProposalMember then
         for i = 1, n do
-            local _mLeader, mRole, _mLevel, mResponded, mAccepted = GetLFGProposalMember(i)
+            local okm, _mLeader, mRole, _mLevel, mResponded, mAccepted = pcall(GetLFGProposalMember, i)
+            if not okm then mRole, mResponded, mAccepted = nil, nil, nil end
             members[i] = { role = asStr(mRole), responded = mResponded, accepted = mAccepted }
         end
     end
-    return { id = id, name = asStr(name), role = asStr(role), hasResponded = hasResponded,
-        bosses = { done = tonumber(completedEncounters) or 0, total = tonumber(totalEncounters) or 0 },
-        numMembers = n, isLeader = isLeader, members = members }
+    return { id = p.id, name = asStr(p.name), role = asStr(p.role), hasResponded = p.hasResponded,
+        bosses = { done = tonumber(p.completedEncounters) or 0, total = tonumber(p.totalEncounters) or 0 },
+        numMembers = n, isLeader = p.isLeader, members = members }
 end
 
 local function readRoles()
@@ -132,6 +168,8 @@ function LW.Refresh()
         local viaServer = st and st.queuedTime and (now - st.queuedTime)
         if viaServer and viaServer >= 0 and viaServer < 21600 then
             LW.State.elapsed = viaServer
+            -- back-date our own start so the 1s tick stays consistent with it
+            LW.State.queueStartTime = now - viaServer
         elseif LW.State.queueStartTime then
             LW.State.elapsed = math.max(0, now - LW.State.queueStartTime)
         end
@@ -292,6 +330,11 @@ function LW.Toggle(on)
     if on == nil then on = not (AIP.db and AIP.db.lfgWatch) end
     if AIP.db then AIP.db.lfgWatch = on and true or false end
     LW.Refresh()   -- re-poll state + show/hide the widget immediately
+    -- Keep an already-built Settings checkbox in sync (title-bar button and
+    -- /aip rdf flip the flag without going through the checkbox's OnClick).
+    local SPn = AIP.Panels and AIP.Panels.Settings
+    local chk = SPn and SPn.Frame and SPn.Frame.checks and SPn.Frame.checks.lfgWatch
+    if chk and chk.SetChecked then chk:SetChecked(AIP.db and AIP.db.lfgWatch and true or false) end
     return AIP.db and AIP.db.lfgWatch
 end
 

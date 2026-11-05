@@ -374,6 +374,9 @@ local function ensureCappedEditBox(self)
     -- instead of ~162px - after a single SetHeight call). This has the
     -- last word every frame instead, for both the box's elastic content
     -- height and the popup's own outer height that must enclose it.
+    -- Remember Blizzard's own StaticPopup_OnUpdate (timeouts, info.OnUpdate)
+    -- so releaseCappedEditBox can put it back on this pooled frame in OnHide.
+    if self.aipOrigOU == nil then self.aipOrigOU = self:GetScript("OnUpdate") or false end
     self:SetScript("OnUpdate", function(popup)
         local box = popup.aipEB
         if box and box.measure and box.editBox then
@@ -392,6 +395,16 @@ local function ensureCappedEditBox(self)
     return self.aipEB.editBox
 end
 
+-- OnHide counterpart: hide the custom box AND restore the pooled popup's
+-- original OnUpdate, so the next unrelated dialog on this frame behaves normally.
+local function releaseCappedEditBox(self)
+    if self.aipEB then self.aipEB:Hide() end
+    if self.aipOrigOU ~= nil then
+        self:SetScript("OnUpdate", self.aipOrigOU or nil)
+        self.aipOrigOU = nil
+    end
+end
+
 StaticPopupDialogs["AIP_RAIDGROUPS_NOTE"] = {
     text = "Note for %s:",
     button1 = OKAY, button2 = CANCEL, timeout = 0, whileDead = 1, hideOnEscape = 1,
@@ -401,7 +414,7 @@ StaticPopupDialogs["AIP_RAIDGROUPS_NOTE"] = {
         eb:SetText(name and RG.GetNote(name) or "")
         eb:SetFocus(); eb:HighlightText()
     end,
-    OnHide = function(self) if self.aipEB then self.aipEB:Hide() end end,
+    OnHide = function(self) releaseCappedEditBox(self) end,
     OnAccept = function(self, data)
         local name = data or self.data
         if not (name and self.aipEB) then return end
@@ -419,7 +432,7 @@ StaticPopupDialogs["AIP_RAIDGROUPS_ASSIGNMENT"] = {
         eb:SetText(name and (RG.GetAssignment(name)) or "")
         eb:SetFocus(); eb:HighlightText()
     end,
-    OnHide = function(self) if self.aipEB then self.aipEB:Hide() end end,
+    OnHide = function(self) releaseCappedEditBox(self) end,
     OnAccept = function(self, data)
         local name = data or self.data
         if not (name and applied.snap and self.aipEB) then return end
@@ -440,7 +453,7 @@ StaticPopupDialogs["AIP_RAIDGROUPS_ANNOUNCE_ALL"] = {
         eb:SetText(current)
         eb:SetFocus(); eb:HighlightText()
     end,
-    OnHide = function(self) if self.aipEB then self.aipEB:Hide() end end,
+    OnHide = function(self) releaseCappedEditBox(self) end,
     OnAccept = function(self)
         if not (applied.snap and self.aipEB) then return end
         local ok, err = RG.SetAllAnnouncement(applied.snap, self.aipEB.editBox:GetText())
@@ -471,10 +484,10 @@ end
 
 local function findCellUnder()
     for _, cell in ipairs(cellPool) do
-        if cell:IsShown() and cell.member and cell:IsMouseOver() then return cell end
+        if cell:IsShown() and cell.member and MouseIsOver(cell) then return cell end
     end
     for _, frame in pairs(cellPool) do
-        if type(frame) == "table" and frame.emptyGroup and frame:IsShown() and frame:IsMouseOver() then return frame end
+        if type(frame) == "table" and frame.emptyGroup and frame:IsShown() and MouseIsOver(frame) then return frame end
     end
     return nil
 end
@@ -1055,6 +1068,13 @@ end
 -- WINDOW
 -- ============================================================================
 
+-- Effective window switch: per-character override > account-wide setting (AIP.WindowProfiles).
+local function winOn(k)
+    local WP = AIP.WindowProfiles
+    if WP and WP.Get then return WP.Get(k) end
+    return not (AIP.db and AIP.db[k] == false)
+end
+
 local function restorePosition()
     local c = RG.Cfg()
     local pos = c and c.pos
@@ -1132,7 +1152,7 @@ local function ensureWindow()
         -- callback once combat ends (RG.Changed() on PLAYER_REGEN_ENABLED), so
         -- the check gets a real retry. "already shown" is checked last so it
         -- never blocks the latch from updating.
-        if not InCombatLockdown() and RG.JustFormedGroup() and AIP.db and AIP.db.autoShowOnGroup and not RG.IsWindowShown() then
+        if not InCombatLockdown() and RG.JustFormedGroup() and AIP.db and winOn("autoShowOnGroup") and winOn("raidGroupsEnabled") and not RG.IsWindowShown() then
             RG.ShowWindow()
         end
     end)
@@ -1142,6 +1162,10 @@ local function ensureWindow()
 end
 
 function RG.ShowWindow()
+    if not winOn("raidGroupsEnabled") then
+        AIP.Print("The Raid Groups window is disabled - enable it in Settings > Windows & Bars.")
+        return
+    end
     if InCombatLockdown() then AIP.Print("The Raid Groups window can't be opened during combat.") return end
     ensureWindow()
     local c = RG.Cfg(); if c then c.shown = true end
@@ -1167,7 +1191,7 @@ local function initWindow()
     pendingInit = false
     ensureWindow()
     local c = RG.Cfg()
-    if c and c.shown then win:Show(); refresh() end
+    if c and c.shown and AIP.db and winOn("raidGroupsEnabled") and winOn("restoreWindowsOnLogin") then win:Show(); refresh() end
 end
 
 -- ============================================================================
@@ -1203,6 +1227,7 @@ local function ensureBubble()
 end
 
 function RG.ShowBubble(text)
+    if not winOn("assignmentToasts") then return end
     ensureBubble()
     bubble.fs:SetText(text)
     if win and win:IsShown() then

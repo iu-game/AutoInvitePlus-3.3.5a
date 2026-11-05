@@ -266,8 +266,12 @@ local function EncodeValue(val)
 end
 
 -- Decode a value from string, returns value and next position
-local function DecodeValue(str, pos)
+local function DecodeValue(str, pos, depth)
     pos = pos or 1
+    -- Hostile peers can nest arrays/dicts arbitrarily deep; cap recursion so a
+    -- crafted payload cannot overflow the Lua stack.
+    depth = (depth or 0) + 1
+    if depth > 24 then return nil, #str + 1 end
     if pos > #str then return nil, pos end
 
     local prefix = str:sub(pos, pos)
@@ -321,11 +325,13 @@ local function DecodeValue(str, pos)
         local countEnd = str:find("~", pos)
         if not countEnd then return {}, pos end
         local count = tonumber(str:sub(pos, countEnd - 1)) or 0
+        -- Clamp: a hostile peer could claim a billion elements and freeze the client.
+        if count > #str then count = #str end
         pos = countEnd + 1
         local arr = {}
         for i = 1, count do
             local val
-            val, pos = DecodeValue(str, pos)
+            val, pos = DecodeValue(str, pos, depth)
             arr[i] = val
             if str:sub(pos, pos) == "~" then pos = pos + 1 end
         end
@@ -335,13 +341,14 @@ local function DecodeValue(str, pos)
         local countEnd = str:find("~", pos)
         if not countEnd then return {}, pos end
         local count = tonumber(str:sub(pos, countEnd - 1)) or 0
+        if count > #str then count = #str end
         pos = countEnd + 1
         local dict = {}
         for i = 1, count do
             local key, val
-            key, pos = DecodeValue(str, pos)
+            key, pos = DecodeValue(str, pos, depth)
             if str:sub(pos, pos) == "~" then pos = pos + 1 end
-            val, pos = DecodeValue(str, pos)
+            val, pos = DecodeValue(str, pos, depth)
             if str:sub(pos, pos) == "~" then pos = pos + 1 end
             if key ~= nil then
                 dict[key] = val
@@ -396,12 +403,17 @@ function DB.Deserialize(str, sender)
     if dataStr then
         data = DecodeValue(dataStr, 1)
     end
+    -- Payload must be a table; scalars would break every event.data.<field> read.
+    if type(data) ~= "table" then data = nil end
 
     return {
         type = eventType,
         version = version,
         sender = sender,
-        timestamp = tonumber(timestamp) or time(),
+        -- Stamp with LOCAL receive time: the sender's clock may be skewed, which
+        -- would break TTL/prune/age checks. Keep the wire value only as sentAt.
+        timestamp = time(),
+        sentAt = tonumber(timestamp),
         data = data or {},
     }
 end
@@ -673,7 +685,7 @@ local function OnAddonMessage(prefix, message, channel, sender)
     -- Only PING/PONG carry the real addon version (event.data.version); LFM/LFG
     -- events don't, so keep any previously-learned version rather than clobbering
     -- it with the protocol version (event.version = "1.0").
-    local peerVersion = (event.data and event.data.version)
+    local peerVersion = (event.data and type(event.data.version) == "string" and event.data.version)
         or (DB.State.onlinePeers[sender] and DB.State.onlinePeers[sender].version) or "unknown"
     DB.State.onlinePeers[sender] = {
         version = peerVersion,
@@ -934,7 +946,7 @@ local function OnChannelMessage(message, sender, _, _, _, _, _, _, channelName)
     -- Only PING/PONG carry the real addon version (event.data.version); LFM/LFG
     -- events don't, so keep any previously-learned version rather than clobbering
     -- it with the protocol version (event.version = "1.0").
-    local peerVersion = (event.data and event.data.version)
+    local peerVersion = (event.data and type(event.data.version) == "string" and event.data.version)
         or (DB.State.onlinePeers[sender] and DB.State.onlinePeers[sender].version) or "unknown"
     DB.State.onlinePeers[sender] = {
         version = peerVersion,

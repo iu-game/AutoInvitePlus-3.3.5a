@@ -153,7 +153,7 @@ function RG.Snapshot()
                 local m = {
                     name = name, unit = "raid" .. i, class = fileName, level = level, group = subgroup,
                     index = i, rank = rank or 0, role = role, isML = isML and true or false,
-                    online = online ~= false, dead = isDead and true or false,
+                    online = online and true or false, dead = isDead and true or false,
                     isSelf = (UnitName and UnitName("player") == name),
                 }
                 members[#members + 1] = m

@@ -173,7 +173,7 @@ function Utils.FormatTime(seconds)
     if not seconds or seconds < 0 then return "-" end
 
     if seconds < 60 then
-        return seconds .. "s"
+        return math.floor(seconds) .. "s"
     elseif seconds < 3600 then
         return math.floor(seconds / 60) .. "m"
     elseif seconds < 86400 then
@@ -223,7 +223,8 @@ end
 
 -- Escape pattern special characters
 function Utils.EscapePattern(str)
-    return str:gsub("([%%%.%[%]%^%$%*%+%-%?%(%)%{%}])", "%%%1")
+    -- Parenthesised: gsub's 2nd return (count) must not leak into callers like s:find(Escape(x)).
+    return (str:gsub("([%%%.%[%]%^%$%*%+%-%?%(%)%{%}])", "%%%1"))
 end
 
 -- ============================================================================
@@ -617,6 +618,8 @@ local function delayedCallOnUpdate(self, elapsed)
         -- schedule another DelayedCall (which could reuse a pooled frame).
         local fn, args, argCount = self.fn, self.args, self.argCount
         self.fn, self.args, self.argCount = nil, nil, nil
+        -- Invalidate outstanding handles so a late Cancel can't re-pool this frame.
+        self.token = self.token + 1
         if args then
             Utils.SafeCall(fn, unpack(args, 1, argCount))
         else
@@ -670,7 +673,13 @@ end
 -- Cancel a delayed call (pass the handle returned by DelayedCall)
 function Utils.CancelDelayedCall(handle)
     if handle and handle.frame and handle.frame.SetScript and handle.frame.token == handle.token then
-        handle.frame:SetScript("OnUpdate", nil)
+        local frame = handle.frame
+        frame:SetScript("OnUpdate", nil)
+        frame.fn, frame.args, frame.argCount = nil, nil, nil
+        -- Invalidate this handle (and any copy) so a second cancel can't pool the frame twice.
+        frame.token = frame.token + 1
+        local pool = Utils.delayedCallPool
+        pool[#pool + 1] = frame
     end
 end
 

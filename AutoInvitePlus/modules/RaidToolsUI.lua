@@ -824,7 +824,9 @@ function RT.RefreshBar()
 end
 
 function RT.UpdateBar()
-    local enabled = AIP.db and AIP.db.floatingBarEnabled
+    local enabled
+    if AIP.WindowProfiles and AIP.WindowProfiles.Get then enabled = AIP.WindowProfiles.Get("floatingBarEnabled")
+    else enabled = AIP.db and AIP.db.floatingBarEnabled end
     if enabled then
         RT.CreateBar(); RT.RefreshBar(); RT.Bar:Show()
     elseif RT.Bar then
@@ -834,8 +836,16 @@ end
 
 function RT.ToggleBar()
     if AIP.db then
-        AIP.db.floatingBarEnabled = not AIP.db.floatingBarEnabled
+        local WP = AIP.WindowProfiles
+        local now
+        if WP and WP.Get then
+            now = not WP.Get("floatingBarEnabled")
+            WP.Set("floatingBarEnabled", now, WP.HasOverride("floatingBarEnabled"))
+        else
+            now = not AIP.db.floatingBarEnabled
+            AIP.db.floatingBarEnabled = now
+        end
         RT.UpdateBar()
-        AIP.Print("Announcement bar " .. (AIP.db.floatingBarEnabled and "shown" or "hidden"))
+        AIP.Print("Announcement bar " .. (now and "shown" or "hidden"))
     end
 end

@@ -21,11 +21,14 @@ Parsers.GSPatterns = {
     "(%d[%.,]?%d)k%s*gs",
     "gs%s*(%d[%.,]?%d)k",
     "(%d[%.,]?%d)k%+?%s*gearscore",
+    -- Whole-thousand K format: "6k gs", "gs 6k" (single digit; frontier keeps "5.8k" on the patterns above)
+    "%f[%d](%d)k%+?%s*gs",
+    "gs%s*(%d)k%f[%A]",
     -- Requirements: "5800+ gs", "gs: 5800"
     "gs%s*:%s*(%d%d%d%d)",
     "(%d%d%d%d)%s*%+%s*gs",
     -- With separators: "5,800 gs"
-    "(%d[%d,]+)%s*gs",
+    "(%d[%d,][%d,]+%d)%s*gs",
     -- AIP format: "5800+ iLvl" or "5800+ ilvl" (number before iLvl)
     "(%d%d%d%d)%+?%s+i[lL]v[lL]",
     -- Standalone 4-digit number followed by + (common LFM format)
@@ -97,8 +100,12 @@ Parsers.RaidPatterns = {
     -- TOC/TOGC (Trial of the Crusader)
     {pattern = "togc%s*25", raid = "TOGC25", category = "TOC"},
     {pattern = "togc%s*10", raid = "TOGC10", category = "TOC"},
-    {pattern = "toc%s*25%s*h", raid = "TOGC25", category = "TOC"},
-    {pattern = "toc%s*10%s*h", raid = "TOGC10", category = "TOC"},
+    {pattern = "toc%s*25%s*hc", raid = "TOGC25", category = "TOC"},
+    {pattern = "toc%s*25%s*h%f[%A]", raid = "TOGC25", category = "TOC"},
+    {pattern = "toc%s*25%s*heroic", raid = "TOGC25", category = "TOC"},
+    {pattern = "toc%s*10%s*hc", raid = "TOGC10", category = "TOC"},
+    {pattern = "toc%s*10%s*h%f[%A]", raid = "TOGC10", category = "TOC"},
+    {pattern = "toc%s*10%s*heroic", raid = "TOGC10", category = "TOC"},
     {pattern = "toc%s*25", raid = "TOC25", category = "TOC"},
     {pattern = "toc%s*10", raid = "TOC10", category = "TOC"},
     {pattern = "trial%s*of%s*the?%s*crusader", raid = "TOC", category = "TOC"},
@@ -333,6 +340,8 @@ function Parsers.ParseGearScore(message)
                     return math.floor(num * 1000)
                 end
             end
+            -- Single digit = whole thousands ("6k gs")
+            if #gs == 1 then return tonumber(gs) * 1000 end
             -- Handle comma separator (5,800)
             return tonumber((gs:gsub(",", ""))) or nil
         end

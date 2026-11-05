@@ -235,7 +235,13 @@ function IE.InspectUnit(unit)
             slotCount = slotCount + 1
 
             -- Check enchantable slots
-            if IE.EnchantableSlots[slotID] and not enchanted then
+            -- Held-in-off-hand items (books/orbs) cannot be enchanted
+            local holdable = false
+            if slotID == 17 then
+                local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(link)
+                holdable = (equipLoc == "INVTYPE_HOLDABLE")
+            end
+            if IE.EnchantableSlots[slotID] and not enchanted and not holdable then
                 data.analysis.missingEnchants = data.analysis.missingEnchants + 1
                 table.insert(data.analysis.enchantableSlots, slotName)
             end
@@ -251,9 +257,12 @@ function IE.InspectUnit(unit)
     end
 
     -- Get GearScore using Integrations module (handles fallback calculation)
+    local integGS = nil
     if AIP.Integrations and AIP.Integrations.GetGearScore then
-        local gs = AIP.Integrations.GetGearScore(name)
-        data.gearScore = gs or 0
+        integGS = AIP.Integrations.GetGearScore(name)
+    end
+    if integGS and integGS > 0 then
+        data.gearScore = integGS
     elseif GearScore_GetScore then
         -- GearScore_GetScore(Name, Target) only actually reads Target (a
         -- unit token) - IE.InspectUnit already has one in scope.
@@ -375,6 +384,69 @@ function IE.GetCachedData(name)
     return cached
 end
 
+-- ============================================================================
+-- Inspect arbiter. The client has ONE shared inspect buffer, so only one
+-- NotifyInspect may be in flight at a time. Every in-addon caller (this queue,
+-- RaidComposition spec scans, the tooltip GS fetch) goes through Request /
+-- SafeNotify; while Busy() they wait instead of clobbering each other's data.
+-- The buffer is never cleared on completion (that raced other readers).
+-- ============================================================================
+IE.Arb = IE.Arb or { owner = nil, unit = nil, name = nil, startedAt = 0, callback = nil, lastSafe = 0 }
+IE.ArbTimeout = 5          -- seconds before an unanswered inspect is abandoned
+IE.SafeNotifyInterval = 1.5 -- min seconds between tooltip-driven inspects
+
+local function arbNow() return GetTime and GetTime() or 0 end
+
+-- Release a lock whose INSPECT_TALENT_READY never arrived.
+local function arbExpire()
+    local a = IE.Arb
+    if a.owner and (arbNow() - a.startedAt) > IE.ArbTimeout then
+        a.owner, a.unit, a.name, a.callback = nil, nil, nil, nil
+        IE.Queue.inProgress = nil
+        if ClearInspectPlayer then ClearInspectPlayer() end  -- nobody awaits it now
+    end
+end
+
+function IE.Busy()
+    arbExpire()
+    return IE.Arb.owner ~= nil
+end
+
+-- Start an inspect for `owner`. Returns true if NotifyInspect was issued,
+-- false (and does nothing) if another inspect is in flight.
+function IE.Request(unit, owner, callback)
+    if not unit or IE.Busy() then return false end
+    local a = IE.Arb
+    a.owner = owner or "unknown"
+    a.unit = unit
+    a.name = UnitName and UnitName(unit) or nil
+    a.startedAt = arbNow()
+    a.callback = callback
+    NotifyInspect(unit)
+    return true
+end
+
+-- Rate-limited, never interrupts anything in flight. For hover-driven callers.
+function IE.SafeNotify(unit)
+    if not unit then return false end
+    if IE.Busy() then return false end
+    if (arbNow() - (IE.Arb.lastSafe or 0)) < IE.SafeNotifyInterval then return false end
+    if IE.Request(unit, "tooltip") then
+        IE.Arb.lastSafe = arbNow()
+        return true
+    end
+    return false
+end
+
+-- Called from INSPECT_TALENT_READY: hand the result to the owner and free the lock.
+function IE.ArbComplete()
+    local a = IE.Arb
+    local cb = a.callback
+    local unit = a.unit
+    a.owner, a.unit, a.name, a.callback = nil, nil, nil, nil
+    if cb then pcall(cb, unit) end
+end
+
 -- Queue a player for inspection
 function IE.QueueInspection(name, priority)
     if not name then return end
@@ -418,16 +490,9 @@ local function ProcessInspectionQueue()
     local now = GetTime()
     if now - IE.Queue.lastInspect < IE.Config.inspectCooldown then return end
 
-    -- Already inspecting? Clear a STUCK inspect whose INSPECT_TALENT_READY never
-    -- fired (target left / went out of range), else all future inspects halt.
-    if IE.Queue.inProgress then
-        if (now - (IE.Queue.lastInspect or 0)) > 5 then
-            IE.Queue.inProgress = nil
-            if ClearInspectPlayer then ClearInspectPlayer() end
-        else
-            return
-        end
-    end
+    -- Another inspect (ours, RaidComposition's, tooltip) in flight? Wait.
+    -- Busy() also expires a stuck lock whose INSPECT_TALENT_READY never fired.
+    if IE.Busy() then return end
 
     -- Get next in queue
     local next = table.remove(IE.Queue.pending, 1)
@@ -441,9 +506,10 @@ local function ProcessInspectionQueue()
     end
 
     -- Start inspection
-    IE.Queue.inProgress = next.name
-    IE.Queue.lastInspect = now
-    NotifyInspect(unit)
+    if IE.Request(unit, "queue") then
+        IE.Queue.inProgress = next.name
+        IE.Queue.lastInspect = now
+    end
 end
 
 -- Resolve a player name to an inspectable unit token. Shared by the queue
@@ -473,7 +539,7 @@ end
 
 -- Handle inspection ready event
 local function OnInspectReady()
-    if not IE.Queue.inProgress then return end
+    if IE.Arb.owner ~= "queue" or not IE.Queue.inProgress then return end
 
     -- Find the unit we were inspecting (same resolution as the starter)
     local name = IE.Queue.inProgress
@@ -485,7 +551,8 @@ local function OnInspectReady()
     end
 
     IE.Queue.inProgress = nil
-    ClearInspectPlayer()
+    -- No ClearInspectPlayer() here: other readers (RaidComposition's own
+    -- INSPECT_TALENT_READY handler) may still need the buffer this tick.
 
     -- Notify UI
     if AIP.UpdateCentralGUI then
@@ -572,6 +639,7 @@ eventFrame:RegisterEvent("INSPECT_TALENT_READY")
 eventFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "INSPECT_TALENT_READY" then
         OnInspectReady()
+        IE.ArbComplete()  -- free the arbiter (runs owner callback, if any)
     end
 end)
 

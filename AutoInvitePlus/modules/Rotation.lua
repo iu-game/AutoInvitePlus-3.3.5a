@@ -33,7 +33,7 @@ local function pbuff(name)               -- player buff: remaining secs, stacks
     for i = 1, 40 do
         local n, _, _, cnt, _, _, exp = UnitBuff("player", i)
         if not n then break end
-        if n == name then return ((exp or 0) - GT()), (cnt or 0) end
+        if n == name then return ((exp or 0) - GT()), ((cnt and cnt > 0) and cnt or 1) end
     end
     return nil
 end

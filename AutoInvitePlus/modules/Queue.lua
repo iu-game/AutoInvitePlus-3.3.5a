@@ -65,6 +65,7 @@ function AIP.AddToQueue(name, message, role, gs, class)
     if not name or name:trim() == "" then return false end
 
     name = name:trim()
+    if AIP.ActivityLog then AIP.ActivityLog.Add("queue", "add attempt: " .. name) end
 
     -- Check if already in queue
     if AIP.IsInQueue(name) then

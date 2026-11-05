@@ -34,6 +34,13 @@ function Bridge.OnD4(msg, sender)
 
     local cmd, a = strsplit("\t", msg)
     sender = sender or "?"
+    -- Only the player who actually STARTED the timer may raid-warn its pre-warn
+    -- (RT.EmitMechanic broadcasts to chat). A received D4 PT/BT from anyone else
+    -- shows the bar locally with NO pre-warn, so a 25-man never has every AIP
+    -- user echoing "pull in 5" into raid chat.
+    local me = UnitName("player")
+    local isSelf = (sender == me) or (sender:lower() == (me or ""):lower())
+    local function warn(text) if isSelf then return text end return nil end
 
     if cmd == "PT" then
         local secs = tonumber(a)
@@ -44,8 +51,9 @@ function Bridge.OnD4(msg, sender)
             return
         end
         if secs <= 120 then
+            if AIP.ActivityLog then AIP.ActivityLog.Add("timer", "pull " .. secs .. "s (" .. sender .. ")") end
             rt.StartTimer("pull", "Pull (" .. sender .. ")", secs, 1, 0.4, 0.1,
-                "PULL!", "Interface\\Icons\\Ability_Warrior_BattleShout")
+                warn("PULL!"), "Interface\\Icons\\Ability_Warrior_BattleShout")
         end
 
     elseif cmd == "BT" then
@@ -55,8 +63,9 @@ function Bridge.OnD4(msg, sender)
         -- is far more likely a minute count than a 15-second break.
         local secs = (n <= 15) and (n * 60) or n
         if secs <= 3600 then
+            if AIP.ActivityLog then AIP.ActivityLog.Add("timer", "break " .. secs .. "s (" .. sender .. ")") end
             rt.StartTimer("break", "Break (" .. sender .. ")", secs, 0.2, 0.7, 1,
-                "Break ending - get ready!", "Interface\\Icons\\Spell_Nature_TimeStop")
+                warn("Break ending - get ready!"), "Interface\\Icons\\Spell_Nature_TimeStop")
         end
 
     elseif cmd == "CR" then

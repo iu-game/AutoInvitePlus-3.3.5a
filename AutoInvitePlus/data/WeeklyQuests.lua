@@ -48,7 +48,17 @@ local function scanQuestLog()
     -- A collapsed zone/header row hides its child quests from
     -- GetNumQuestLogEntries()/GetQuestLogTitle entirely, so expand every
     -- header first or a weekly filed under a collapsed header goes unseen.
-    if ExpandQuestHeader then ExpandQuestHeader(0) end
+    -- Remember which headers the player had collapsed so they can be
+    -- re-collapsed afterwards (the scan must not change the player's UI state).
+    local collapsed = {}
+    local hadCollapsed = false
+    local pre = GetNumQuestLogEntries and GetNumQuestLogEntries() or 0
+    for i = 1, pre do
+        local t, _, _, _, hdr, isCollapsed = GetQuestLogTitle(i)
+        if hdr and isCollapsed and t then collapsed[t] = true; hadCollapsed = true end
+    end
+    if hadCollapsed and ExpandQuestHeader then ExpandQuestHeader(0) end
+    local result = false
     local numEntries = GetNumQuestLogEntries and GetNumQuestLogEntries() or 0
     for i = 1, numEntries do
         -- 3.3.5a returns: title, level, questTag, suggestedGroup, isHeader,
@@ -63,11 +73,24 @@ local function scanQuestLog()
                 -- other *Data.lua file). Only available for a quest we
                 -- currently hold ourselves; see W.LinkFor.
                 local link = GetQuestLink and GetQuestLink(i) or nil
-                return { quest = q, complete = (isComplete and isComplete > 0) and true or false, link = link }
+                result = { quest = q, complete = (isComplete and isComplete > 0) and true or false, link = link }
+                break
             end
         end
     end
-    return false
+    -- Re-collapse bottom-up so earlier indices stay valid.
+    if hadCollapsed then
+        -- Expand/Collapse fire QUEST_LOG_UPDATE themselves; without this the
+        -- invalidate -> rescan -> expand/collapse cycle would feed on itself.
+        W.suppressInvalidateUntil = GetTime() + 0.5
+    end
+    if hadCollapsed and CollapseQuestHeader then
+        for i = numEntries, 1, -1 do
+            local t, _, _, _, hdr = GetQuestLogTitle(i)
+            if hdr and t and collapsed[t] then CollapseQuestHeader(i) end
+        end
+    end
+    return result
 end
 
 -- Returns { quest = {title, token, raid, boss}, complete = bool } for the
@@ -144,6 +167,9 @@ end
 -- ============================================================================
 
 if AIP.Utils and AIP.Utils.Events then
-    AIP.Utils.Events.Register("QUEST_LOG_UPDATE", function() W.Invalidate() end, W)
+    AIP.Utils.Events.Register("QUEST_LOG_UPDATE", function()
+        if W.suppressInvalidateUntil and GetTime() < W.suppressInvalidateUntil then return end
+        W.Invalidate()
+    end, W)
     AIP.Utils.Events.Register("PLAYER_ENTERING_WORLD", function() W.Invalidate() end, W)
 end

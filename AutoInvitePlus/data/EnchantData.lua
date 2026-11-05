@@ -282,9 +282,15 @@ function E.ForSlot(slotId)
     -- Death Knights can't either (dual-wield or 2H only in WotLK), so
     -- there's nothing to enchant there for either class. Item-type check,
     -- not just class/spec.
+    -- A BySpec entry (e.g. dual-wield Frost DK's Razorice) is a weapon enchant,
+    -- not the shield one, so it is exempt from this gate.
     if slotId == 17 then
         local _, class = UnitClass("player")
-        if class == "DRUID" or class == "DEATHKNIGHT" then return nil end
+        if class == "DRUID" or class == "DEATHKNIGHT" then
+            local k = SG and SG.KeyFor and SG.KeyFor()
+            if k and E.BySpec[k] and E.BySpec[k][17] then return E.BySpec[k][17] end
+            return nil
+        end
     end
     -- Ranged scope only makes sense on an actual bow/gun/crossbow - the other
     -- agiDPS classes put a wand/idol/totem in slot 18, which can't take one.

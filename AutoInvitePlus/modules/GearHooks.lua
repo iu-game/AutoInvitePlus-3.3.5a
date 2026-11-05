@@ -44,6 +44,7 @@ local function hookTip(tip)
     if not tip then return end
     tip:HookScript("OnTooltipSetItem", addTooltipScore)
     tip:HookScript("OnHide", function(self) self._aipScored = nil end)
+    tip:HookScript("OnTooltipCleared", function(self) self._aipScored = nil end)
 end
 hookTip(GameTooltip)
 hookTip(ItemRefTooltip)

@@ -994,7 +994,9 @@ function TK.ImportFromBlizzard()
             for i = 1, nParty do units[#units + 1] = "party" .. i end
         end
         for _, unit in ipairs(units) do
-            if UnitGroupRolesAssigned(unit) == "TANK" then
+            -- 3.3.5a returns booleans (isTank, isHealer, isDamage); later clients return "TANK".
+            local r1 = UnitGroupRolesAssigned(unit)
+            if r1 == "TANK" or r1 == true or r1 == 1 then
                 local n = UnitName(unit)
                 if n then mt, viaLFD = n, true; break end
             end

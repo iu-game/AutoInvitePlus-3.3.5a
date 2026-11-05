@@ -531,6 +531,9 @@ end
 -- Transient notification popup near the minimap icon (e.g. "VOA Listed").
 -- Created lazily; reused across calls. Shows for a few seconds then hides.
 function GUI.ShowMinimapBubble(text)
+    if AIP.WindowProfiles and AIP.WindowProfiles.Get then
+        if not AIP.WindowProfiles.Get("minimapBubbles") then return end
+    elseif AIP.db and AIP.db.minimapBubbles == false then return end
     local b = GUI.MinimapBubble
     if not b then
         b = CreateFrame("Frame", "AIPMinimapBubble", UIParent)
@@ -772,7 +775,10 @@ end
 
 -- Quick menu for minimap button
 function GUI.ShowQuickMenu(anchor)
-    local menu = CreateFrame("Frame", "AIPQuickMenu", UIParent, "UIDropDownMenuTemplate")
+    if not GUI.QuickMenuFrame then
+        GUI.QuickMenuFrame = CreateFrame("Frame", "AIPQuickMenu", UIParent, "UIDropDownMenuTemplate")
+    end
+    local menu = GUI.QuickMenuFrame
 
     local menuList = {
         {text = "AutoInvite+", isTitle = true, notCheckable = true},
@@ -794,7 +800,7 @@ function GUI.ShowQuickMenu(anchor)
         {
             text = "Raid Tools Bar",
             isNotRadio = true,
-            checked = (AIP.db and AIP.db.floatingBarEnabled) and true or false,
+            checked = ((AIP.WindowProfiles and AIP.WindowProfiles.Get and AIP.WindowProfiles.Get("floatingBarEnabled")) or (not AIP.WindowProfiles and AIP.db and AIP.db.floatingBarEnabled)) and true or false,
             func = function()
                 if AIP.RaidTools and AIP.RaidTools.ToggleBar then
                     AIP.RaidTools.ToggleBar()
@@ -1272,6 +1278,32 @@ function GUI.CreateFrame()
     chatBanStatus:SetJustifyH("CENTER")
     chatBanStatus:SetText("")
     statusBar.chatBanStatus = chatBanStatus
+
+    -- Chat-safety indicator: a transparent hover/tick button over chatBanStatus.
+    -- Re-uses that fontstring (already clipped to 160px, so it can't overlap the
+    -- right-side strings); THROTTLED / channel-delay messages still take priority.
+    local safetyBtn = CreateFrame("Button", nil, statusBar)
+    safetyBtn:SetPoint("TOPLEFT", chatBanStatus, "TOPLEFT", 0, 0)
+    safetyBtn:SetPoint("BOTTOMRIGHT", chatBanStatus, "BOTTOMRIGHT", 0, 0)
+    safetyBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        local _, lines = GUI.ChatSafetyText()
+        for i, l in ipairs(lines or {}) do
+            if i == 1 then GameTooltip:SetText(l) else GameTooltip:AddLine(l, 0.8, 0.8, 0.8, true) end
+        end
+        GameTooltip:Show()
+    end)
+    safetyBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    safetyBtn.acc = 0
+    safetyBtn:SetScript("OnUpdate", function(self, dt)
+        self.acc = self.acc + dt
+        if self.acc < 1 then return end
+        self.acc = 0
+        if not statusBar:IsVisible() then return end
+        local ban = AIP.ChatBan and AIP.ChatBan.detected and (time() - (AIP.ChatBan.lastBanTime or 0)) < 300
+        local delayed = GUI.Broadcast and GUI.Broadcast.active and AIP.ChatBan and (AIP.ChatBan.channelDelay or 2) > 2
+        if not ban and not delayed then chatBanStatus:SetText((GUI.ChatSafetyText())) end
+    end)
 
     -- Mode indicator (left of broadcast status)
     local modeIndicator = statusBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -2617,7 +2649,7 @@ function GUI.CreateCompositionTab(container)
                         if gf and gf.slots then
                             for sNum = 1, 5 do
                                 local s = gf.slots[sNum]
-                                if s and s:IsMouseOver() then
+                                if s and MouseIsOver(s) then
                                     targetSlot = s
                                     targetGroup = gNum
                                     break
@@ -3275,9 +3307,10 @@ local function FilterTreeData(treeData, searchFilter, raidFilter)
     for _, catNode in ipairs(treeData) do
         -- Check if category matches raid filter
         local catMatches = (not raidFilter or raidFilter == "ALL")
-        if not catMatches and catNode.data and catNode.data.id then
-            catMatches = catNode.data.id == raidFilter or
-                         (catNode.id and catNode.id:find(raidFilter))
+        if not catMatches then
+            catMatches = (catNode.id == "lfm_" .. raidFilter) or
+                         (catNode.id == "lfg_" .. raidFilter) or
+                         (catNode.data and catNode.data.id == raidFilter) or false
         end
         -- For "Other" category, always include if no specific raid filter
         if catNode.id and catNode.id:find("other") then
@@ -3285,22 +3318,43 @@ local function FilterTreeData(treeData, searchFilter, raidFilter)
         end
 
         if catMatches and catNode.children then
-            local filteredChildren = {}
-            for _, child in ipairs(catNode.children) do
-                local childMatches = true
+            -- Recursive: size/difficulty sub-nodes hold the real leaves
+            local function filterNodes(nodes)
+                local out, leafCount = {}, 0
+                for _, child in ipairs(nodes) do
+                    if child.children and not child.isLeaf then
+                        local sub, subCount = filterNodes(child.children)
+                        if #sub > 0 then
+                            local newSub = {}
+                            for k, v in pairs(child) do
+                                newSub[k] = v
+                            end
+                            newSub.children = sub
+                            newSub.count = subCount
+                            newSub.text = (child.text or ""):gsub("%s*%(%d+%)%s*$", "") .. " (" .. subCount .. ")"
+                            table.insert(out, newSub)
+                            leafCount = leafCount + subCount
+                        end
+                    else
+                        local childMatches = true
 
-                -- Apply search filter to player/group name and message
-                if searchFilter and searchFilter ~= "" then
-                    local searchText = (child.text or ""):lower()
-                    local msgText = (child.data and child.data.message or ""):lower()
-                    childMatches = searchText:find(searchFilter, 1, true) or
-                                   msgText:find(searchFilter, 1, true)
-                end
+                        -- Apply search filter to player/group name and message
+                        if searchFilter and searchFilter ~= "" then
+                            local searchText = (child.text or ""):lower()
+                            local msgText = (child.data and child.data.message or ""):lower()
+                            childMatches = searchText:find(searchFilter, 1, true) or
+                                           msgText:find(searchFilter, 1, true)
+                        end
 
-                if childMatches then
-                    table.insert(filteredChildren, child)
+                        if childMatches then
+                            table.insert(out, child)
+                            leafCount = leafCount + 1
+                        end
+                    end
                 end
+                return out, leafCount
             end
+            local filteredChildren, totalLeaves = filterNodes(catNode.children)
 
             -- Only add category if it has children after filtering
             if #filteredChildren > 0 then
@@ -3310,7 +3364,7 @@ local function FilterTreeData(treeData, searchFilter, raidFilter)
                 end
                 newCatNode.children = filteredChildren
                 newCatNode.text = catNode.data and catNode.data.name or catNode.text:match("^(.-)%s*%(") or catNode.text
-                newCatNode.text = newCatNode.text .. " (" .. #filteredChildren .. ")"
+                newCatNode.text = newCatNode.text .. " (" .. totalLeaves .. ")"
                 table.insert(filtered, newCatNode)
             end
         end
@@ -4779,6 +4833,7 @@ function GUI.UpdateBroadcastStatus()
                 end
             end
 
+            if statusMsg == "" then statusMsg = (GUI.ChatSafetyText()) end
             chatBanStatus:SetText(statusMsg)
         end
     end
@@ -7233,6 +7288,9 @@ function GUI.ShowEnrollPopup()
     if GUI.EnrollPopup.UpdateSizeDropdown then
         GUI.EnrollPopup.UpdateSizeDropdown()
     end
+    if GUI.EnrollPopup.UpdateCustomFieldVisibility then
+        GUI.EnrollPopup.UpdateCustomFieldVisibility()
+    end
     -- Update raid dropdown text with lockout color
     if GUI.EnrollPopup.UpdateRaidDropdownText then
         GUI.EnrollPopup.UpdateRaidDropdownText()
@@ -7756,8 +7814,8 @@ function GUI.CreateEnrollPopup()
             end
             if not currentSizeValid then
                 popup.raidSize = raidInfo.defaultSize
-                UIDropDownMenu_SetText(sizeDropdown, raidInfo.defaultSize)
             end
+            UIDropDownMenu_SetText(sizeDropdown, popup.raidSize)
             -- Update heroic checkbox visibility
             if raidInfo.hasHeroic then
                 heroicCheck:Show()
@@ -7792,6 +7850,7 @@ function GUI.CreateEnrollPopup()
         end)
     end
     popup.UpdateSizeDropdown = UpdateSizeDropdown
+    popup.UpdateCustomFieldVisibility = UpdateCustomFieldVisibility
 
     -- Helper to update raid dropdown text with lockout color (+ weekly tag)
     local function UpdateRaidDropdownText()
@@ -8545,6 +8604,36 @@ function GUI.GetLfgEnrollmentCount()
 end
 
 -- Update status bar
+-- Compact chat-safety text + tooltip lines from ChatGate.GetStats.
+-- Returns text (colour-coded), lines (tooltip). OK green / n/limit per min yellow / BACKOFF red.
+function GUI.ChatSafetyText()
+    local CG = AIP.ChatGate
+    if not (CG and CG.GetStats) then return "", {} end
+    local s = CG.GetStats()
+    local text
+    if s.muted or s.backoff > 1 then
+        text = "|cFFFF4444Chat: BACKOFF|r"
+    elseif s.sentLastMinute > 0 or s.queued > 0 or s.rejectSuppressed > 0 then
+        local warn = s.sentLastMinute >= math.max(1, s.limit - 1) or s.queued > 3 or s.rejectSuppressed > 0
+        text = (warn and "|cFFFFD100" or "|cFF00FF00") .. "Chat: " .. s.sentLastMinute .. "/min|r"
+    else
+        text = "|cFF00FF00Chat: OK|r"
+    end
+    local spam = (GUI.Broadcast and GUI.Broadcast.active) and "running" or "off"
+    local lines = {
+        "Chat safety (ChatGate)",
+        "Public sends last minute: " .. s.sentLastMinute .. " / " .. s.limit .. " allowed. Queued: " .. s.queued .. ".",
+        "Auto-spam: " .. spam .. ".",
+        "Reject whispers this minute: " .. s.rejectSent .. " sent, " .. s.rejectSuppressed .. " suppressed (cap " .. s.rejectLimit .. "/min).",
+    }
+    if s.muted then
+        lines[#lines + 1] = "Server throttle detected: public sends paused for " .. s.mutedFor .. "s."
+    elseif s.backoff > 1 then
+        lines[#lines + 1] = string.format("Slowed to %.1fx intervals after a server throttle; relaxes automatically.", s.backoff)
+    end
+    return text, lines
+end
+
 function GUI.UpdateStatus()
     if not GUI.Frame then return end
 

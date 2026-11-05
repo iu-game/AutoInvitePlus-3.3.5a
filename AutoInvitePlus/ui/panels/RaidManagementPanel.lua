@@ -228,9 +228,12 @@ function RM.GetTemplates()
     -- is empty, so intentionally deleting every template actually sticks.
     if not AIP.db.raidWarningTemplatesInit then
         AIP.db.raidWarningTemplatesInit = true
-        AIP.db.raidWarningTemplates = {}
-        for _, t in ipairs(RM.DefaultTemplates) do
-            table.insert(AIP.db.raidWarningTemplates, {name = t.name, message = t.message, channel = t.channel})
+        -- Never overwrite an existing non-empty list (upgrade / reset-defaults).
+        if not AIP.db.raidWarningTemplates or #AIP.db.raidWarningTemplates == 0 then
+            AIP.db.raidWarningTemplates = {}
+            for _, t in ipairs(RM.DefaultTemplates) do
+                table.insert(AIP.db.raidWarningTemplates, {name = t.name, message = t.message, channel = t.channel})
+            end
         end
     end
     AIP.db.raidWarningTemplates = AIP.db.raidWarningTemplates or {}
@@ -1601,12 +1604,18 @@ function RM.Create(parent)
     local barCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
     barCheck:SetSize(22, 22)
     barCheck:SetPoint("TOPLEFT", rtHeader, "BOTTOMLEFT", 0, -6)
-    barCheck:SetChecked(AIP.db and AIP.db.floatingBarEnabled)
+    do
+        local WP = AIP.WindowProfiles
+        barCheck:SetChecked(WP and WP.Get and WP.Get("floatingBarEnabled") or (AIP.db and AIP.db.floatingBarEnabled))
+    end
     local barLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     barLabel:SetPoint("LEFT", barCheck, "RIGHT", 2, 0)
     barLabel:SetText("Show floating announcement bar (always visible while enabled)")
     barCheck:SetScript("OnClick", function(self)
-        if AIP.db then AIP.db.floatingBarEnabled = self:GetChecked() and true or false end
+        local on = self:GetChecked() and true or false
+        local WP = AIP.WindowProfiles
+        if WP and WP.Set then WP.Set("floatingBarEnabled", on, WP.HasOverride("floatingBarEnabled"))
+        elseif AIP.db then AIP.db.floatingBarEnabled = on end
         if AIP.RaidTools then AIP.RaidTools.UpdateBar() end
     end)
 
@@ -2762,7 +2771,7 @@ local function CreateDropdownMenu(parent, width, items, onSelect, placeholder)
     -- Hide menu when clicking elsewhere
     menu:SetScript("OnShow", function(self)
         self:SetScript("OnUpdate", function()
-            if not dropdown:IsMouseOver() and not self:IsMouseOver() then
+            if not MouseIsOver(dropdown) and not MouseIsOver(self) then
                 self:Hide()
             end
         end)

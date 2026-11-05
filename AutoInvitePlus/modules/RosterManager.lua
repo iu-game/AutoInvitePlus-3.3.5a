@@ -8,10 +8,44 @@ local Roster = AIP.Roster
 -- Default roster data structure (saved in DB)
 local defaultRosterDB = {
     savedRosters = {},    -- {name = {players = {}, template = "", created = time}}
-    playerNotes = {},     -- {playerName = {note = "", rating = 5, tags = {}}}
+    playerNotes = {},     -- {playerName = {note = "", tags = {}}}
     attendance = {},      -- {playerName = {raids = {}, totalRaids = 0, attended = 0}}
     waitlist = {},        -- {name, role, class, time, priority}
 }
+
+-- Canonical key for per-player records (chat/UI deliver inconsistent casing)
+local function Key(name)
+    if type(name) ~= "string" then return name end
+    return (AIP.Utils and AIP.Utils.NormalizeName and AIP.Utils.NormalizeName(name)) or name
+end
+
+-- Re-key mixed-case records (notes / attendance) to the canonical name, once per DB
+local function MigrateKeys(tbl, isNotes)
+    if not tbl then return end
+    local moves = {}
+    for k in pairs(tbl) do
+        local nk = Key(k)
+        if nk ~= k then moves[#moves + 1] = {k, nk} end
+    end
+    for _, m in ipairs(moves) do
+        local old, nk = m[1], m[2]
+        local v = tbl[old]
+        tbl[old] = nil
+        local cur = tbl[nk]
+        if not cur then
+            tbl[nk] = v
+        elseif isNotes and type(cur) == "table" and type(v) == "table" then
+            if (cur.note == nil or cur.note == "") and v.note and v.note ~= "" then cur.note = v.note end
+            if cur.rating == nil then cur.rating = v.rating end
+            cur.tags = cur.tags or {}
+            for _, t in ipairs(v.tags or {}) do
+                local have = false
+                for _, ct in ipairs(cur.tags) do if ct == t then have = true break end end
+                if not have then table.insert(cur.tags, t) end
+            end
+        end
+    end
+end
 
 -- Initialize roster DB
 function Roster.InitDB()
@@ -25,6 +59,12 @@ function Roster.InitDB()
         if AIP.db.rosters[k] == nil then
             AIP.db.rosters[k] = v
         end
+    end
+
+    if not AIP.db.rosters.keysNormalized then
+        MigrateKeys(AIP.db.rosters.playerNotes, true)
+        MigrateKeys(AIP.db.rosters.attendance, false)
+        AIP.db.rosters.keysNormalized = true
     end
 end
 
@@ -105,8 +145,9 @@ function Roster.LoadRoster(name)
         if player.name ~= UnitName("player") then
             if not UnitInRaid(player.name) and not UnitInParty(player.name) then
                 if AIP.AddToQueue then
-                    AIP.AddToQueue(player.name, "Roster: " .. name)
-                    added = added + 1
+                    if AIP.AddToQueue(player.name, "Roster: " .. name) then
+                        added = added + 1
+                    end
                 end
             end
         end
@@ -161,9 +202,10 @@ end
 -- Set note for a player
 function Roster.SetPlayerNote(playerName, note)
     Roster.InitDB()
+    playerName = Key(playerName)
 
     if not AIP.db.rosters.playerNotes[playerName] then
-        AIP.db.rosters.playerNotes[playerName] = {note = "", rating = 5, tags = {}}
+        AIP.db.rosters.playerNotes[playerName] = {note = "", tags = {}}
     end
 
     AIP.db.rosters.playerNotes[playerName].note = note or ""
@@ -173,6 +215,7 @@ end
 -- Get player note
 function Roster.GetPlayerNote(playerName)
     Roster.InitDB()
+    playerName = Key(playerName)
     local data = AIP.db.rosters.playerNotes[playerName]
     return data and data.note or ""
 end
@@ -180,10 +223,11 @@ end
 -- Set player rating (1-5)
 function Roster.SetPlayerRating(playerName, rating)
     Roster.InitDB()
+    playerName = Key(playerName)
     rating = math.max(1, math.min(5, tonumber(rating) or 5))
 
     if not AIP.db.rosters.playerNotes[playerName] then
-        AIP.db.rosters.playerNotes[playerName] = {note = "", rating = 5, tags = {}}
+        AIP.db.rosters.playerNotes[playerName] = {note = "", tags = {}}
     end
 
     AIP.db.rosters.playerNotes[playerName].rating = rating
@@ -193,16 +237,18 @@ end
 -- Get player rating
 function Roster.GetPlayerRating(playerName)
     Roster.InitDB()
+    playerName = Key(playerName)
     local data = AIP.db.rosters.playerNotes[playerName]
-    return data and data.rating or 5
+    return data and data.rating or nil
 end
 
 -- Add tag to player
 function Roster.AddPlayerTag(playerName, tag)
     Roster.InitDB()
+    playerName = Key(playerName)
 
     if not AIP.db.rosters.playerNotes[playerName] then
-        AIP.db.rosters.playerNotes[playerName] = {note = "", rating = 5, tags = {}}
+        AIP.db.rosters.playerNotes[playerName] = {note = "", tags = {}}
     end
 
     local tags = AIP.db.rosters.playerNotes[playerName].tags
@@ -219,6 +265,7 @@ end
 -- Remove tag from player
 function Roster.RemovePlayerTag(playerName, tag)
     Roster.InitDB()
+    playerName = Key(playerName)
 
     local data = AIP.db.rosters.playerNotes[playerName]
     if not data then return end
@@ -235,6 +282,7 @@ end
 -- Get player tags
 function Roster.GetPlayerTags(playerName)
     Roster.InitDB()
+    playerName = Key(playerName)
     local data = AIP.db.rosters.playerNotes[playerName]
     return data and data.tags or {}
 end
@@ -267,7 +315,7 @@ function Roster.RecordAttendance(raidName)
     local present = {}
     for i = 1, numRaid do
         local pName = GetRaidRosterInfo(i)
-        if pName then present[pName] = true end
+        if pName then present[Key(pName)] = true end
     end
 
     local attendance = AIP.db.rosters.attendance
@@ -293,6 +341,7 @@ end
 -- Get attendance percentage for a player
 function Roster.GetAttendancePercent(playerName)
     Roster.InitDB()
+    playerName = Key(playerName)
     local data = AIP.db.rosters.attendance[playerName]
     if not data or data.totalRaids == 0 then
         return nil
@@ -303,6 +352,7 @@ end
 -- Get attendance stats for a player
 function Roster.GetAttendanceStats(playerName)
     Roster.InitDB()
+    playerName = Key(playerName)
     return AIP.db.rosters.attendance[playerName]
 end
 
@@ -313,6 +363,12 @@ end
 -- Add to waitlist
 function Roster.AddToWaitlist(name, role, priority)
     Roster.InitDB()
+
+    if not name or name:trim() == "" then
+        AIP.Print("Please specify a player name")
+        return false
+    end
+    name = name:trim()
 
     -- Check if already on waitlist
     for i, entry in ipairs(AIP.db.rosters.waitlist) do
@@ -825,7 +881,7 @@ end
 function Roster.UpdateNotesDisplay(name)
     if not rosterFrame then return end
 
-    local rating = Roster.GetPlayerRating(name)
+    local rating = Roster.GetPlayerRating(name) or 5
     for i = 1, 5 do
         local star = _G["AIPNotesRating"..i]
         if star then

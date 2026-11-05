@@ -121,7 +121,14 @@ function CC.AppendToTooltip(tooltip, name, isSelf, opts)
     opts = opts or {}
     local mine = isSelf or name == UnitName("player")
     local card = CC.peerCards and CC.peerCards[name]
-    if not card and mine then card = CC.BuildMine() end
+    if not card and mine then
+        card = CC.BuildMine()
+        -- BuildMine returns slots as a dense list; the tooltip looks them up by slot id
+        -- (like assembled peer cards), so re-key by slot id.
+        local bySlot = {}
+        for _, r in ipairs(card.slots or {}) do if r.s then bySlot[r.s] = r end end
+        card.slots = bySlot
+    end
 
     if opts.header then
         -- Class-coloured name.

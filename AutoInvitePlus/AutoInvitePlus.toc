@@ -51,6 +51,7 @@ modules\RaidTools.lua
 modules\RaidToolsRoll.lua
 modules\RaidToolsUI.lua
 modules\RaidToolsEvents.lua
+modules\ActivityLog.lua
 modules\DBMBridge.lua
 modules\ThreatCoach.lua
 modules\Readiness.lua
@@ -62,6 +63,7 @@ modules\PostPull.lua
 modules\Rotation.lua
 modules\TankCast.lua
 modules\RaidGroups.lua
+modules\WindowProfiles.lua
 modules\LFGWatch.lua
 modules\CharacterCard.lua
 modules\TestData.lua

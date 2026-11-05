@@ -155,6 +155,8 @@ function BP.Create(parent)
     searchBox:SetScript("OnEscapePressed", function(self)
         self:SetText("")
         self:ClearFocus()
+        BP.SearchFilter = ""
+        BP.Update()
     end)
     if AIP.UI and AIP.UI.StyleEditBox then AIP.UI.StyleEditBox(searchBox) end
     frame.searchBox = searchBox
@@ -827,9 +829,8 @@ function BP.ShowExportPopup()
     exportPopup.statsText:SetText("Exporting " .. count .. " players  |  " .. sourceStr)
 
     -- Generate export data
-    BP.UpdateExportData()
-
     exportPopup:Show()
+    BP.UpdateExportData()
 end
 
 function BP.UpdateExportData()

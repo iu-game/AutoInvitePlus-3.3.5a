@@ -180,7 +180,12 @@ function GUI.CreateBrowserTab(container, tabType)
         end
     end)
     searchBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-    searchBox:SetScript("OnEscapePressed", function(self) self:SetText("") self:ClearFocus() end)
+    searchBox:SetScript("OnEscapePressed", function(self)
+        self:SetText("")
+        container.searchFilter = ""
+        GUI.RefreshBrowserTab(tabType)
+        self:ClearFocus()
+    end)
 
     -- Filter dropdown
     local filterDropdown = CreateFrame("Frame", "AIPFilter" .. tabType, treePanel, "UIDropDownMenuTemplate")
@@ -750,7 +755,7 @@ function GUI.CreateBrowserTab(container, tabType)
                 "([%w%-_]+)%s+to%s+join",    -- keyword to join
 
                 -- AIP protocol pattern
-                "{AIP[^}]*}.-w/%s*([%w%-_]+)",  -- {AIP:x.x} ... w/ keyword
+                "{aip[^}]*}.-w/%s*([%w%-_]+)",  -- {AIP:x.x} ... w/ keyword
             }
 
             for _, pattern in ipairs(patterns) do
@@ -794,7 +799,11 @@ function GUI.CreateBrowserTab(container, tabType)
                 local msg = data.message:lower()
                 for _, pat in ipairs({'w/%s*"([^"]+)"', "w/%s*'([^']+)'", "w/%s+([%w%-_]+)"}) do
                     local found = msg:match(pat)
-                    if found and #found <= 20 then keyword = found break end
+                    if found and #found >= 2 and #found <= 20
+                        and not ({["the"]=1, ["and"]=1, ["for"]=1, ["lfm"]=1, ["lf"]=1, ["need"]=1, ["tank"]=1, ["heal"]=1, ["dps"]=1})[found] then
+                        keyword = found
+                        break
+                    end
                 end
             end
         end
@@ -884,6 +893,7 @@ function GUI.CreateBrowserTab(container, tabType)
             CS.MarkExcluded(name)
             AIP.Print("Hid " .. name .. "'s listing")
         end
+        GUI.UpdateDetailsPanel(container, data)  -- refresh this button's label
         GUI.RefreshBrowserTab(tabType)
     end)
     hideBtn:SetScript("OnEnter", function(self)
@@ -891,8 +901,9 @@ function GUI.CreateBrowserTab(container, tabType)
         self:SetBackdropColor(0.16, 0.15, 0.10, 0.98)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         local data = container.selectedGroupData
-        local hidden = data and data.leader and AIP.ChatScanner
-            and AIP.ChatScanner.IsExcluded(data.leader)
+        local hiddenName = data and (data.leader or data.name)
+        local hidden = hiddenName and AIP.ChatScanner
+            and AIP.ChatScanner.IsExcluded(hiddenName)
         if hidden then
             GameTooltip:AddLine("Unhide")
             GameTooltip:AddLine("Show this listing again", 1, 1, 1, true)
@@ -2036,7 +2047,8 @@ function GUI.CreateBrowserTab(container, tabType)
             AIP.Print("Queue cleared")
         elseif tab == "lfg" then
             GUI.LfgEnrollments = {}
-            if AIP.ChatScanner then AIP.ChatScanner.Players = {} end
+            -- Wipe in place: AIP.LFMBrowser.Players aliases this table
+            if AIP.ChatScanner and AIP.ChatScanner.Players then wipe(AIP.ChatScanner.Players) end
             -- Also clear LFG entries from the queue
             if AIP.db and AIP.db.queue then
                 for i = #AIP.db.queue, 1, -1 do

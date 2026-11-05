@@ -2426,10 +2426,20 @@ function Comp.RequestInspect(unit)
     if not CheckInteractDistance(unit, 1) then return end  -- Must be in range
 
     -- Remember who we're inspecting: INSPECT_TALENT_READY carries no unit arg.
+    -- Go through the shared arbiter so we never NotifyInspect while another
+    -- inspect (InspectionEngine queue / tooltip) awaits its results; callers
+    -- retry on their next scan tick.
+    local IE = AIP.InspectionEngine
+    if IE and IE.Request and IE.Busy() then return end
+
     Comp.PendingInspectUnit = unit
     Comp.PendingInspectName = UnitName(unit)
     Comp.InspectBufferName = nil  -- whatever was confirmed before is stale until this lands
-    NotifyInspect(unit)
+    if IE and IE.Request then
+        if not IE.Request(unit, "comp") then return end
+    else
+        NotifyInspect(unit)
+    end
 end
 
 -- Handle inspection data received
@@ -2457,11 +2467,20 @@ inspectFrame:SetScript("OnEvent", function(self, event)
                 if spec then
                     Comp.InspectedSpecs[unitName] = {spec = spec, timestamp = time()}
 
+                    -- Push the resolved spec into the already-scanned member entry,
+                    -- otherwise CheckBuffCoverage keeps reading the stale nil spec.
+                    for _, m in ipairs(Comp.CurrentRaid.members or {}) do
+                        if m.name == unitName then m.spec = spec end
+                    end
+
                     -- Trigger a raid rescan if we're tracking composition
                     if Comp.CurrentRaid.template then
                         -- Delay slightly to avoid spamming (WotLK compatible)
                         if AIP.Utils and AIP.Utils.DelayedCall then
-                            AIP.Utils.DelayedCall(0.5, Comp.CheckBuffCoverage)
+                            AIP.Utils.DelayedCall(0.5, function()
+                                Comp.CheckBuffCoverage()
+                                if AIP.UpdateCompositionUI then AIP.UpdateCompositionUI() end
+                            end)
                         end
                     end
                 end
@@ -2517,6 +2536,35 @@ function Comp.SpecMatchesBuff(memberSpec, requiredSpecs)
         end
     end
 
+    return false
+end
+
+-- alternatesWith is declared one-way in the data; build a symmetric index once.
+local altIndex
+local function getAltIndex()
+    if altIndex then return altIndex end
+    altIndex = {}
+    for a, info in pairs(Comp.RaidBuffs) do
+        if info.alternatesWith then
+            altIndex[a] = altIndex[a] or {}
+            for _, b in ipairs(info.alternatesWith) do
+                altIndex[a][b] = true
+                altIndex[b] = altIndex[b] or {}
+                altIndex[b][a] = true
+            end
+        end
+    end
+    return altIndex
+end
+
+-- True if any buff that alternates with buffName (either direction) is available
+function Comp.HasAlternateBuff(buffName)
+    local alts = getAltIndex()[buffName]
+    if not alts then return false end
+    local avail = Comp.CurrentRaid.buffsAvailable or {}
+    for altName in pairs(alts) do
+        if avail[altName] then return true end
+    end
     return false
 end
 
@@ -2698,7 +2746,7 @@ function Comp.GetMissingBuffs()
 
     local missing = {}
     for _, buffName in ipairs(templateData.requiredBuffs) do
-        if not Comp.CurrentRaid.buffsAvailable[buffName] then
+        if not Comp.CurrentRaid.buffsAvailable[buffName] and not Comp.HasAlternateBuff(buffName) then
             table.insert(missing, buffName)
         end
     end
@@ -3264,11 +3312,7 @@ function Comp.GetRecommendations()
         local info = Comp.RaidBuffs[name]
         if not info then return end
         if raid.buffsAvailable[name] then return end
-        if info.alternatesWith then
-            for _, alt in ipairs(info.alternatesWith) do
-                if raid.buffsAvailable[alt] then return end
-            end
-        end
+        if Comp.HasAlternateBuff(name) then return end
         seenBuff[name] = true
         table.insert(wantBuffs, name)
     end
@@ -3451,12 +3495,7 @@ function Comp.BuildRecommendationLines()
         for _, b in ipairs(mb) do
             if not Comp.CurrentRaid.buffsAvailable[b] then
                 local info = Comp.RaidBuffs[b]
-                local alt = false
-                if info and info.alternatesWith then
-                    for _, a in ipairs(info.alternatesWith) do
-                        if Comp.CurrentRaid.buffsAvailable[a] then alt = true; break end
-                    end
-                end
+                local alt = Comp.HasAlternateBuff(b)
                 if not alt then table.insert(missing, b) end
             end
         end
