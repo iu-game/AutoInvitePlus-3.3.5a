@@ -65,11 +65,11 @@ function AIP.AddToQueue(name, message, role, gs, class)
     if not name or name:trim() == "" then return false end
 
     name = name:trim()
-    if AIP.ActivityLog then AIP.ActivityLog.Add("queue", "add attempt: " .. name) end
 
     -- Check if already in queue
     if AIP.IsInQueue(name) then
         AIP.Debug(name .. " is already in queue")
+        if AIP.ActivityLog then AIP.ActivityLog.Add("queue", "duplicate (already queued): " .. name) end
         return false
     end
 
@@ -84,6 +84,7 @@ function AIP.AddToQueue(name, message, role, gs, class)
         AIP.Debug(name .. " is blacklisted and mode is reject, auto-rejecting")
         local reason = blacklistEntry and blacklistEntry.reason or "blacklisted"
         SendChatMessage("[AutoInvite+] Auto-declined: " .. reason, "WHISPER", nil, name)
+        if AIP.ActivityLog then AIP.ActivityLog.Add("queue", "blacklisted, declined: " .. name) end
         return false
     end
 
@@ -130,6 +131,7 @@ function AIP.AddToQueue(name, message, role, gs, class)
     end
 
     table.insert(AIP.db.queue, insertPos, entry)
+    if AIP.ActivityLog then AIP.ActivityLog.Add("queue", "added " .. properName .. " (#" .. insertPos .. " of " .. #AIP.db.queue .. ")") end
 
     -- Build status message
     local queueMsg = properName .. " added to queue (position #" .. insertPos .. ", " .. #AIP.db.queue .. " total)"
@@ -156,6 +158,7 @@ function AIP.AddToQueue(name, message, role, gs, class)
             posMsg = posMsg .. " (expires in " .. AIP.db.queueTimeout .. " min)"
         end
         SendChatMessage(posMsg, "WHISPER", nil, properName)
+        if AIP.ActivityLog then AIP.ActivityLog.Add("whisper", "queue position #" .. insertPos .. " -> " .. properName) end
     end
 
     -- Notify other players of position changes if they moved down
@@ -171,6 +174,7 @@ function AIP.AddToQueue(name, message, role, gs, class)
                 delay = delay + 0.5
                 AIP.Utils.DelayedCall(delay, function()
                     pcall(SendChatMessage, "[AutoInvite+] Your queue position changed to: #" .. newPos, "WHISPER", nil, targetName)
+                    if AIP.ActivityLog then AIP.ActivityLog.Add("whisper", "queue moved #" .. newPos .. " -> " .. targetName) end
                 end)
             end
         end

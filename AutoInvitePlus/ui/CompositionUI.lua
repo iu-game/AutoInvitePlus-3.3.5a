@@ -227,7 +227,18 @@ function AIP.InitCompositionUI()
 
         -- Template options
         if AIP.Composition and AIP.Composition.RaidTemplates then
-            for key, data in pairs(AIP.Composition.RaidTemplates) do
+            -- pairs() order is hash-random and changes between sessions /
+            -- after custom templates are added: list alphabetically by name.
+            local keys = {}
+            for key in pairs(AIP.Composition.RaidTemplates) do keys[#keys + 1] = key end
+            table.sort(keys, function(a, b)
+                local na = AIP.Composition.RaidTemplates[a].name or a
+                local nb = AIP.Composition.RaidTemplates[b].name or b
+                if na ~= nb then return na < nb end
+                return a < b
+            end)
+            for _, key in ipairs(keys) do
+                local data = AIP.Composition.RaidTemplates[key]
                 info = UIDropDownMenu_CreateInfo()
                 info.text = data.name
                 info.value = key

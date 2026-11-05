@@ -72,6 +72,7 @@ local function SendWaitlistMessage(playerName, messageTemplate, position)
         return false
     end
 
+    if AIP.ActivityLog then AIP.ActivityLog.Add("whisper", "waitlist notice #" .. posStr .. " -> " .. playerName) end
     return true
 end
 

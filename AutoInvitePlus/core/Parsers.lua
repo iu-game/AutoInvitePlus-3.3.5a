@@ -10,27 +10,32 @@ local Parsers = AIP.Parsers
 -- ============================================================================
 
 Parsers.GSPatterns = {
-    -- Standard formats: "5800 gs", "gs 5800"
-    "(%d%d%d%d)%+?%s*gs",
-    "gs%s*(%d%d%d%d)%+?",
-    "(%d%d%d%d)%+?%s*gearscore",
-    "gearscore%s*(%d%d%d%d)%+?",
-    "min%s*gs%s*(%d%d%d%d)",
-    "gs%s*min%s*(%d%d%d%d)",
+    -- Standard formats: "5800 gs", "gs 5800". The %f[%d] / %f[%D] frontiers keep a
+    -- 4-digit capture from being a slice of a longer number ("58000 gs", "gs 58000").
+    "%f[%d](%d%d%d%d)%+?%s*gs",
+    "gs%s*%f[%d](%d%d%d%d)%f[%D]%+?",
+    "%f[%d](%d%d%d%d)%+?%s*gearscore",
+    "gearscore%s*%f[%d](%d%d%d%d)%f[%D]%+?",
+    "min%s*gs%s*%f[%d](%d%d%d%d)%f[%D]",
+    "gs%s*min%s*%f[%d](%d%d%d%d)%f[%D]",
+    -- Two-decimal K format: "5.80k gs", "gs 5.85k"
+    "(%d[%.,]%d%d)k%s*gs",
+    "gs%s*(%d[%.,]%d%d)k",
     -- K format: "5.8k gs", "gs 5.8k"
     "(%d[%.,]?%d)k%s*gs",
     "gs%s*(%d[%.,]?%d)k",
     "(%d[%.,]?%d)k%+?%s*gearscore",
     -- Whole-thousand K format: "6k gs", "gs 6k" (single digit; frontier keeps "5.8k" on the patterns above)
-    "%f[%d](%d)k%+?%s*gs",
+    -- %f[%w] (not %f[%d]) so "ToC5k gs" - a raid tag glued to the number - is not "5k gs".
+    "%f[%w](%d)k%+?%s*gs",
     "gs%s*(%d)k%f[%A]",
     -- Requirements: "5800+ gs", "gs: 5800"
-    "gs%s*:%s*(%d%d%d%d)",
-    "(%d%d%d%d)%s*%+%s*gs",
+    "gs%s*:%s*%f[%d](%d%d%d%d)%f[%D]",
+    "%f[%d](%d%d%d%d)%s*%+%s*gs",
     -- With separators: "5,800 gs"
     "(%d[%d,][%d,]+%d)%s*gs",
     -- AIP format: "5800+ iLvl" or "5800+ ilvl" (number before iLvl)
-    "(%d%d%d%d)%+?%s+i[lL]v[lL]",
+    "%f[%d](%d%d%d%d)%+?%s+i[lL]v[lL]",
     -- Standalone 4-digit number followed by + (common LFM format)
     "%]%s*(%d%d%d%d)%+",
 }
@@ -41,6 +46,15 @@ Parsers.GSPatterns = {
 
 Parsers.RaidPatterns = {
     -- ICC (Icecrown Citadel)
+    -- "icc 25 man hc" / "icc 25 men heroic": optional "man"/"men" between the size
+    -- and the difficulty word (must precede the bare normal-mode "icc%s*25%s*n" ->
+    -- which would otherwise never see these, and "icc%s*25" fallback would win).
+    {pattern = "icc%s*25%s*m[ae]n%s*hc", raid = "ICC25H", category = "ICC"},
+    {pattern = "icc%s*25%s*m[ae]n%s*h%f[%A]", raid = "ICC25H", category = "ICC"},
+    {pattern = "icc%s*25%s*m[ae]n%s*heroic", raid = "ICC25H", category = "ICC"},
+    {pattern = "icc%s*10%s*m[ae]n%s*hc", raid = "ICC10H", category = "ICC"},
+    {pattern = "icc%s*10%s*m[ae]n%s*h%f[%A]", raid = "ICC10H", category = "ICC"},
+    {pattern = "icc%s*10%s*m[ae]n%s*heroic", raid = "ICC10H", category = "ICC"},
     {pattern = "icc%s*25%s*hc", raid = "ICC25H", category = "ICC"},
     {pattern = "icc%s*25%s*h%f[%A]", raid = "ICC25H", category = "ICC"},
     {pattern = "icc%s*25%s*heroic", raid = "ICC25H", category = "ICC"},
@@ -53,6 +67,15 @@ Parsers.RaidPatterns = {
     {pattern = "icc%s*10%s*normal", raid = "ICC10N", category = "ICC"},
     {pattern = "icc%s*25", raid = "ICC25N", category = "ICC"},
     {pattern = "icc%s*10", raid = "ICC10N", category = "ICC"},
+    -- "lk" (Lich King) shorthand: ONLY with an explicit size ("lk25", "lk 10 hc").
+    -- Bare "lk" is deliberately NOT matched - it is too ambiguous in chat (initials,
+    -- typos, "Lk" as a name fragment) and false positives matter more than recall.
+    {pattern = "%f[%w]lk%s*25%s*hc", raid = "ICC25H", category = "ICC"},
+    {pattern = "%f[%w]lk%s*25%s*heroic", raid = "ICC25H", category = "ICC"},
+    {pattern = "%f[%w]lk%s*10%s*hc", raid = "ICC10H", category = "ICC"},
+    {pattern = "%f[%w]lk%s*10%s*heroic", raid = "ICC10H", category = "ICC"},
+    {pattern = "%f[%w]lk%s*25%f[%D]", raid = "ICC25N", category = "ICC"},
+    {pattern = "%f[%w]lk%s*10%f[%D]", raid = "ICC10N", category = "ICC"},
     -- ICC reputation/trash farming (Ashen Verdict) - not sized like a real
     -- raid run, so it gets its own child id rather than ICC10/ICC25. Must
     -- come before the bare "icc" catch-all below or every ICC rep message
@@ -258,6 +281,9 @@ Parsers.RoleKeywords = {
     },
 }
 
+-- Keywords that may carry a plural "s" in DetectRole.
+Parsers.RolePluralOK = {tank = true, healer = true, heal = true, dd = true, caster = true, rdps = true, mdps = true}
+
 -- Deterministic detection order (pairs() order is unspecified in Lua 5.1).
 Parsers.RoleOrder = {"tank", "healer", "dps"}
 
@@ -332,18 +358,28 @@ function Parsers.ParseGearScore(message)
     for _, pattern in ipairs(Parsers.GSPatterns) do
         local gs = msg:match(pattern)
         if gs then
+            local value
             -- Handle "5.8k" or "5,8k" format
             if gs:match("[%.,]") then
-                gs = gs:gsub(",", ".")
-                local num = tonumber(gs)
+                local num = tonumber((gs:gsub(",", ".")))
                 if num and num < 100 then
-                    return math.floor(num * 1000)
+                    value = math.floor(num * 1000 + 0.5)
                 end
             end
-            -- Single digit = whole thousands ("6k gs")
-            if #gs == 1 then return tonumber(gs) * 1000 end
-            -- Handle comma separator (5,800)
-            return tonumber((gs:gsub(",", ""))) or nil
+            if not value then
+                if #gs == 1 then
+                    -- Single digit = whole thousands ("6k gs")
+                    value = tonumber(gs) * 1000
+                else
+                    -- Handle comma separator (5,800)
+                    value = tonumber((gs:gsub(",", "")))
+                end
+            end
+            -- Plausibility guard: real WotLK GearScores are ~1000-10000. Anything
+            -- else is a mis-slice ("5.80k"->80) or junk; try the next pattern.
+            if value and value >= 1000 and value <= 10000 then
+                return value
+            end
         end
     end
 
@@ -395,7 +431,10 @@ function Parsers.DetectRole(message)
     for _, role in ipairs(Parsers.RoleOrder) do
         local data = Parsers.RoleKeywords[role]
         for _, keyword in ipairs(data.patterns) do
-            if msg:find("%f[%w]" .. keyword .. "%f[%W]") then
+            -- Plural "s" only for genuine role nouns ("tanks", "heals", "healers");
+            -- NOT for "trees"/"bears"/"discs"/"mts" style words.
+            local suffix = Parsers.RolePluralOK[keyword] and "s?" or ""
+            if msg:find("%f[%w]" .. keyword .. suffix .. "%f[%W]") then
                 return role:upper()
             end
         end

@@ -1102,6 +1102,8 @@ function GUI.CreateFrame()
                 func = function() if AIP.TankCast and AIP.TankCast.ToggleWindow then AIP.TankCast.ToggleWindow() end end},
             {text = "Raid Groups Window", notCheckable = true,
                 func = function() if AIP.RaidGroups and AIP.RaidGroups.ToggleWindow then AIP.RaidGroups.ToggleWindow() end end},
+            {text = "Activity Log", notCheckable = true,
+                func = function() if AIP.ActivityLog and AIP.ActivityLog.ToggleWindow then AIP.ActivityLog.ToggleWindow() end end},
             {text = " ", disabled = true, notCheckable = true},
             {text = "Cancel", notCheckable = true},
         }
@@ -1347,6 +1349,16 @@ function GUI.CreateFrame()
     simpleLine2:Hide()
     statusBar.simpleLine2 = simpleLine2
 
+    -- Chat-safety indicator for Simplified View: right-aligned on line 1;
+    -- simpleLine1's right edge is re-anchored to it in RenderSimplifiedFooter
+    -- using the measured text width, so the two can never overlap.
+    local simpleChat = statusBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    simpleChat:SetPoint("TOPRIGHT", -6, -4)
+    simpleChat:SetJustifyH("RIGHT")
+    simpleChat:SetText("")
+    simpleChat:Hide()
+    statusBar.simpleChat = simpleChat
+
     -- Resize grip
     local resizeGrip = CreateFrame("Button", nil, frame)
     resizeGrip:SetSize(16, 16)
@@ -1487,6 +1499,7 @@ function GUI.ApplySimplifiedView(enabled)
             if sb.broadcastStatus then sb.broadcastStatus:Hide() end
             if sb.simpleLine1 then sb.simpleLine1:Show() end
             if sb.simpleLine2 then sb.simpleLine2:Show() end
+            if sb.simpleChat then sb.simpleChat:Show() end
             GUI.RenderSimplifiedFooter()
         else
             if frame.statusText then frame.statusText:Show() end
@@ -1495,6 +1508,7 @@ function GUI.ApplySimplifiedView(enabled)
             if sb.broadcastStatus then sb.broadcastStatus:Show() end
             if sb.simpleLine1 then sb.simpleLine1:Hide() end
             if sb.simpleLine2 then sb.simpleLine2:Hide() end
+            if sb.simpleChat then sb.simpleChat:Hide() end
         end
     end
 
@@ -4486,8 +4500,21 @@ function GUI.CleanupLfgEnrollments()
     local now = time()
     local expireTime = 15 * 60  -- 15 minutes
 
+    -- Enrollment tables are also inserted into the persisted AIP.db.queue; after
+    -- a relog GUI.LfgEnrollments is empty so they'd never expire. Sweep stale
+    -- orphans (not tracked this session, not our own) out of the saved queue.
+    if AIP.db and AIP.db.queue then
+        for i = #AIP.db.queue, 1, -1 do
+            local q = AIP.db.queue[i]
+            if q and q.isLfgEnrollment and not q.isSelf and not GUI.LfgEnrollments[q.name]
+               and (now - (q.time or 0)) > expireTime then
+                table.remove(AIP.db.queue, i)
+            end
+        end
+    end
+
     for name, enrollment in pairs(GUI.LfgEnrollments) do
-        if now - enrollment.time > expireTime then
+        if now - (enrollment.time or now) > expireTime then
             GUI.LfgEnrollments[name] = nil
             -- Also remove from queue
             if AIP.db and AIP.db.queue then
@@ -8438,6 +8465,9 @@ function GUI.ShowRecommendations()
 end
 
 function GUI.UpdateCompositionTab()
+    -- The main frame may not exist yet (the LFM popup can be opened and
+    -- re-point the template before the window was ever created).
+    if not (GUI.Frame and GUI.Frame.tabContents) then return end
     local container = GUI.Frame.tabContents["composition"]
     if not container then return end
 
@@ -8729,6 +8759,16 @@ function GUI.RenderSimplifiedFooter()
         local modeStr = GUI.Broadcast.mode == "lfm" and "LFM" or "LFG"
         local color = remaining < 5 and "|cFFFFFF00" or "|cFF00FF00"
         alert = color .. "Broadcasting " .. modeStr .. ":|r " .. math.floor(remaining) .. "s"
+    end
+
+    -- Chat-safety text on the right of line 1; line 1 is clipped to whatever
+    -- width is left (measured, plus a 6px gap) so nothing overlaps.
+    if sb.simpleChat then
+        sb.simpleChat:SetText((GUI.ChatSafetyText()))
+        local cw = (sb.simpleChat:GetStringWidth() or 0) + 6
+        sb.simpleLine1:ClearAllPoints()
+        sb.simpleLine1:SetPoint("TOPLEFT", 6, -4)
+        sb.simpleLine1:SetPoint("TOPRIGHT", -6 - cw, -4)
     end
 
     if alert ~= "" then
@@ -9043,15 +9083,15 @@ function AIP.OnTreeSelectionChanged(nodeId, playerName)
 
     -- Check for inspection data
     local inspectData = AIP.InspectionEngine and AIP.InspectionEngine.GetCachedData(playerName)
-    if inspectData then
-        panel.enchantText:SetText("Missing Enchants: " .. inspectData.analysis.missingEnchants)
+    if inspectData and inspectData.analysis and inspectData.analysis.enchantableSlots then
+        panel.enchantText:SetText("Missing Enchants: " .. (inspectData.analysis.missingEnchants or 0))
         if #inspectData.analysis.enchantableSlots > 0 then
             panel.enchantList:SetText("- " .. table.concat(inspectData.analysis.enchantableSlots, ", "))
         else
             panel.enchantList:SetText("")
         end
 
-        panel.gemText:SetText("Empty Gem Slots: " .. inspectData.analysis.emptyGemSlots .. " / " .. inspectData.analysis.totalGemSlots)
+        panel.gemText:SetText("Empty Gem Slots: " .. (inspectData.analysis.emptyGemSlots or 0) .. " / " .. (inspectData.analysis.totalGemSlots or 0))
 
         if inspectData.performanceEstimate then
             local perf = inspectData.performanceEstimate

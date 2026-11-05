@@ -216,6 +216,7 @@ local defaults = {
         groupLocked = false,        -- group positions locked (manager safety toggle)
         pos = nil,                  -- {point, relPoint, x, y}
     },
+    activityLogPos = nil,           -- Activity Log window {point, relPoint, x, y}
     -- Auto-open the Tank Cast and Raid Groups windows the moment you form or
     -- join a group (solo -> party/raid). Toggle with /aip autoshow.
     autoShowOnGroup = true,
@@ -228,6 +229,7 @@ local defaults = {
     minimapBubbles = true,          -- "VOA Listed" / "Favorites Listed" bubbles by the minimap icon
     assignmentToasts = true,        -- Raid Groups assignment/note toast
     settingsCollapsed = {},         -- Settings tab: [sectionId] = true when collapsed
+    windowsPerCharMode = false,     -- Settings tab: "This character only" checkbox for window profiles/toggles
     timerBarsEnabled = true,        -- pull/break/boss-ability countdown bars
     windowsTipShown = false,        -- one-time "/aip windows off" login tip (AIP.WindowProfiles)
 
@@ -603,7 +605,7 @@ local function InvitePlayer(name)
     local invited = (AIP.db.responseInvite and AIP.db.responseInvite ~= "") and AIP.db.responseInvite or "[AutoInvite+] Sending invite!"
     SendChatMessage(invited, "WHISPER", nil, name)
     Print("Invited: " .. name)
-    if AIP.ActivityLog then AIP.ActivityLog.Add("invite", name) end
+    if AIP.ActivityLog then AIP.ActivityLog.Add("invite", name) AIP.ActivityLog.Add("whisper", "invite notice -> " .. name) end
 
     -- Truthful application status: if this player applied via the DataBus
     -- Apply protocol, tell their addon they were invited.
@@ -1526,7 +1528,10 @@ local function SlashHandler(msg)
         end
 
     elseif cmd == "activity" then
-        if AIP.ActivityLog then AIP.ActivityLog.Print(tonumber(rest) or 20) else Print("ActivityLog not loaded") end
+        local sub = (rest or ""):lower():trim()
+        if sub == "window" or sub == "win" or sub == "show" then
+            if AIP.ActivityLog and AIP.ActivityLog.ToggleWindow then AIP.ActivityLog.ToggleWindow() else Print("ActivityLog not loaded") end
+        elseif AIP.ActivityLog then AIP.ActivityLog.Print(tonumber(rest) or 20) else Print("ActivityLog not loaded") end
 
     -- Debug log
     elseif cmd == "log" then
@@ -1912,6 +1917,7 @@ local function SlashHandler(msg)
         Print("  /aip spam - Send invite spam (paced by the ChatGate)")
         Print("  /aip gate - Show chat-budget status | /aip gate profile <relaxed|safe|paranoid>")
         Print("  /aip activity [n] - Show the last n things AIP sent/did (invites, whispers, broadcasts)")
+        Print("  /aip activity window - Open the Activity Log window")
         Print("  /aip weekly - Show this week's raid quest status")
         Print("  /aip fit <name> - Fit verdict for a queued player or a scanned listing")
         Print("  /aip auto - Matchmaking automation toggles (alerts/invite/apply/max)")

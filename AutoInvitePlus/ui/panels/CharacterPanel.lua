@@ -166,7 +166,10 @@ local function buildGear()
             if cap then e[#e+1] = { text = "        counts toward: " .. cap, rcolor = {0.6,0.65,0.72} } end
         end
     end
-    GA.BroadcastMine(#missing, sockets)
+    -- Render path: throttle the DataBus GEAR broadcast (this builder re-runs on every
+    -- P.Update / equipment change; BroadcastMine itself does not rate-limit).
+    local nowT = GetTime and GetTime() or 0
+    if not P.lastGearBcast or (nowT - P.lastGearBcast) > 60 then P.lastGearBcast = nowT; GA.BroadcastMine(#missing, sockets) end
 
     -- 3) Where to go next: weakest slots + the BiS progression + tier.
     e[#e+1] = { text = " " }
@@ -287,7 +290,7 @@ local function buildRotation()
     if Rot.ActiveProc then procBuff, procCast, procTex = Rot.ActiveProc() end
     local inCombat = UnitAffectingCombat("player")
     local hasTarget = UnitExists("target") and UnitCanAttack("player", "target")
-    e[#e+1] = { text = "WHAT TO PRESS NOW", header = true, accent = LIVE, rcolor = {0.55,1,0.55},
+    e[#e+1] = { text = "WHAT TO PRESS NOW", header = true, dpsRow = true, accent = LIVE, rcolor = {0.55,1,0.55},
         right = string.format("%.0f dps", Rot.DPS()), rightColor = {0.5,0.9,0.5} }
     if procBuff and procCast then
         e[#e+1] = { text = "PROC  " .. procBuff .. "  ->  cast " .. procCast .. " NOW!", icon = procTex, accent = GREEN, rcolor = {0.3,1,0.45} }
@@ -442,8 +445,10 @@ local function renderContent(entries, content, scroll)
     content = content or (frame and frame.content)
     scroll = scroll or (frame and frame.scroll)
     if not content then return end
+    content.dpsRow = nil
     for i, e in ipairs(entries) do
         local row = getRow(content, i)
+        if e.dpsRow then content.dpsRow = row end
         local xoff = (e.whatif or e.sel) and 20 or 0
         if e.header then row.headerBg:Show() else row.headerBg:Hide() end
         if e.accent then row.accent:SetTexture(e.accent[1], e.accent[2], e.accent[3]); row.accent:Show()
@@ -596,7 +601,7 @@ function updateStats()
     add("Attack Power", apTotal(), "ITEM_MOD_ATTACK_POWER_SHORT")
     add("Crit", string.format("%.2f%%", GetCritChance and GetCritChance() or 0), "ITEM_MOD_CRIT_RATING_SHORT", true)
     add("Hit", string.format("%d (%.2f%%)", cr(CR_HIT_MELEE), crb(CR_HIT_MELEE)), "ITEM_MOD_HIT_RATING_SHORT", true)
-    add("Expertise", (GetExpertise and select(1, GetExpertise())) or 0, "ITEM_MOD_EXPERTISE_RATING_SHORT", true)
+    add("Expertise", string.format("%d (%d)", math.floor((GetExpertise and select(1, GetExpertise())) or 0), cr(CR_EXPERTISE)), "ITEM_MOD_EXPERTISE_RATING_SHORT", true)
     add("Haste", string.format("%.2f%%", crb(CR_HASTE_MELEE)), "ITEM_MOD_HASTE_RATING_SHORT", true)
     add("Armor Pen", string.format("%d (%.2f%%)", cr(CR_ARMOR_PENETRATION), crb(CR_ARMOR_PENETRATION)), "ITEM_MOD_ARMOR_PENETRATION_RATING_SHORT", true)
 
@@ -615,7 +620,7 @@ function updateStats()
     hdr("Defense")
     add("Armor", armorTotal())
     local dba, dmo = 0, 0; if UnitDefense then dba, dmo = UnitDefense("player") end
-    add("Defense", (dba or 0) + (dmo or 0), "ITEM_MOD_DEFENSE_SKILL_RATING_SHORT", true)
+    add("Defense", string.format("%d (%d)", math.floor((dba or 0) + (dmo or 0)), cr(CR_DEFENSE_SKILL)), "ITEM_MOD_DEFENSE_SKILL_RATING_SHORT", true)
     add("Dodge", string.format("%.2f%%", GetDodgeChance and GetDodgeChance() or 0), "ITEM_MOD_DODGE_RATING_SHORT", true)
     add("Parry", string.format("%.2f%%", GetParryChance and GetParryChance() or 0), "ITEM_MOD_PARRY_RATING_SHORT", true)
     add("Block", string.format("%.2f%%", GetBlockChance and GetBlockChance() or 0), "ITEM_MOD_BLOCK_RATING_SHORT", true)
@@ -1561,7 +1566,7 @@ function P.Create(container)
         end
     end)
     local function loadModel()
-        local ok = pcall(function() model:SetUnit("player"); model:SetRotation(model.rot or 0.4) end)
+        local ok = pcall(function() model:SetUnit("player"); model:SetRotation(model.rot or 0.4); if model.zoom then model:SetPosition(model.zoom, 0, 0) end end)
         if not ok then pcall(function() model:SetModelScale(1); model:RefreshUnit() end) end
     end
     loadModel()
@@ -1684,11 +1689,19 @@ function P.Create(container)
     -- the Gear view is showing (NOT on the 0.5s ticker - SlotAudit is a heavy scan).
     local eqf = CreateFrame("Frame")
     eqf:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
-    eqf:SetScript("OnEvent", function()
+    -- Debounced: a gear swap fires this several times, and each refresh is a x17 tooltip scan.
+    local eqPending = false
+    local function eqRefresh()
+        eqPending = false
         if P.section == "Gear" and frame and frame:IsVisible() and frame.gearPane then
             renderPaperdoll()
             renderSlotDetail(P.detailSlot)
         end
+    end
+    eqf:SetScript("OnEvent", function()
+        if eqPending then return end
+        eqPending = true
+        if AIP.Utils and AIP.Utils.DelayedCall then AIP.Utils.DelayedCall(0.2, eqRefresh) else eqRefresh() end
     end)
 
     -- Every recommendation on this panel (gems/enchants/upgrades/caps) is derived
@@ -1699,10 +1712,18 @@ function P.Create(container)
     local specf = CreateFrame("Frame")
     specf:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
     specf:RegisterEvent("CHARACTER_POINTS_CHANGED")
-    specf:SetScript("OnEvent", function()
+    -- Debounced: CHARACTER_POINTS_CHANGED fires once per point (Apply talents loops).
+    local specPending = false
+    local function specRefresh()
+        specPending = false
         if frame and frame:IsVisible() then
             selectSection(P.section)
         end
+    end
+    specf:SetScript("OnEvent", function()
+        if specPending then return end
+        specPending = true
+        if AIP.Utils and AIP.Utils.DelayedCall then AIP.Utils.DelayedCall(0.3, specRefresh) else specRefresh() end
     end)
 
     -- Live-refresh the Combat section's DPS line while it's the active view.
@@ -1711,10 +1732,10 @@ function P.Create(container)
         self.acc = self.acc + e
         if self.acc < 0.5 then return end
         self.acc = 0
-        if P.section == "Rotation" and self:IsVisible() and self.content and self.content.rows and self.content.rows[1]
+        if P.section == "Rotation" and self:IsVisible() and self.content and self.content.dpsRow
             and AIP.Rotation then
             -- Row 1 is the "WHAT TO PRESS NOW" header; live DPS lives in its right column.
-            self.content.rows[1].right:SetText(string.format("%.0f dps", AIP.Rotation.DPS()))
+            self.content.dpsRow.right:SetText(string.format("%.0f dps", AIP.Rotation.DPS()))
         end
     end)
 

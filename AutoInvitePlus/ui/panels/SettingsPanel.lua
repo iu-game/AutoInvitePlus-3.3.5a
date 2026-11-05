@@ -252,9 +252,81 @@ local function CreateCheckbox(parent, x, y, key, labelText, onClick)
     return check, label
 end
 
+local textPopup
+
+-- Boolean setting with nil treated as the Core default (a missing key must not
+-- show as unticked when the default is on; an explicit false stays false).
+local function DbBool(key)
+    local v = AIP.db and AIP.db[key]
+    if v == nil and AIP.Defaults then v = AIP.Defaults[key] end
+    return v and true or false
+end
+
+-- Dry-run of WindowProfiles.Import: how many settings in the string differ
+-- from the current values. Mirrors WP.Import's parsing (it has no preview mode),
+-- so the count is an estimate if the module's skip rules change.
+local function ImportPreview(str)
+    local PREFIX = "AIPS1:"
+    if string.sub(str, 1, #PREFIX) ~= PREFIX then return nil end
+    local D, db = AIP.Defaults, AIP.db
+    if type(D) ~= "table" or type(db) ~= "table" then return nil end
+    local total, changed = 0, 0
+    for entry in string.gmatch(string.sub(str, #PREFIX + 1), "[^;]+") do
+        local k, t, val = string.match(entry, "^([%w_]+)=([bns])(.*)$")
+        local d = k and D[k]
+        if d ~= nil then
+            local cur = db[k]
+            if cur == nil then cur = d end
+            local new
+            if t == "b" and type(d) == "boolean" then new = (val == "1")
+            elseif t == "n" and type(d) == "number" then new = tonumber(val)
+            elseif t == "s" and type(d) == "string" then
+                new = string.gsub(val, "%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
+            end
+            if new ~= nil then
+                total = total + 1
+                if new ~= cur then changed = changed + 1 end
+            end
+        end
+    end
+    return total, changed
+end
+
+local function DoImport(str)
+    local WP = AIP.WindowProfiles
+    if WP and WP.Import then
+        local a, b = WP.Import(str)
+        local msg = (type(b) == "string" and b) or (type(a) == "string" and a)
+            or (a and "Settings imported." or "Import failed.")
+        AIP.Print(msg)
+        if SP.Update then SP.Update() end
+        return a and true or false
+    end
+    AIP.Print("Settings import is not available (module not loaded).")
+    return false
+end
+
+StaticPopupDialogs["AIP_SETTINGS_IMPORT_CONFIRM"] = {
+    text = "%s",
+    button1 = "Import",
+    button2 = "Cancel",
+    OnAccept = function(self, data)
+        if data and DoImport(data) and textPopup then textPopup:Hide() end
+    end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
+StaticPopupDialogs["AIP_SETTINGS_RESET_SECTION"] = {
+    text = "%s",
+    button1 = "Reset",
+    button2 = "Cancel",
+    OnAccept = function(self, data)
+        if data and data.run then data.run() end
+    end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
+
 -- Shared popup for settings export (read-only, selectable) and import (paste +
 -- Apply). Every dimension is derived from the content it holds.
-local textPopup
 function SP.ShowTextPopup(mode, text)
     local PAD, EDIT_W = 12, 480
     if not textPopup then
@@ -292,23 +364,24 @@ function SP.ShowTextPopup(mode, text)
             local str = f.edit:GetText() or ""
             str = string.gsub(str, "^%s+", "")
             str = string.gsub(str, "%s+$", "")
-            local WP = AIP.WindowProfiles
             if str == "" then
                 AIP.Print("Paste a settings string first.")
-            elseif WP and WP.Import then
-                local a, b = WP.Import(str)
-                local msg = (type(b) == "string" and b) or (type(a) == "string" and a)
-                    or (a and "Settings imported." or "Import failed.")
-                AIP.Print(msg)
-                if SP.Update then SP.Update() end
-                f:Hide()
-            else
-                AIP.Print("Settings import is not available (module not loaded).")
+                return
             end
+            local total, changed = ImportPreview(str)
+            if not total then
+                AIP.Print("Not an AutoInvite+ settings string.")
+                return
+            end
+            local msg = "Import these settings?\n\n" .. changed .. " of " .. total
+                .. " settings in the string differ from your current values and will be overwritten."
+            f.edit:ClearFocus()
+            StaticPopup_Show("AIP_SETTINGS_IMPORT_CONFIRM", msg, nil, str)
         end)
         f.closeBtn = AIP.UI.FlatButton(f, "Close", 80, 22, function() f:Hide() end)
         f.closeBtn:SetPoint("TOPRIGHT", f.editBox, "BOTTOMRIGHT", 0, -10)
         f.applyBtn:SetPoint("RIGHT", f.closeBtn, "LEFT", -8, 0)
+        f:SetScript("OnHide", function(self) self.edit:ClearFocus() end)
         textPopup = f
     end
 
@@ -392,6 +465,7 @@ function SP.Create(parent)
     local content = root
     local sections = {}
     local filterText = ""
+    local searchCollapsed = {}   -- manual collapse clicks made WHILE searching (reset when the query changes)
     local HDR_H, HEAD_GAP, SEC_GAP = 22, 4, 8
 
     local function CleanText(str)
@@ -425,7 +499,9 @@ function SP.Create(parent)
         local total = 10
         for _, s in ipairs(sections) do
             if (not searching) or s.match then
-                local collapsed = (not searching) and IsCollapsed(s.id)
+                local collapsed
+                if searching then collapsed = searchCollapsed[s.id] and true or false
+                else collapsed = IsCollapsed(s.id) end
                 local sf = s.frame
                 sf:ClearAllPoints()
                 if prev then
@@ -457,14 +533,19 @@ function SP.Create(parent)
     SP.Reflow = Reflow
 
     local function ToggleSection(s)
-        if filterText ~= "" then return end  -- while searching, matches stay open
-        SetCollapsed(s.id, not IsCollapsed(s.id))
+        if filterText ~= "" then
+            -- while searching, matches start open but a click still wins
+            searchCollapsed[s.id] = (not searchCollapsed[s.id]) or nil
+        else
+            SetCollapsed(s.id, not IsCollapsed(s.id))
+        end
         Reflow()
     end
 
     local function ApplyFilter(text)
         local q = string.gsub(text or "", "^%s+", "")
         q = string.lower((string.gsub(q, "%s+$", "")))
+        if q ~= filterText then searchCollapsed = {} end
         filterText = q
         for _, s in ipairs(sections) do
             s.match = false
@@ -483,7 +564,7 @@ function SP.Create(parent)
 
     -- Restore this section's keys to the Core defaults table (AIP.Defaults is
     -- the very table AIP.ResetDefaults seeds from), then refresh the widgets.
-    local function ResetSection(s)
+    local function DoResetSection(s)
         local D = AIP.Defaults
         if not (D and AIP.db and s.resetKeys) then return end
         local WP = AIP.WindowProfiles
@@ -491,6 +572,7 @@ function SP.Create(parent)
             if D[k] ~= nil then
                 if frame.winKeys and frame.winKeys[k] and WP and WP.Set then
                     WP.Set(k, CopyVal(D[k]), false)
+                    WP.Set(k, nil, true)  -- drop this character's override so the default really shows
                 else
                     AIP.db[k] = CopyVal(D[k])
                 end
@@ -499,9 +581,17 @@ function SP.Create(parent)
                 end
             end
         end
+        if WP and WP.Refresh and frame.winKeys then WP.Refresh() end
+        if AIP.LFGWatch and AIP.LFGWatch.UpdateWidget then AIP.LFGWatch.UpdateWidget() end
         if AIP.CentralGUI and AIP.CentralGUI.UpdateStatus then AIP.CentralGUI.UpdateStatus() end
         SP.Update()
         AIP.Print("Settings section reset to defaults: " .. s.title)
+    end
+
+    local function ResetSection(s)
+        StaticPopup_Show("AIP_SETTINGS_RESET_SECTION",
+            "Reset the \"" .. s.title .. "\" settings section to its defaults?\n\nOther sections are not affected.",
+            nil, {run = function() DoResetSection(s) end})
     end
 
     local function BeginSection(id, num, title, tipKey, resetKeys)
@@ -540,11 +630,14 @@ function SP.Create(parent)
         return s
     end
 
-    local function EndSection(s)
-        -- elastic: body height = the lowest y any widget in it reached
-        s.bodyH = math.max(1, -y)
-        s.body:SetHeight(s.bodyH)
-        -- collect searchable label strings (FontStrings + button captions)
+    -- (Re)index the section's label strings + button captions for search. Safe
+    -- to call repeatedly: it restores any highlight colour first, then rescans,
+    -- so text set after build time (status lines, dropdown captions) is searchable.
+    local function CollectTexts(s)
+        for _, e in ipairs(s.texts) do
+            if e.hl and e.fs then e.fs:SetTextColor(e.r, e.g, e.b) end
+        end
+        s.texts = {}
         local regs = {s.body:GetRegions()}
         for _, r in ipairs(regs) do
             if r.GetObjectType and r:GetObjectType() == "FontString" then
@@ -568,19 +661,38 @@ function SP.Create(parent)
         end
     end
 
+    local function EndSection(s)
+        -- elastic: body height = the lowest y any widget in it reached
+        s.bodyH = math.max(1, -y)
+        s.body:SetHeight(s.bodyH)
+        CollectTexts(s)
+    end
+
+    -- Re-index everything and re-apply the active query (called from SP.Update).
+    function frame.RecollectSearch()
+        for _, s in ipairs(sections) do CollectTexts(s) end
+        if filterText ~= "" then ApplyFilter(filterText) end
+    end
+
     searchBox:SetScript("OnTextChanged", function(self) ApplyFilter(self:GetText()) end)
     searchBox:SetScript("OnEscapePressed", function(self)
         self:SetText("")
         self:ClearFocus()
     end)
+    searchBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    -- never leave keyboard focus in the search box when the panel (or its tab) goes away
+    frame:SetScript("OnHide", function() searchBox:ClearFocus() end)
 
     local expandAllBtn = AIP.UI.FlatButton(searchBar, "Expand all", 76, 18, function()
-        if AIP.db then AIP.db.settingsCollapsed = {} end
+        if filterText ~= "" then searchCollapsed = {}
+        elseif AIP.db then AIP.db.settingsCollapsed = {} end
         Reflow()
     end)
     expandAllBtn:SetPoint("RIGHT", searchBar, "RIGHT", 0, 0)
     local collapseAllBtn = AIP.UI.FlatButton(searchBar, "Collapse all", 80, 18, function()
-        for _, s in ipairs(sections) do SetCollapsed(s.id, true) end
+        for _, s in ipairs(sections) do
+            if filterText ~= "" then searchCollapsed[s.id] = true else SetCollapsed(s.id, true) end
+        end
         Reflow()
     end)
     collapseAllBtn:SetPoint("RIGHT", expandAllBtn, "LEFT", -6, 0)
@@ -1474,19 +1586,19 @@ function SP.Create(parent)
         AIP.db.lfgWatch = (self:GetChecked() == 1 or self:GetChecked() == true)
         if AIP.LFGWatch and AIP.LFGWatch.UpdateWidget then AIP.LFGWatch.UpdateWidget() end
     end)
-    rdfCheck:SetChecked(AIP.db and AIP.db.lfgWatch)
+    rdfCheck:SetChecked(DbBool("lfgWatch"))
     frame.checks.lfgWatch = rdfCheck
     y = y - 26
     local rdfShareCheck = CreateCheckbox(content, 15, y, "lfgShare", "Share my queue status with addon peers (DataBus)", function(self)
         AIP.db.lfgShare = (self:GetChecked() == 1 or self:GetChecked() == true)
     end)
-    rdfShareCheck:SetChecked(AIP.db and AIP.db.lfgShare)
+    rdfShareCheck:SetChecked(DbBool("lfgShare"))
     frame.checks.lfgShare = rdfShareCheck
     y = y - 26
     local rdfRequeueCheck = CreateCheckbox(content, 15, y, "lfgAutoRequeue", "Auto leave + re-queue if no group in 2 min (resets queue position)", function(self)
         AIP.db.lfgAutoRequeue = (self:GetChecked() == 1 or self:GetChecked() == true)
     end)
-    rdfRequeueCheck:SetChecked(AIP.db and AIP.db.lfgAutoRequeue)
+    rdfRequeueCheck:SetChecked(DbBool("lfgAutoRequeue"))
     frame.checks.lfgAutoRequeue = rdfRequeueCheck
     y = y - 34
 
@@ -1528,7 +1640,10 @@ function SP.Create(parent)
     y = y - 28
 
     local perCharLabel
-    perCharCheck, perCharLabel = CreateCheckbox(content, 15, y, nil, "This character only (applies to profiles and the toggles below)")
+    perCharCheck, perCharLabel = CreateCheckbox(content, 15, y, nil, "This character only (applies to profiles and the toggles below)", function(self)
+        if AIP.db then AIP.db.windowsPerCharMode = (self:GetChecked() == 1 or self:GetChecked() == true) end
+    end)
+    perCharCheck:SetChecked(DbBool("windowsPerCharMode"))
     frame.perCharCheck = perCharCheck
     local resetPosBtn = AIP.UI.FlatButton(content, "Reset window positions", 150, 20, function()
         local WP = AIP.WindowProfiles
@@ -1945,10 +2060,14 @@ function SP.Update()
             local v
             if WP and WP.Get then v = WP.Get(key) else v = db[key] end
             check:SetChecked(v and true or false)
-        elseif db[key] ~= nil then
-            check:SetChecked(db[key])
+        else
+            local v = db[key]
+            if v == nil and AIP.Defaults then v = AIP.Defaults[key] end
+            if v ~= nil then check:SetChecked(v and true or false) end
         end
     end
+
+    if SP.Frame.perCharCheck then SP.Frame.perCharCheck:SetChecked(DbBool("windowsPerCharMode")) end
 
     -- Update smart invite settings (nested in smartInvite table)
     if db.smartInvite then
@@ -2063,7 +2182,8 @@ function SP.Update()
         end
     end
 
-    -- Re-apply saved collapse state (db may have changed, e.g. after a reset)
+    -- Re-index search text (status lines etc. changed above) + re-apply collapse state
+    if SP.Frame.RecollectSearch then SP.Frame.RecollectSearch() end
     if SP.Reflow then SP.Reflow() end
 end
 
@@ -2077,6 +2197,7 @@ end
 
 function SP.Hide()
     if SP.Frame then
+        if SP.Frame.searchBox then SP.Frame.searchBox:ClearFocus() end
         SP.Frame:Hide()
     end
 end

@@ -59,6 +59,21 @@ local roles = {
 }
 for _, c in ipairs(roles) do eq(P.DetectRole(c[1]), c[2], "role '" .. c[1] .. "'") end
 eq(P.DetectRole(nil), nil, "role nil")
+
+-- ---- previously-open gaps --------------------------------------------------------
+for _, c in ipairs({
+    { "LFM ICC 25 man hc", "ICC25H" }, { "icc 25 man heroic", "ICC25H" }, { "icc 10 men hc", "ICC10H" },
+    { "icc 25 man", "ICC25N" }, { "lk25", "ICC25N" }, { "lfm lk 10", "ICC10N" }, { "lk25 hc", "ICC25H" },
+    { "lk", nil }, { "my lk is low", nil }, { "talk 25 now", nil },
+}) do eq((P.DetectRaid(c[1])), c[2], "gap raid '" .. c[1] .. "'") end
+for _, c in ipairs({
+    { "5.80k gs", 5800 }, { "gs 5.85k", 5850 }, { "icc gs 58000", nil }, { "58000 gs", nil },
+    { "ToC5k gs", nil }, { "toc 5k gs", 5000 }, { "50k gs", nil }, { "gs 99999", nil },
+}) do eq(P.ParseGearScore(c[1]), c[2], "gap GS '" .. c[1] .. "'") end
+for _, c in ipairs({
+    { "need tanks", "TANK" }, { "need 2 heals", "HEALER" }, { "LF healers", "HEALER" }, { "more dps pls", "DPS" },
+    { "casters wanted", "DPS" }, { "trees", nil }, { "mts", nil }, { "tankard", nil }, { "healthy", nil },
+}) do eq(P.DetectRole(c[1]), c[2], "gap role '" .. c[1] .. "'") end
 eq(P.DetectClass("Resto druid LFG"), "DRUID", "class druid")
 eq(P.DetectClass("holy pala LF ICC"), "PALADIN", "class pala")
 eq(P.DetectClass("melee locate"), nil, "class: no false positive on melee/locate")

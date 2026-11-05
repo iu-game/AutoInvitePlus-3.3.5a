@@ -112,6 +112,8 @@ AIP.CentralGUI = {}
 eq(CS.MatchesMyLFM({ raid = "ICC25N" }), false, "no own LFM -> false")
 AIP.CentralGUI = { MyGroup = { raid = "ICC25N", tanks = { needed = 2, current = 0 }, healers = { needed = 0, current = 0 } } }
 noerr("MatchesMyLFM nil raid", CS.MatchesMyLFM, { role = "TANK" })
+noerr("MatchesMyLFM nil arg", CS.MatchesMyLFM, nil)
+eq(CS.MatchesMyLFM(nil), false, "MatchesMyLFM nil -> false")
 eq(CS.MatchesMyLFM({ role = "TANK" }), false, "nil raid -> false")
 eq(CS.MatchesMyLFM({ raids = {}, role = "TANK" }), false, "empty raids + nil raid -> false")
 noerr("MatchesMyLFM numeric raid", CS.MatchesMyLFM, { raid = 5 })

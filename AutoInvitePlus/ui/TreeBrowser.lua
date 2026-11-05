@@ -437,8 +437,13 @@ TB.SavedInstancesLastUpdate = 0
 function TB.UpdateSavedInstances()
     TB.SavedInstances = {}
 
-    -- Request fresh raid info from server
-    RequestRaidInfo()
+    -- Request fresh raid info from server (throttled: this runs on every tree
+    -- rebuild and every popup raid change; the server only needs asking
+    -- occasionally and each call is a client->server request)
+    if GetTime() - (TB.LastRaidInfoRequest or -999) >= 30 then
+        TB.LastRaidInfoRequest = GetTime()
+        RequestRaidInfo()
+    end
 
     -- GetNumSavedInstances returns the number of saved instances
     local numSaved = GetNumSavedInstances and GetNumSavedInstances() or 0

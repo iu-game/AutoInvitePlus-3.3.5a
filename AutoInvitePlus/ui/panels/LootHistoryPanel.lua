@@ -1325,7 +1325,7 @@ function LH.RefreshLoot()
                 if session and session.bosses then
                     for _, boss in ipairs(session.bosses) do
                         if boss.id == entry.bossId then
-                            sourceName = boss.name
+                            sourceName = boss.name or sourceName
                             break
                         end
                     end
@@ -1383,6 +1383,7 @@ function LH.CreatePopups()
         OnAccept = function(self, data)
             if data and AIP.RaidSession then
                 AIP.RaidSession.DeleteSession(data)
+                if AIP.db and AIP.db.selectedRaidSessionId == data then AIP.db.selectedRaidSessionId = nil; AIP.db.selectedBossId = nil end
                 if LH.SelectedRaid == data then
                     LH.SelectedRaid = nil
                     LH.SelectedBoss = nil
@@ -1567,7 +1568,7 @@ function LH.ShowExportPopup(text)
         LH.ExportPopup = popup
     end
 
-    LH.ExportPopup.editBox:SetText(text)
+    LH.ExportPopup.editBox:SetText(text or "")
     LH.ExportPopup.editBox:HighlightText()
     LH.ExportPopup:Show()
 end
@@ -1806,9 +1807,9 @@ lootFrame:SetScript("OnEvent", function(self, event, ...)
         --   item link but no recognizable recipient -> unassigned (no winner)
         -- Anything the local player gets is normalized to the player's name.
         local looter, category
-        if message:find("^You ") then
+        if message:find("^You won") or message:find("^You receive") then
             looter = UnitName("player")
-            category = message:find("won") and "won" or "picked"
+            category = message:find("^You won") and "won" or "picked"
         else
             local won = message:match("^(%S+) wins") or message:match("^(%S+) won")
             if won then

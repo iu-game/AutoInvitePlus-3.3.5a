@@ -1316,6 +1316,12 @@ function GUI.CreateBrowserTab(container, tabType)
                 if AIP.db and AIP.db.queue then
                     for j = #AIP.db.queue, 1, -1 do
                         if AIP.db.queue[j].name and AIP.db.queue[j].name:lower() == entry.name:lower() then
+                            -- Truthful ACK ladder: an applicant removed silently
+                            -- must still be told "declined" (not left on "queued").
+                            if AIP.db.queue[j].isApplication and AIP.Apply and AIP.Apply.NotifyDeclined
+                                and not UnitInRaid(entry.name) and not UnitInParty(entry.name) then
+                                AIP.Apply.NotifyDeclined(entry.name)
+                            end
                             table.remove(AIP.db.queue, j)
                             break
                         end
@@ -1562,6 +1568,18 @@ function GUI.CreateBrowserTab(container, tabType)
         row.queueBtn:SetScript("OnClick", function(self)
             local entry = container.lfgData and container.lfgData[self.index]
             if entry and entry.name then
+                -- Canonical path (blacklist reject-mode, favorite/guild priority,
+                -- role/GS, same as the Add-to-Queue popup)
+                if AIP.AddToQueue then
+                    if AIP.AddToQueue(entry.name, "LFG: " .. (entry.raid or "Unknown") .. " " .. (entry.role or "DPS"),
+                        entry.role, entry.gs, entry.class) then
+                        AIP.Print(entry.name .. " added to queue from LFG list")
+                        GUI.UpdateQueuePanel(container)
+                    else
+                        AIP.Print(entry.name .. " was not added (already queued or blacklisted)")
+                    end
+                    return
+                end
                 -- Add to queue
                 if not AIP.db then AIP.db = {} end
                 if not AIP.db.queue then AIP.db.queue = {} end
@@ -1617,6 +1635,16 @@ function GUI.CreateBrowserTab(container, tabType)
         row.waitlistBtn:SetScript("OnClick", function(self)
             local entry = container.lfgData and container.lfgData[self.index]
             if entry and entry.name then
+                -- Canonical path (dedupe, blacklist tag, role fold - the
+                -- waitlist store/UI only knows TANK/HEALER/DPS)
+                if AIP.AddToWaitlist then
+                    local wlRole = entry.role or "DPS"
+                    if AIP.Utils and AIP.Utils.FoldRole then wlRole = AIP.Utils.FoldRole(wlRole) or wlRole end
+                    if AIP.AddToWaitlist(entry.name, wlRole, "From LFG: " .. (entry.raid or "Unknown"), entry.class, entry.gs) then
+                        GUI.UpdateQueuePanel(container)
+                    end
+                    return
+                end
                 -- Ensure waitlist exists
                 if not AIP.db then AIP.db = {} end
                 if not AIP.db.waitlist then AIP.db.waitlist = {} end

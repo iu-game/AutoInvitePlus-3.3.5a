@@ -382,6 +382,7 @@ end
 -- ============================================================================
 
 function CS.MatchesMyLFM(lfgInfo)
+    if type(lfgInfo) ~= "table" then return false end
     local GUI = AIP.CentralGUI or {}
     if not GUI.MyGroup then return false end
 

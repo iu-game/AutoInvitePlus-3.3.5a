@@ -153,6 +153,10 @@ function WP.ResetPositions()
     if type(db) == "table" then
         for _, f in ipairs(FRAMES) do if f[2] then db[f[2]] = nil end end
     end
+    if type(db) == "table" then db.activityLogPos = nil end
+    if AIP.ActivityLog and AIP.ActivityLog.window and AIP.ActivityLog.window.SetPoint then
+        AIP.ActivityLog.window:ClearAllPoints(); AIP.ActivityLog.window:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    end
     if AIP.TankCast and AIP.TankCast.Cfg then
         local c = AIP.TankCast.Cfg(); if c then c.pos = nil end
     end

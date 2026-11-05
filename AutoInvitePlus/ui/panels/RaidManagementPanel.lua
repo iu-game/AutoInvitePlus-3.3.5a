@@ -89,6 +89,7 @@ RM.FlaskPatterns = {
     "Flask of Endless Rage",
     "Flask of Pure Mojo",
     "Lesser Flask",
+    "Flask of",  -- any other flask (Distilled Wisdom, Supreme Power, ...)
     "Elixir",  -- Catch battle/guardian elixirs
 }
 
@@ -151,6 +152,7 @@ RM.RaidBuffs = {
         provider = "PRIEST",
         spellName = "Prayer of Shadow Protection",
         priority = 6,
+        optional = true,  -- situational (Yogg/Sindra-type fights); never flag as "missing"
     },
     -- AP buffs (Battle Shout/Might/Horn)
     {
@@ -397,6 +399,18 @@ function RM.UpdateMSOSFromRaid()
     end
 end
 
+-- Send a list of chat lines staggered (first immediately) to respect the chat throttle.
+function RM.SendPaced(list, chatType)
+    local U = AIP.Utils
+    for i, msg in ipairs(list) do
+        if i == 1 or not (U and U.DelayedCall) then
+            SendChatMessage(msg, chatType)
+        else
+            U.DelayedCall((i - 1) * 0.4, function() SendChatMessage(msg, chatType) end)
+        end
+    end
+end
+
 -- Announce MS/OS specs to raid or party chat
 function RM.AnnounceMSOS()
     local numRaid = GetNumRaidMembers() or 0
@@ -412,6 +426,10 @@ function RM.AnnounceMSOS()
 
     local tracking = AIP.db and AIP.db.msTracking or {}
     local chatType = numRaid > 0 and "RAID" or "PARTY"
+    -- Paced sends: a group can be 25-40 lines; firing them all in one frame trips the
+    -- client chat throttle. Collect here, flush staggered via RM.SendPaced.
+    local pending = {}
+    local SendChatMessage = function(msg) pending[#pending + 1] = msg end
 
     -- Build list of players in raid with MS/OS info
     local playersWithMS = {}
@@ -467,6 +485,7 @@ function RM.AnnounceMSOS()
         end
     end
 
+    RM.SendPaced(pending, chatType)
     AIP.Print("MS/OS announced to " .. chatType:lower() .. " chat. " .. #playersWithMS .. " specs, " .. #playersWithoutMS .. " unset.")
 end
 
@@ -634,7 +653,7 @@ function RM.CheckUnitBuffs(unit)
 
     -- Determine missing buffs - ONLY if there's a provider available
     for _, buff in ipairs(RM.RaidBuffs) do
-        if not result.hasBuffs[buff.name] then
+        if not result.hasBuffs[buff.name] and not buff.optional then
             -- Only add to missing if someone can cast this buff
             if RM.AvailableBuffs and RM.AvailableBuffs[buff.name] then
                 table.insert(result.missingBuffs, buff.name)
@@ -691,7 +710,7 @@ function RM.GetBuffAssignments()
 
     -- Build buff needs from current data
     for _, buff in ipairs(RM.RaidBuffs) do
-        local providers = RM.BuffProviders[buff.name]
+        local providers = (RM.BuffProviders or {})[buff.name]
         if providers and #providers > 0 then
             -- Find players missing this buff
             local missingPlayers = {}
@@ -793,6 +812,10 @@ function RM.AnnounceMissingBuffsSmart()
 
     -- Determine chat type
     local chatType = numRaid > 0 and "RAID" or "PARTY"
+    -- Paced sends: a group can be 25-40 lines; firing them all in one frame trips the
+    -- client chat throttle. Collect here, flush staggered via RM.SendPaced.
+    local pending = {}
+    local SendChatMessage = function(msg) pending[#pending + 1] = msg end
 
     -- Build sorted list of casters (by class for consistent ordering)
     local sortedCasters = {}
@@ -870,6 +893,7 @@ function RM.AnnounceMissingBuffsSmart()
         SendChatMessage("All buffs, food, and flasks present!", chatType)
     end
 
+    RM.SendPaced(pending, chatType)
     AIP.Print("Buff announcements sent to " .. chatType:lower() .. " chat.")
 end
 
@@ -3149,7 +3173,7 @@ bossEventFrame:SetScript("OnEvent", function(self, event, timestamp, subevent, s
     if subevent == "UNIT_DIED" and dstName then
         -- Check if it's a known boss
         for _, bossName in ipairs(RM.BossList) do
-            if bossName ~= "(None)" and bossName ~= "<Custom Boss>" and dstName:find(bossName, 1, true) then
+            if bossName ~= "(None)" and bossName ~= "<Custom Boss>" and dstName == bossName then
                 RM.CurrentBoss = bossName
                 if AIP.Debug then AIP.Debug("Boss killed: " .. bossName .. " - tracking for loot ban warnings") end
                 break
