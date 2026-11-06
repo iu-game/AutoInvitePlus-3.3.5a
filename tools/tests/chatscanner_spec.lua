@@ -183,5 +183,26 @@ for _, nm in ipairs({ "BadLFG1", "BadLFG2", "BadLFG3" }) do
     ok(p == nil or type(p.raids) == "table", nm .. " raids table or entry absent")
 end
 
+-- Wintergrasp / VoA portal helpers
+eq(CS.FormatWGTime(4599), "1:16:39", "FormatWGTime h:mm:ss")
+eq(CS.FormatWGTime(599), "9:59", "FormatWGTime m:ss")
+eq(CS.FormatWGTime(0), "0:00", "FormatWGTime zero")
+eq(CS.FormatWGTime(nil), "--:--", "FormatWGTime nil")
+eq(CS.FormatWGTime(-5), "--:--", "FormatWGTime negative")
+eq(CS.ParseWGOwnerMessage("The Alliance has defeated the Horde in Wintergrasp!"), "Alliance", "WG owner: Alliance defeated")
+eq(CS.ParseWGOwnerMessage("The Horde has successfully defended Wintergrasp."), "Horde", "WG owner: Horde successfully")
+eq(CS.ParseWGOwnerMessage("The Horde has won the battle for Wintergrasp"), "Horde", "WG owner: Horde won")
+eq(CS.ParseWGOwnerMessage("The Alliance has captured Hellfire Peninsula"), nil, "WG owner: other zone ignored")
+eq(CS.ParseWGOwnerMessage("Wintergrasp battle begins in 10 minutes"), nil, "WG owner: no faction verb")
+eq(CS.ParseWGOwnerMessage(nil), nil, "WG owner: nil safe")
+AIP.db.wgOwner = ""
+GetWintergraspWaitTime = function() return 4599 end
+local st = CS.GetWGStatus()
+ok(st.wait == 4599 and not st.active and st.owner == nil, "GetWGStatus wait, unknown owner")
+ok(CS.SetWGOwner("Horde") and CS.GetWGStatus().owner == "Horde", "SetWGOwner stores Horde")
+ok(not CS.SetWGOwner("Naga"), "SetWGOwner rejects junk")
+GetWintergraspWaitTime = function() return nil end
+ok(CS.GetWGStatus().active == true and CS.GetWGStatus().wait == nil, "GetWGStatus battle active when wait nil")
+
 print(string.format("%d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)

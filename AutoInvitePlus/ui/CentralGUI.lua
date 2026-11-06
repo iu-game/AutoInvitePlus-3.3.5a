@@ -616,6 +616,17 @@ function GUI.CreateMinimapButton()
     voaGlow:Hide()
     button.voaGlow = voaGlow
 
+    -- Second, much larger halo (breathes in size) so the alert is visible at a
+    -- glance even on a busy minimap.
+    local voaHalo = button:CreateTexture(nil, "BACKGROUND")
+    voaHalo:SetSize(96, 96)
+    voaHalo:SetPoint("CENTER", 0, 0)
+    voaHalo:SetTexture("Interface\\Cooldown\\star4")
+    voaHalo:SetBlendMode("ADD")
+    voaHalo:SetVertexColor(1, 0.35, 0.1)
+    voaHalo:Hide()
+    button.voaHalo = voaHalo
+
     -- Position around minimap
     local angle = AIP.db and AIP.db.minimapAngle or 220
     local rad = math.rad(angle)
@@ -686,6 +697,9 @@ function GUI.CreateMinimapButton()
             local favCount = (CS and CS.GetFavoriteListings) and #CS.GetFavoriteListings() or 0
             if self.voaCount > 0 and (self.prevVoaCount or 0) == 0 then
                 GUI.ShowMinimapBubble("VOA Listed")
+                if AIP.db and AIP.db.voaSound ~= false and PlaySound then
+                    PlaySound("RaidWarning")
+                end
             end
             if favCount > 0 and (self.prevFavCount or 0) == 0 then
                 GUI.ShowMinimapBubble("Favorites Listed")
@@ -696,14 +710,23 @@ function GUI.CreateMinimapButton()
 
         if self.voaGlow then
             if (self.voaCount or 0) > 0 then
-                -- Alpha oscillates ~0.25..1.0 for a soft pulse
-                local a = 0.6 + 0.4 * math.sin(self.voaClock * 3)
-                self.voaGlow:SetAlpha(a)
+                -- Fast, full-range pulse (0.35..1.0) plus a breathing halo
+                local s = math.sin(self.voaClock * 5)
+                self.voaGlow:SetAlpha(0.675 + 0.325 * s)
+                self.voaGlow:SetSize(60 + 12 * s, 60 + 12 * s)
                 if not self.voaGlow:IsShown() then self.voaGlow:Show() end
-            elseif self.voaGlow:IsShown() then
-                self.voaGlow:Hide()
+                if self.voaHalo then
+                    local h = 96 + 28 * s
+                    self.voaHalo:SetSize(h, h)
+                    self.voaHalo:SetAlpha(0.55 + 0.45 * s)
+                    if not self.voaHalo:IsShown() then self.voaHalo:Show() end
+                end
+            else
+                if self.voaGlow:IsShown() then self.voaGlow:Hide() end
+                if self.voaHalo and self.voaHalo:IsShown() then self.voaHalo:Hide() end
             end
         end
+        GUI.UpdateVoaBanner(elapsed, self.voaCount or 0, self.voaClock or 0)
     end)
 
     button:SetScript("OnClick", function(self, button)
@@ -771,6 +794,118 @@ function GUI.CreateMinimapButton()
     GUI.MinimapButton = button
 
     return button
+end
+
+-- Always-on VoA banner under the minimap: who holds Wintergrasp/VoA, how long
+-- until the portal closes (= next Wintergrasp battle), and the live VOA LFM count.
+-- Draggable (Shift+drag); position saved in db.voaBannerPos.
+function GUI.CreateVoaBanner()
+    if GUI.VoaBanner then return GUI.VoaBanner end
+    local f = CreateFrame("Button", "AIPVoaBanner", UIParent)
+    f:SetSize(190, 44)
+    f:SetFrameStrata("MEDIUM")
+    f:SetClampedToScreen(true)
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 2,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    f:SetBackdropColor(0.04, 0.04, 0.07, 0.9)
+    f:SetBackdropBorderColor(0.4, 0.4, 0.45, 1)
+
+    local pos = AIP.db and AIP.db.voaBannerPos
+    if pos and pos.point then
+        f:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+    else
+        f:SetPoint("TOP", Minimap, "BOTTOM", 0, -26)
+    end
+    f:SetScript("OnDragStart", function(self) if IsShiftKeyDown() then self:StartMoving() end end)
+    f:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local point, _, relPoint, x, y = self:GetPoint()
+        if AIP.db then AIP.db.voaBannerPos = { point = point, relPoint = relPoint, x = x, y = y } end
+    end)
+
+    f.l1 = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.l1:SetPoint("TOP", 0, -5)
+    f.l2 = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    f.l2:SetPoint("TOP", f.l1, "BOTTOM", 0, -2)
+    f.l3 = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.l3:SetPoint("TOP", f.l2, "BOTTOM", 0, -2)
+
+    f:SetScript("OnClick", function() GUI.Toggle() end)
+    f:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Vault of Archavon portal")
+        local CS = AIP.ChatScanner
+        local st = CS and CS.GetWGStatus and CS.GetWGStatus() or {}
+        if st.active then
+            GameTooltip:AddLine("Wintergrasp battle in progress.", 1, 0.5, 0.2)
+        elseif st.wait then
+            GameTooltip:AddLine("Portal closes / next battle in " .. CS.FormatWGTime(st.wait), 0.8, 0.8, 0.8)
+        end
+        if st.owner then
+            GameTooltip:AddLine("Holder: " .. st.owner .. (st.ownerAge and (" (seen " .. CS.FormatWGTime(st.ownerAge) .. " ago)") or ""), 0.8, 0.8, 0.8)
+        else
+            GameTooltip:AddLine("Holder unknown - learned from the next battle result,", 0.6, 0.6, 0.6)
+            GameTooltip:AddLine("or set it with /aip voa owner alliance|horde", 0.6, 0.6, 0.6)
+        end
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("|cFFFFFFFFClick:|r Open main window   |cFFFFFFFFShift-drag:|r Move", 0.7, 0.7, 0.7)
+        GameTooltip:Show()
+    end)
+    f:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    GUI.VoaBanner = f
+    return f
+end
+
+function GUI.UpdateVoaBanner(elapsed, voaCount, clock)
+    local db = AIP.db
+    local f = GUI.VoaBanner
+    if not (db and db.voaBanner ~= false) then
+        if f and f:IsShown() then f:Hide() end
+        return
+    end
+    f = f or GUI.CreateVoaBanner()
+    f.acc = (f.acc or 0) + (elapsed or 0)
+    if f.acc >= 0.5 or not f.shownOnce then
+        f.acc = 0
+        f.shownOnce = true
+        if not f:IsShown() then f:Show() end
+        local CS = AIP.ChatScanner
+        local st = (CS and CS.GetWGStatus) and CS.GetWGStatus() or {}
+        local ownerTxt, r, g, b = "|cFF999999VoA holder unknown|r", 0.4, 0.4, 0.45
+        if st.owner == "Alliance" then
+            ownerTxt, r, g, b = "|cFF4A9BFFAlliance|r holds VoA", 0.29, 0.6, 1
+        elseif st.owner == "Horde" then
+            ownerTxt, r, g, b = "|cFFFF4040Horde|r holds VoA", 1, 0.25, 0.25
+        end
+        f.l1:SetText(ownerTxt)
+        if st.active then
+            f.l2:SetText("|cFFFF8000Battle in progress|r - portal closed")
+        elseif st.wait then
+            f.l2:SetText("Portal closes in |cFFFFD100" .. CS.FormatWGTime(st.wait) .. "|r")
+        else
+            f.l2:SetText("|cFF999999Wintergrasp timer n/a|r")
+        end
+        f.baseColor = { r, g, b }
+        if (voaCount or 0) > 0 then
+            f.l3:SetText("|cFFFFD100VOA LFM x" .. voaCount .. "|r - click")
+        else
+            f.l3:SetText("")
+        end
+        f:SetHeight((voaCount or 0) > 0 and 58 or 44)
+    end
+    -- Border flashes gold while VOA listings exist, otherwise the holder's colour
+    local c = f.baseColor or { 0.4, 0.4, 0.45 }
+    if (voaCount or 0) > 0 then
+        local s = 0.5 + 0.5 * math.sin((clock or 0) * 5)
+        f:SetBackdropBorderColor(1, 0.55 + 0.3 * s, 0, 0.6 + 0.4 * s)
+    else
+        f:SetBackdropBorderColor(c[1], c[2], c[3], 1)
+    end
 end
 
 -- Quick menu for minimap button

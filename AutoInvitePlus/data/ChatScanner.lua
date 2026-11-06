@@ -120,6 +120,65 @@ function CS.GetVOAListings()
 end
 
 -- ============================================================================
+-- WINTERGRASP / VAULT OF ARCHAVON PORTAL STATUS
+-- The VoA portal is usable by the faction holding Wintergrasp from the moment a
+-- battle ends until the next one starts, so "time until next battle" is also the
+-- time until the portal closes. GetWintergraspWaitTime() works from anywhere in
+-- the world; the OWNER is only known from the zone/chat, so it is remembered.
+-- ============================================================================
+
+-- "1:16:39" / "16:39"; nil/negative -> "--:--"
+function CS.FormatWGTime(sec)
+    if type(sec) ~= "number" or sec < 0 then return "--:--" end
+    sec = math.floor(sec)
+    local h = math.floor(sec / 3600)
+    local m = math.floor((sec % 3600) / 60)
+    local s = sec % 60
+    if h > 0 then return string.format("%d:%02d:%02d", h, m, s) end
+    return string.format("%d:%02d", m, s)
+end
+
+-- Winner faction ("Alliance"/"Horde") from a Wintergrasp battle-result message,
+-- or nil. Only messages that mention Wintergrasp are considered.
+function CS.ParseWGOwnerMessage(msg)
+    if type(msg) ~= "string" then return nil end
+    local l = msg:lower()
+    if not l:find("wintergrasp", 1, true) then return nil end
+    local verbs = { "defeated", "won", "captured", "taken", "conquered", "claimed", "control", "victorious", "successfully" }
+    for _, f in ipairs({ "alliance", "horde" }) do
+        for _, v in ipairs(verbs) do
+            if l:find("the " .. f .. " " .. v, 1, true) or l:find("the " .. f .. " has " .. v, 1, true)
+                or l:find("the " .. f .. " is " .. v, 1, true) then
+                return (f == "alliance") and "Alliance" or "Horde"
+            end
+        end
+        if l:find(f .. " control", 1, true) then return (f == "alliance") and "Alliance" or "Horde" end
+    end
+    return nil
+end
+
+-- { active = bool, wait = seconds|nil, owner = "Alliance"|"Horde"|nil, ownerAge = seconds|nil }
+function CS.GetWGStatus()
+    local st = { active = false }
+    if GetWintergraspWaitTime then
+        local w = GetWintergraspWaitTime()
+        if w and w > 0 then st.wait = w else st.active = true end
+    end
+    local db = AIP.db
+    if db and (db.wgOwner == "Alliance" or db.wgOwner == "Horde") then
+        st.owner = db.wgOwner
+        if db.wgOwnerTime then st.ownerAge = time() - db.wgOwnerTime end
+    end
+    return st
+end
+
+function CS.SetWGOwner(faction)
+    if faction ~= "Alliance" and faction ~= "Horde" then return false end
+    if AIP.db then AIP.db.wgOwner = faction; AIP.db.wgOwnerTime = time() end
+    return true
+end
+
+-- ============================================================================
 -- ENTRY MANAGEMENT
 -- ============================================================================
 
@@ -934,6 +993,16 @@ end
 local eventFrame = CreateFrame("Frame", "AIPChatScannerFrame")
 
 local function OnEvent(self, event, message, author, ...)
+    -- Wintergrasp battle results (server broadcasts) -> remember who holds VoA
+    if event == "CHAT_MSG_BG_SYSTEM_ALLIANCE" or event == "CHAT_MSG_BG_SYSTEM_HORDE"
+        or event == "CHAT_MSG_BG_SYSTEM_NEUTRAL" or event == "CHAT_MSG_RAID_BOSS_EMOTE" then
+        local owner = CS.ParseWGOwnerMessage(message)
+        if owner and CS.SetWGOwner(owner) then
+            AIP.Print("Wintergrasp: " .. owner .. " now holds Vault of Archavon.")
+        end
+        return
+    end
+
     -- Use unified listen settings from AIP.db (same as auto-invite)
     local db = AIP.db or {}
     local shouldScan = false
@@ -970,6 +1039,9 @@ eventFrame:RegisterEvent("CHAT_MSG_CHANNEL")
 eventFrame:RegisterEvent("CHAT_MSG_SAY")
 eventFrame:RegisterEvent("CHAT_MSG_YELL")
 eventFrame:RegisterEvent("CHAT_MSG_GUILD")
+eventFrame:RegisterEvent("CHAT_MSG_BG_SYSTEM_ALLIANCE")
+eventFrame:RegisterEvent("CHAT_MSG_BG_SYSTEM_HORDE")
+eventFrame:RegisterEvent("CHAT_MSG_BG_SYSTEM_NEUTRAL")
 eventFrame:SetScript("OnEvent", OnEvent)
 
 -- Periodic cleanup (every 60 seconds)

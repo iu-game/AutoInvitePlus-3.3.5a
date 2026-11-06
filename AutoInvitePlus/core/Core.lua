@@ -47,6 +47,10 @@ local defaults = {
     chatScanEnabled = true,         -- Persisted enable for the LFM/LFG browser scanner
     cacheDuration = 15,             -- Minutes to keep scanned LFM/LFG entries (drives scanner prune)
     voaAlert = true,                -- Pulse the minimap icon when VOA listings are available
+    voaBanner = true,               -- Always-on banner under the minimap: VoA portal timer + owner + listing count
+    voaSound = true,                -- Raid-warning sound when a VOA listing first appears
+    wgOwner = "",                   -- Last known Wintergrasp holder ("Alliance"/"Horde"), learned from battle-end messages
+    wgOwnerTime = 0,                -- time() when wgOwner was recorded
     hideBlacklistedListings = true, -- Hide blacklisted players' listings from the browser tree
 
     -- Player mode: "none", "lfm" (looking for members), "lfg" (looking for group)
@@ -1534,6 +1538,26 @@ local function SlashHandler(msg)
         if sub == "window" or sub == "win" or sub == "show" then
             if AIP.ActivityLog and AIP.ActivityLog.ToggleWindow then AIP.ActivityLog.ToggleWindow() else Print("ActivityLog not loaded") end
         elseif AIP.ActivityLog then AIP.ActivityLog.Print(tonumber(rest) or 20) else Print("ActivityLog not loaded") end
+
+    -- Vault of Archavon / Wintergrasp status
+    elseif cmd == "voa" then
+        local sub, arg = (rest or ""):lower():match("^(%S*)%s*(.-)$")
+        local CS = AIP.ChatScanner
+        if sub == "owner" then
+            local f = (arg == "alliance" or arg == "a") and "Alliance" or ((arg == "horde" or arg == "h") and "Horde" or nil)
+            if f and CS and CS.SetWGOwner(f) then Print("VoA holder set to " .. f .. ".")
+            else Print("Usage: /aip voa owner alliance|horde") end
+        elseif sub == "banner" then
+            AIP.db.voaBanner = not (AIP.db.voaBanner ~= false)
+            Print("VoA banner: " .. (AIP.db.voaBanner and "ON" or "OFF"))
+        elseif sub == "sound" then
+            AIP.db.voaSound = not (AIP.db.voaSound ~= false)
+            Print("VoA alert sound: " .. (AIP.db.voaSound and "ON" or "OFF"))
+        else
+            local st = (CS and CS.GetWGStatus) and CS.GetWGStatus() or {}
+            Print("Wintergrasp: " .. (st.active and "battle in progress" or ("next battle in " .. (CS and CS.FormatWGTime(st.wait) or "?")))
+                .. " | VoA holder: " .. (st.owner or "unknown") .. " | /aip voa owner|banner|sound")
+        end
 
     -- Debug log
     elseif cmd == "log" then
