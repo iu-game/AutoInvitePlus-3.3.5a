@@ -122,7 +122,7 @@ end
 local function build()
     local f = CreateFrame("Frame", "AIPActivityLogWindow", UIParent)
     f:SetSize(W_WIDTH, W_HEIGHT)
-    f:SetFrameStrata("DIALOG")
+    f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:SetClampedToScreen(true)
     f:SetMovable(true)
     f:EnableMouse(true)
@@ -130,7 +130,7 @@ local function build()
         bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1,
         insets = { left = 1, right = 1, top = 1, bottom = 1 },
     })
-    f:SetBackdropColor(0.06, 0.07, 0.10, 0.95)
+    f:SetBackdropColor(0.06, 0.07, 0.10, 1)
     f:SetBackdropBorderColor(0.24, 0.26, 0.34, 1)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", function(self) self:StartMoving() end)
