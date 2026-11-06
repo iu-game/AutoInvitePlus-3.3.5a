@@ -52,6 +52,7 @@ local defaults = {
     wgOwner = "",                   -- Last known Wintergrasp holder ("Alliance"/"Horde"), learned from battle-end messages
     wgOwnerTime = 0,                -- time() when wgOwner was recorded
     wgOwnerSource = "",             -- How the holder was learned: world-state / aura / announcement / manual
+    wgOwnerNext = 0,                -- Estimated next-battle time when the holder was learned (detects a battle since)
     hideBlacklistedListings = true, -- Hide blacklisted players' listings from the browser tree
 
     -- Player mode: "none", "lfm" (looking for members), "lfg" (looking for group)

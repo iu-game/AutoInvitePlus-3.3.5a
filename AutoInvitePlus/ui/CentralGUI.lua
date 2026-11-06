@@ -841,20 +841,7 @@ function GUI.CreateVoaBanner()
     f.l3:SetPoint("TOP", f.l2, "BOTTOM", 0, -2)
 
     f:SetScript("OnClick", function(self, btn)
-        if btn == "RightButton" then
-            -- Quick manual holder: unknown -> Alliance -> Horde -> Alliance ...
-            local CS = AIP.ChatScanner
-            local cur = AIP.db and AIP.db.wgOwner
-            if CS and CS.SetWGOwner then CS.SetWGOwner(cur == "Alliance" and "Horde" or "Alliance") end
-            self.acc = 99
-            if GameTooltip:IsOwned(self) then
-                GameTooltip:Hide()
-                local onEnter = self:GetScript("OnEnter")
-                if onEnter then onEnter(self) end
-            end
-        else
-            GUI.Toggle()
-        end
+        if btn ~= "RightButton" then GUI.Toggle() end
     end)
     f:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
@@ -869,12 +856,12 @@ function GUI.CreateVoaBanner()
         if st.owner then
             GameTooltip:AddLine("Holder: " .. st.owner .. " (" .. tostring(st.source or "?") .. (st.ownerAge and (", " .. CS.FormatWGTime(st.ownerAge) .. " ago") or "") .. ")", 0.8, 0.8, 0.8)
         else
-            GameTooltip:AddLine("Holder not detected yet. It is read automatically in Northrend", 0.6, 0.6, 0.6)
-            GameTooltip:AddLine("(Essence of Wintergrasp aura / world-state bar) and from", 0.6, 0.6, 0.6)
-            GameTooltip:AddLine("Wintergrasp battle-end announcements.", 0.6, 0.6, 0.6)
+            GameTooltip:AddLine("Holder not shown: it is only displayed when it can be proven", 0.6, 0.6, 0.6)
+            GameTooltip:AddLine("(Wintergrasp world-state bar, your own Essence of Wintergrasp", 0.6, 0.6, 0.6)
+            GameTooltip:AddLine("aura, or a battle-end announcement).", 0.6, 0.6, 0.6)
         end
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("|cFFFFFFFFClick:|r Open main window   |cFFFFFFFFRight-click:|r Override   |cFFFFFFFFShift-drag:|r Move", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("|cFFFFFFFFClick:|r Open main window   |cFFFFFFFFShift-drag:|r Move", 0.7, 0.7, 0.7)
         GameTooltip:Show()
     end)
     f:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -899,27 +886,30 @@ function GUI.UpdateVoaBanner(elapsed, voaCount, clock)
         if not f:IsShown() then f:Show() end
         local CS = AIP.ChatScanner
         local st = (CS and CS.GetWGStatus) and CS.GetWGStatus() or {}
-        local ownerTxt, r, g, b = "|cFF999999VoA holder: not seen yet|r", 0.4, 0.4, 0.45
+        -- No proof of the holder -> say nothing about it (a wrong guess is worse)
+        local ownerTxt, r, g, b = nil, 0.4, 0.4, 0.45
         if st.owner == "Alliance" then
             ownerTxt, r, g, b = "|cFF4A9BFFAlliance|r holds VoA", 0.29, 0.6, 1
         elseif st.owner == "Horde" then
             ownerTxt, r, g, b = "|cFFFF4040Horde|r holds VoA", 1, 0.25, 0.25
         end
-        f.l1:SetText(ownerTxt)
+        local timerTxt
         if st.active then
-            f.l2:SetText("|cFFFF8000Battle in progress|r - portal closed")
+            timerTxt = "|cFFFF8000Battle in progress|r - portal closed"
         elseif st.wait then
-            f.l2:SetText("Portal closes in |cFFFFD100" .. CS.FormatWGTime(st.wait) .. "|r")
+            timerTxt = "Portal closes in |cFFFFD100" .. CS.FormatWGTime(st.wait) .. "|r"
         else
-            f.l2:SetText("|cFF999999Wintergrasp timer n/a|r")
+            timerTxt = "|cFF999999Wintergrasp timer n/a|r"
         end
+        local lines = {}
+        if ownerTxt then lines[#lines + 1] = ownerTxt end
+        lines[#lines + 1] = timerTxt
+        if (voaCount or 0) > 0 then lines[#lines + 1] = "|cFFFFD100VOA LFM x" .. voaCount .. "|r - click" end
+        f.l1:SetText(lines[1] or "")
+        f.l2:SetText(lines[2] or "")
+        f.l3:SetText(lines[3] or "")
         f.baseColor = { r, g, b }
-        if (voaCount or 0) > 0 then
-            f.l3:SetText("|cFFFFD100VOA LFM x" .. voaCount .. "|r - click")
-        else
-            f.l3:SetText("")
-        end
-        f:SetHeight((voaCount or 0) > 0 and 58 or 44)
+        f:SetHeight(#lines >= 3 and 58 or 44)
     end
     -- Border flashes gold while VOA listings exist, otherwise the holder's colour
     local c = f.baseColor or { 0.4, 0.4, 0.45 }

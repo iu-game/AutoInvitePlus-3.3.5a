@@ -211,7 +211,7 @@ local NORTHREND_ZONES = {
 }
 
 -- Holder from the player's own aura: players of the faction that holds
--- Wintergrasp carry "Essence of Wintergrasp" (spell 58045) in Northrend.
+-- Wintergrasp carry "Essence of Wintergrasp" (spell 57940 / 58045) in Northrend.
 -- Positive evidence only: the aura being absent proves nothing (it can lag
 -- after a battle), so that returns nil rather than guessing the other faction.
 function CS.ScanWGAura(inBattle)
@@ -225,7 +225,7 @@ function CS.ScanWGAura(inBattle)
     while true do
         local name, _, _, _, _, _, _, _, _, _, spellId = UnitBuff("player", i)
         if not name then break end
-        if spellId == 58045 or name == "Essence of Wintergrasp" then return mine end
+        if spellId == 57940 or spellId == 58045 or name == "Essence of Wintergrasp" then return mine end
         i = i + 1
     end
     return nil
@@ -263,6 +263,12 @@ function CS.GetWGStatus()
             if (time() - (db.wgOwnerTime or 0)) > 120 then db.wgOwner = ""; db.wgOwnerSource = "" end
         end
         CS.wgWasActive = st.active
+        -- Evidence from an earlier cycle: the next-battle time moved on since it
+        -- was recorded, so at least one battle has been fought and the holder
+        -- may have changed (e.g. it happened while we were offline).
+        if st.wait and (db.wgOwnerNext or 0) > 0 and (time() + st.wait) - db.wgOwnerNext > 600 then
+            db.wgOwner = ""; db.wgOwnerSource = ""
+        end
         if db.wgOwner == "Alliance" or db.wgOwner == "Horde" then
             st.owner = db.wgOwner
             st.source = db.wgOwnerSource
@@ -278,6 +284,8 @@ function CS.SetWGOwner(faction, source)
         AIP.db.wgOwner = faction
         AIP.db.wgOwnerTime = time()
         AIP.db.wgOwnerSource = source or "manual"
+        local w = GetWintergraspWaitTime and GetWintergraspWaitTime()
+        AIP.db.wgOwnerNext = (w and w > 0) and (time() + w) or 0
     end
     return true
 end

@@ -1679,9 +1679,18 @@ function SP.Create(parent)
     end
     winCheck("tankCastEnabled", "Enable the Tank Cast window", function(on)
         if not on and AIP.TankCast and AIP.TankCast.HideWindow then AIP.TankCast.HideWindow() end
+        if on and (GetNumRaidMembers() > 0 or GetNumPartyMembers() > 0) and not InCombatLockdown()
+            and AIP.TankCast and AIP.TankCast.ShowWindow and not (AIP.TankCast.IsWindowShown and AIP.TankCast.IsWindowShown()) then
+            AIP.TankCast.ShowWindow()
+        end
     end)
     winCheck("raidGroupsEnabled", "Enable the Raid Groups window", function(on)
         if not on and AIP.RaidGroups and AIP.RaidGroups.HideWindow then AIP.RaidGroups.HideWindow() end
+        -- Enabling while grouped opens it right away (otherwise it looks like nothing happened)
+        if on and (GetNumRaidMembers() > 0 or GetNumPartyMembers() > 0) and not InCombatLockdown()
+            and AIP.RaidGroups and AIP.RaidGroups.ShowWindow and not (AIP.RaidGroups.IsWindowShown and AIP.RaidGroups.IsWindowShown()) then
+            AIP.RaidGroups.ShowWindow()
+        end
     end)
     winCheck("autoShowOnGroup", "Auto-open those windows when I join or form a group")
     winCheck("restoreWindowsOnLogin", "Re-open them at login if they were open last session")

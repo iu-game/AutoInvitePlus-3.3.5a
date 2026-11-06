@@ -277,5 +277,17 @@ local stA = CS.GetWGStatus()
 eq(stA.owner, "Alliance", "GetWGStatus adopts aura holder")
 eq(stA.source, "aura", "GetWGStatus reports source")
 
+-- evidence from an earlier battle cycle is dropped
+buffs = {}
+GetTime = function() return 9000 end
+GetWintergraspWaitTime = function() return 9000 end
+local stB = CS.GetWGStatus()
+eq(stB.owner, nil, "holder from an earlier cycle is dropped (next battle moved on)")
+GetWintergraspWaitTime = function() return 5000 end
+buffs = { { "Essence of Wintergrasp", 57940 } }
+GetTime = function() return 9100 end
+local stC = CS.GetWGStatus()
+eq(stC.owner, "Alliance", "aura id 57940 recognised")
+
 print(string.format("%d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)
