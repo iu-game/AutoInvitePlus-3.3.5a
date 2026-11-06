@@ -51,6 +51,7 @@ local defaults = {
     voaSound = true,                -- Raid-warning sound when a VOA listing first appears
     wgOwner = "",                   -- Last known Wintergrasp holder ("Alliance"/"Horde"), learned from battle-end messages
     wgOwnerTime = 0,                -- time() when wgOwner was recorded
+    wgOwnerSource = "",             -- How the holder was learned: world-state / aura / announcement / manual
     hideBlacklistedListings = true, -- Hide blacklisted players' listings from the browser tree
 
     -- Player mode: "none", "lfm" (looking for members), "lfg" (looking for group)
@@ -1555,6 +1556,19 @@ local function SlashHandler(msg)
                 local ui, st, text, icon = GetWorldStateUIInfo(i)
                 Print(i .. ": " .. tostring(text) .. " | " .. tostring(icon) .. " | state " .. tostring(st))
             end
+            local cs = AIP.ChatScanner
+            if cs then
+                Print("Aura scan: " .. tostring(cs.ScanWGAura and cs.ScanWGAura(false)) .. " | world-state: " .. tostring(cs.ScanWGWorldState and cs.ScanWGWorldState()))
+            end
+            local i = 1
+            while true do
+                local name, _, _, _, _, _, _, _, _, _, sid = UnitBuff("player", i)
+                if not name then break end
+                if tostring(name):lower():find("wintergrasp", 1, true) or tostring(name):lower():find("essence", 1, true) then
+                    Print("Buff: " .. name .. " (" .. tostring(sid) .. ")")
+                end
+                i = i + 1
+            end
         elseif sub == "banner" then
             AIP.db.voaBanner = not (AIP.db.voaBanner ~= false)
             Print("VoA banner: " .. (AIP.db.voaBanner and "ON" or "OFF"))
@@ -1564,7 +1578,7 @@ local function SlashHandler(msg)
         else
             local st = (CS and CS.GetWGStatus) and CS.GetWGStatus() or {}
             Print("Wintergrasp: " .. (st.active and "battle in progress" or ("next battle in " .. (CS and CS.FormatWGTime(st.wait) or "?")))
-                .. " | VoA holder: " .. (st.owner or "unknown") .. " | /aip voa owner|banner|sound|probe")
+                .. " | VoA holder: " .. (st.owner and (st.owner .. " (" .. tostring(st.source or "?") .. ")") or "unknown") .. " | /aip voa owner|banner|sound|probe")
         end
 
     -- Debug log

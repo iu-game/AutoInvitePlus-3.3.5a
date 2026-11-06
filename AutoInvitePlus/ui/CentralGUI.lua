@@ -867,13 +867,14 @@ function GUI.CreateVoaBanner()
             GameTooltip:AddLine("Portal closes / next battle in " .. CS.FormatWGTime(st.wait), 0.8, 0.8, 0.8)
         end
         if st.owner then
-            GameTooltip:AddLine("Holder: " .. st.owner .. (st.ownerAge and (" (seen " .. CS.FormatWGTime(st.ownerAge) .. " ago)") or ""), 0.8, 0.8, 0.8)
+            GameTooltip:AddLine("Holder: " .. st.owner .. " (" .. tostring(st.source or "?") .. (st.ownerAge and (", " .. CS.FormatWGTime(st.ownerAge) .. " ago") or "") .. ")", 0.8, 0.8, 0.8)
         else
-            GameTooltip:AddLine("Holder unknown. Right-click to set it (Alliance/Horde),", 0.6, 0.6, 0.6)
-            GameTooltip:AddLine("or it is learned from the next Wintergrasp result.", 0.6, 0.6, 0.6)
+            GameTooltip:AddLine("Holder not detected yet. It is read automatically in Northrend", 0.6, 0.6, 0.6)
+            GameTooltip:AddLine("(Essence of Wintergrasp aura / world-state bar) and from", 0.6, 0.6, 0.6)
+            GameTooltip:AddLine("Wintergrasp battle-end announcements.", 0.6, 0.6, 0.6)
         end
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("|cFFFFFFFFClick:|r Open main window   |cFFFFFFFFRight-click:|r Set holder   |cFFFFFFFFShift-drag:|r Move", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("|cFFFFFFFFClick:|r Open main window   |cFFFFFFFFRight-click:|r Override   |cFFFFFFFFShift-drag:|r Move", 0.7, 0.7, 0.7)
         GameTooltip:Show()
     end)
     f:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -896,7 +897,7 @@ function GUI.UpdateVoaBanner(elapsed, voaCount, clock)
         if not f:IsShown() then f:Show() end
         local CS = AIP.ChatScanner
         local st = (CS and CS.GetWGStatus) and CS.GetWGStatus() or {}
-        local ownerTxt, r, g, b = "|cFF999999VoA holder ?|r |cFF666666(right-click)|r", 0.4, 0.4, 0.45
+        local ownerTxt, r, g, b = "|cFF999999VoA holder: not seen yet|r", 0.4, 0.4, 0.45
         if st.owner == "Alliance" then
             ownerTxt, r, g, b = "|cFF4A9BFFAlliance|r holds VoA", 0.29, 0.6, 1
         elseif st.owner == "Horde" then

@@ -138,18 +138,30 @@ function CS.FormatWGTime(sec)
     return string.format("%d:%02d", m, s)
 end
 
--- Winner faction ("Alliance"/"Horde") from a Wintergrasp battle-result message,
--- or nil. Only messages that mention Wintergrasp are considered.
+-- Holder faction ("Alliance"/"Horde") from a Wintergrasp announcement, or nil.
+-- Understands results ("The Alliance has defeated the Horde", "...defended
+-- Wintergrasp", "Wintergrasp was captured by the Horde") and defender
+-- announcements. Messages that do not mention Wintergrasp are ignored.
 function CS.ParseWGOwnerMessage(msg)
     if type(msg) ~= "string" then return nil end
     local l = msg:lower()
     if not l:find("wintergrasp", 1, true) then return nil end
-    local verbs = { "defeated", "won", "captured", "taken", "conquered", "claimed", "control", "victorious", "successfully" }
+    -- "<verb> by the <faction>": the faction AFTER "by" is the winner
+    for _, f in ipairs({ "alliance", "horde" }) do
+        for _, v in ipairs({ "captured", "taken", "conquered", "claimed", "won", "defeated" }) do
+            if l:find(v .. " by the " .. f, 1, true) then
+                return (f == "alliance") and "Alliance" or "Horde"
+            end
+        end
+    end
+    local verbs = { "defeated", "won", "captured", "taken", "conquered", "claimed", "control",
+        "victorious", "successfully", "defended", "defending", "defends", "defenders", "holds", "owns" }
     for _, f in ipairs({ "alliance", "horde" }) do
         for _, v in ipairs(verbs) do
-            if l:find("the " .. f .. " " .. v, 1, true) or l:find("the " .. f .. " has " .. v, 1, true)
-                or l:find("the " .. f .. " is " .. v, 1, true) then
-                return (f == "alliance") and "Alliance" or "Horde"
+            for _, mid in ipairs({ " ", " has ", " have ", " is ", " are ", " has been ", " have been " }) do
+                if l:find("the " .. f .. mid .. v, 1, true) then
+                    return (f == "alliance") and "Alliance" or "Horde"
+                end
             end
         end
         if l:find(f .. " control", 1, true) then return (f == "alliance") and "Alliance" or "Horde" end
@@ -182,9 +194,40 @@ function CS.ScanWGWorldState()
     return nil
 end
 
--- { active = bool, wait = seconds|nil, owner = "Alliance"|"Horde"|nil, ownerAge = seconds|nil }
--- The remembered holder is dropped when a battle ends without a fresh
--- announcement (the result of that battle is unknown to us).
+-- Northrend zone names: the holder's "Essence of Wintergrasp" aura is only
+-- present there, so only then does its absence mean anything.
+local NORTHREND_ZONES = {
+    ["borean tundra"] = true, ["howling fjord"] = true, ["dragonblight"] = true, ["grizzly hills"] = true,
+    ["zul'drak"] = true, ["sholazar basin"] = true, ["the storm peaks"] = true, ["icecrown"] = true,
+    ["crystalsong forest"] = true, ["dalaran"] = true, ["wintergrasp"] = true, ["hrothgar's landing"] = true,
+    ["vault of archavon"] = true, ["the underbelly"] = true,
+}
+
+-- Holder from the player's own aura: players of the faction that holds
+-- Wintergrasp carry "Essence of Wintergrasp" (spell 58045) in Northrend.
+-- Returns faction, or nil when it can't be told (outside Northrend, battle on,
+-- or the faction is unknown).
+function CS.ScanWGAura(inBattle)
+    if inBattle or not UnitBuff then return nil end
+    local mine = UnitFactionGroup and UnitFactionGroup("player")
+    if mine ~= "Alliance" and mine ~= "Horde" then return nil end
+    local zone = ((GetRealZoneText and GetRealZoneText()) or ""):lower()
+    local sub = ((GetSubZoneText and GetSubZoneText()) or ""):lower()
+    if not (NORTHREND_ZONES[zone] or NORTHREND_ZONES[sub]) then return nil end
+    local i = 1
+    while true do
+        local name, _, _, _, _, _, _, _, _, _, spellId = UnitBuff("player", i)
+        if not name then break end
+        if spellId == 58045 or name == "Essence of Wintergrasp" then return mine end
+        i = i + 1
+    end
+    return (mine == "Alliance") and "Horde" or "Alliance"
+end
+
+-- { active = bool, wait = seconds|nil, owner = "Alliance"|"Horde"|nil, ownerAge = seconds|nil, source = string|nil }
+-- Holder sources, in order: world-state bar, own aura, battle-end announcements
+-- (see OnEvent). A remembered holder is dropped when a battle ends without a
+-- fresh announcement (the result of that battle is unknown to us).
 function CS.GetWGStatus()
     local st = { active = false }
     if GetWintergraspWaitTime then
@@ -193,23 +236,37 @@ function CS.GetWGStatus()
     end
     local db = AIP.db
     if db then
-        local seen = CS.ScanWGWorldState()
-        if seen then CS.SetWGOwner(seen) end
+        local now = (GetTime and GetTime()) or 0
+        if not CS.wgScanAt or now - CS.wgScanAt >= 2 then
+            CS.wgScanAt = now
+            local seen = CS.ScanWGWorldState()
+            if seen then
+                CS.SetWGOwner(seen, "world-state")
+            else
+                local aura = CS.ScanWGAura(st.active)
+                if aura then CS.SetWGOwner(aura, "aura") end
+            end
+        end
         if CS.wgWasActive and not st.active and st.wait then
-            if (time() - (db.wgOwnerTime or 0)) > 120 then db.wgOwner = "" end
+            if (time() - (db.wgOwnerTime or 0)) > 120 then db.wgOwner = ""; db.wgOwnerSource = "" end
         end
         CS.wgWasActive = st.active
         if db.wgOwner == "Alliance" or db.wgOwner == "Horde" then
             st.owner = db.wgOwner
+            st.source = db.wgOwnerSource
             if db.wgOwnerTime and db.wgOwnerTime > 0 then st.ownerAge = time() - db.wgOwnerTime end
         end
     end
     return st
 end
 
-function CS.SetWGOwner(faction)
+function CS.SetWGOwner(faction, source)
     if faction ~= "Alliance" and faction ~= "Horde" then return false end
-    if AIP.db then AIP.db.wgOwner = faction; AIP.db.wgOwnerTime = time() end
+    if AIP.db then
+        AIP.db.wgOwner = faction
+        AIP.db.wgOwnerTime = time()
+        AIP.db.wgOwnerSource = source or "manual"
+    end
     return true
 end
 
@@ -1030,9 +1087,11 @@ local eventFrame = CreateFrame("Frame", "AIPChatScannerFrame")
 local function OnEvent(self, event, message, author, ...)
     -- Wintergrasp battle results (server broadcasts) -> remember who holds VoA
     if event == "CHAT_MSG_BG_SYSTEM_ALLIANCE" or event == "CHAT_MSG_BG_SYSTEM_HORDE"
-        or event == "CHAT_MSG_BG_SYSTEM_NEUTRAL" or event == "CHAT_MSG_RAID_BOSS_EMOTE" then
+        or event == "CHAT_MSG_BG_SYSTEM_NEUTRAL" or event == "CHAT_MSG_RAID_BOSS_EMOTE"
+        or event == "CHAT_MSG_MONSTER_YELL" or event == "CHAT_MSG_SYSTEM"
+        or event == "CHAT_MSG_RAID_WARNING" then
         local owner = CS.ParseWGOwnerMessage(message)
-        if owner and CS.SetWGOwner(owner) then
+        if owner and CS.SetWGOwner(owner, "announcement") then
             AIP.Print("Wintergrasp: " .. owner .. " now holds Vault of Archavon.")
         end
         return
@@ -1077,6 +1136,10 @@ eventFrame:RegisterEvent("CHAT_MSG_GUILD")
 eventFrame:RegisterEvent("CHAT_MSG_BG_SYSTEM_ALLIANCE")
 eventFrame:RegisterEvent("CHAT_MSG_BG_SYSTEM_HORDE")
 eventFrame:RegisterEvent("CHAT_MSG_BG_SYSTEM_NEUTRAL")
+eventFrame:RegisterEvent("CHAT_MSG_RAID_BOSS_EMOTE")
+eventFrame:RegisterEvent("CHAT_MSG_MONSTER_YELL")
+eventFrame:RegisterEvent("CHAT_MSG_SYSTEM")
+eventFrame:RegisterEvent("CHAT_MSG_RAID_WARNING")
 eventFrame:SetScript("OnEvent", OnEvent)
 
 -- Periodic cleanup (every 60 seconds)

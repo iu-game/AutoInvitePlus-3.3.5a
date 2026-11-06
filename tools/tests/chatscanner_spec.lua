@@ -184,6 +184,8 @@ for _, nm in ipairs({ "BadLFG1", "BadLFG2", "BadLFG3" }) do
 end
 
 -- Wintergrasp / VoA portal helpers
+local clk = 0
+GetTime = function() clk = clk + 10; return clk end
 eq(CS.FormatWGTime(4599), "1:16:39", "FormatWGTime h:mm:ss")
 eq(CS.FormatWGTime(599), "9:59", "FormatWGTime m:ss")
 eq(CS.FormatWGTime(0), "0:00", "FormatWGTime zero")
@@ -228,6 +230,37 @@ GetWintergraspWaitTime = function() return nil end
 CS.GetWGStatus()
 GetWintergraspWaitTime = function() return 9000 end
 eq(CS.GetWGStatus().owner, "Alliance", "fresh holder kept after battle end")
+
+-- broader announcements
+eq(CS.ParseWGOwnerMessage("Wintergrasp has been captured by the Horde!"), "Horde", "WG msg: captured by the Horde")
+eq(CS.ParseWGOwnerMessage("The Horde has been defeated by the Alliance in Wintergrasp"), "Alliance", "WG msg: defeated by the Alliance")
+eq(CS.ParseWGOwnerMessage("The Alliance are defending Wintergrasp"), "Alliance", "WG msg: defenders")
+eq(CS.ParseWGOwnerMessage("The Horde has successfully defended Wintergrasp"), "Horde", "WG msg: defended")
+-- aura detection
+local mineF = "Horde"
+UnitFactionGroup = function() return mineF end
+local zone = "Dalaran"
+GetRealZoneText = function() return zone end
+GetSubZoneText = function() return "" end
+local buffs = {}
+UnitBuff = function(_, i) local b = buffs[i]; if b then return b[1], nil, nil, nil, nil, nil, nil, nil, nil, nil, b[2] end end
+buffs = { { "Essence of Wintergrasp", 58045 } }
+eq(CS.ScanWGAura(false), "Horde", "aura: has Essence -> own faction holds")
+buffs = { { "Something", 1 } }
+eq(CS.ScanWGAura(false), "Alliance", "aura: Northrend without Essence -> other faction holds")
+eq(CS.ScanWGAura(true), nil, "aura: ignored during a battle")
+zone = "Orgrimmar"
+eq(CS.ScanWGAura(false), nil, "aura: outside Northrend is unknown")
+zone = "Dalaran"; mineF = "Alliance"; buffs = { { "Essence of Wintergrasp", 58045 } }
+eq(CS.ScanWGAura(false), "Alliance", "aura: Alliance player with Essence")
+-- GetWGStatus uses the aura when no world-state info
+GetNumWorldStateUI = function() return 0 end
+GetWintergraspWaitTime = function() return 5000 end
+CS.wgScanAt = nil
+AIP.db.wgOwner = ""
+local stA = CS.GetWGStatus()
+eq(stA.owner, "Alliance", "GetWGStatus adopts aura holder")
+eq(stA.source, "aura", "GetWGStatus reports source")
 
 print(string.format("%d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)
