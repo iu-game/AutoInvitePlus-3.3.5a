@@ -1,4 +1,4 @@
-# AutoInvite Plus v7.0.0
+# AutoInvite Plus v7.0.1
 
 A comprehensive raid organization suite for World of Warcraft 3.3.5a (WotLK) with an LFM/LFG browser, auto-invite system, raid management & assist tools, loot tracking, and a full character-optimization / coaching suite (gear, spec, rotation, PvE **and** PvP).
 
@@ -369,6 +369,10 @@ These windows used to re-open on every login and every time you joined a group. 
 ---
 
 ## Changelog
+
+### v7.0.1
+- **Fixed**: the VoA banner could name the wrong Wintergrasp holder (a missing "Essence of Wintergrasp" aura was read as "the other faction holds it"). The holder is now shown only when proven (world-state bar, your own aura, or a battle-end announcement), is dropped once a new battle cycle has passed, and the line is simply left out when unknown. The manual right-click override was removed.
+- **Improved**: enabling "Tank Cast window" / "Raid Groups window" in Settings now opens it immediately when you are grouped.
 
 ### v7.0.0
 - **Windows & Bars** ([#6](https://github.com/iu-game/AutoInvitePlus-3.3.5a/issues/6)): every popup, window and bar that opens by itself can be switched off permanently (Settings > Windows & Bars, `/aip windows`). Added window profiles (Minimal / Raid Leader / Full / Multibox), per-character overrides, auto-switch by context (solo / party / raid / dungeon / raid instance / battleground / arena), reset window positions, settings export/import (`AIPS1:` strings), collapsible and searchable Settings sections, and per-section Reset buttons.
