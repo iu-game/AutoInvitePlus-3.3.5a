@@ -1547,6 +1547,14 @@ local function SlashHandler(msg)
             local f = (arg == "alliance" or arg == "a") and "Alliance" or ((arg == "horde" or arg == "h") and "Horde" or nil)
             if f and CS and CS.SetWGOwner(f) then Print("VoA holder set to " .. f .. ".")
             else Print("Usage: /aip voa owner alliance|horde") end
+        elseif sub == "probe" then
+            -- Dump the world-state bar so the holder detection can be tuned in-zone
+            local n = GetNumWorldStateUI and GetNumWorldStateUI() or 0
+            Print("World-state entries: " .. n .. " (zone: " .. tostring(GetRealZoneText and GetRealZoneText()) .. ")")
+            for i = 1, n do
+                local ui, st, text, icon = GetWorldStateUIInfo(i)
+                Print(i .. ": " .. tostring(text) .. " | " .. tostring(icon) .. " | state " .. tostring(st))
+            end
         elseif sub == "banner" then
             AIP.db.voaBanner = not (AIP.db.voaBanner ~= false)
             Print("VoA banner: " .. (AIP.db.voaBanner and "ON" or "OFF"))
@@ -1556,7 +1564,7 @@ local function SlashHandler(msg)
         else
             local st = (CS and CS.GetWGStatus) and CS.GetWGStatus() or {}
             Print("Wintergrasp: " .. (st.active and "battle in progress" or ("next battle in " .. (CS and CS.FormatWGTime(st.wait) or "?")))
-                .. " | VoA holder: " .. (st.owner or "unknown") .. " | /aip voa owner|banner|sound")
+                .. " | VoA holder: " .. (st.owner or "unknown") .. " | /aip voa owner|banner|sound|probe")
         end
 
     -- Debug log

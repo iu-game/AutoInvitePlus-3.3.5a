@@ -821,12 +821,17 @@ function GUI.CreateVoaBanner()
     else
         f:SetPoint("TOP", Minimap, "BOTTOM", 0, -26)
     end
-    f:SetScript("OnDragStart", function(self) if IsShiftKeyDown() then self:StartMoving() end end)
+    f:SetScript("OnDragStart", function(self)
+        if IsShiftKeyDown() then self.moving = true; self:StartMoving() end
+    end)
     f:SetScript("OnDragStop", function(self)
+        if not self.moving then return end
+        self.moving = nil
         self:StopMovingOrSizing()
         local point, _, relPoint, x, y = self:GetPoint()
         if AIP.db then AIP.db.voaBannerPos = { point = point, relPoint = relPoint, x = x, y = y } end
     end)
+    f:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
     f.l1 = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     f.l1:SetPoint("TOP", 0, -5)
@@ -835,7 +840,22 @@ function GUI.CreateVoaBanner()
     f.l3 = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     f.l3:SetPoint("TOP", f.l2, "BOTTOM", 0, -2)
 
-    f:SetScript("OnClick", function() GUI.Toggle() end)
+    f:SetScript("OnClick", function(self, btn)
+        if btn == "RightButton" then
+            -- Quick manual holder: unknown -> Alliance -> Horde -> Alliance ...
+            local CS = AIP.ChatScanner
+            local cur = AIP.db and AIP.db.wgOwner
+            if CS and CS.SetWGOwner then CS.SetWGOwner(cur == "Alliance" and "Horde" or "Alliance") end
+            self.acc = 99
+            if GameTooltip:IsOwned(self) then
+                GameTooltip:Hide()
+                local onEnter = self:GetScript("OnEnter")
+                if onEnter then onEnter(self) end
+            end
+        else
+            GUI.Toggle()
+        end
+    end)
     f:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
         GameTooltip:AddLine("Vault of Archavon portal")
@@ -849,11 +869,11 @@ function GUI.CreateVoaBanner()
         if st.owner then
             GameTooltip:AddLine("Holder: " .. st.owner .. (st.ownerAge and (" (seen " .. CS.FormatWGTime(st.ownerAge) .. " ago)") or ""), 0.8, 0.8, 0.8)
         else
-            GameTooltip:AddLine("Holder unknown - learned from the next battle result,", 0.6, 0.6, 0.6)
-            GameTooltip:AddLine("or set it with /aip voa owner alliance|horde", 0.6, 0.6, 0.6)
+            GameTooltip:AddLine("Holder unknown. Right-click to set it (Alliance/Horde),", 0.6, 0.6, 0.6)
+            GameTooltip:AddLine("or it is learned from the next Wintergrasp result.", 0.6, 0.6, 0.6)
         end
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("|cFFFFFFFFClick:|r Open main window   |cFFFFFFFFShift-drag:|r Move", 0.7, 0.7, 0.7)
+        GameTooltip:AddLine("|cFFFFFFFFClick:|r Open main window   |cFFFFFFFFRight-click:|r Set holder   |cFFFFFFFFShift-drag:|r Move", 0.7, 0.7, 0.7)
         GameTooltip:Show()
     end)
     f:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -876,7 +896,7 @@ function GUI.UpdateVoaBanner(elapsed, voaCount, clock)
         if not f:IsShown() then f:Show() end
         local CS = AIP.ChatScanner
         local st = (CS and CS.GetWGStatus) and CS.GetWGStatus() or {}
-        local ownerTxt, r, g, b = "|cFF999999VoA holder unknown|r", 0.4, 0.4, 0.45
+        local ownerTxt, r, g, b = "|cFF999999VoA holder ?|r |cFF666666(right-click)|r", 0.4, 0.4, 0.45
         if st.owner == "Alliance" then
             ownerTxt, r, g, b = "|cFF4A9BFFAlliance|r holds VoA", 0.29, 0.6, 1
         elseif st.owner == "Horde" then

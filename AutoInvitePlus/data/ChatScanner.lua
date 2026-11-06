@@ -157,7 +157,34 @@ function CS.ParseWGOwnerMessage(msg)
     return nil
 end
 
+-- Faction hinted by a world-state UI entry (text/icon path), or nil.
+function CS.WGFactionFromText(s)
+    if type(s) ~= "string" then return nil end
+    local l = s:lower()
+    local a, h = l:find("alliance", 1, true), l:find("horde", 1, true)
+    if a and not h then return "Alliance" end
+    if h and not a then return "Horde" end
+    return nil
+end
+
+-- Northrend zones show a Wintergrasp entry in the top world-state bar; its text
+-- or icon names the holder. Best effort - returns the faction or nil.
+function CS.ScanWGWorldState()
+    if not (GetNumWorldStateUI and GetWorldStateUIInfo) then return nil end
+    for i = 1, (GetNumWorldStateUI() or 0) do
+        local _, _, text, icon, _, tip = GetWorldStateUIInfo(i)
+        local blob = tostring(text or "") .. " " .. tostring(icon or "") .. " " .. tostring(tip or "")
+        if blob:lower():find("wintergrasp", 1, true) then
+            local f = CS.WGFactionFromText(blob)
+            if f then return f end
+        end
+    end
+    return nil
+end
+
 -- { active = bool, wait = seconds|nil, owner = "Alliance"|"Horde"|nil, ownerAge = seconds|nil }
+-- The remembered holder is dropped when a battle ends without a fresh
+-- announcement (the result of that battle is unknown to us).
 function CS.GetWGStatus()
     local st = { active = false }
     if GetWintergraspWaitTime then
@@ -165,9 +192,17 @@ function CS.GetWGStatus()
         if w and w > 0 then st.wait = w else st.active = true end
     end
     local db = AIP.db
-    if db and (db.wgOwner == "Alliance" or db.wgOwner == "Horde") then
-        st.owner = db.wgOwner
-        if db.wgOwnerTime then st.ownerAge = time() - db.wgOwnerTime end
+    if db then
+        local seen = CS.ScanWGWorldState()
+        if seen then CS.SetWGOwner(seen) end
+        if CS.wgWasActive and not st.active and st.wait then
+            if (time() - (db.wgOwnerTime or 0)) > 120 then db.wgOwner = "" end
+        end
+        CS.wgWasActive = st.active
+        if db.wgOwner == "Alliance" or db.wgOwner == "Horde" then
+            st.owner = db.wgOwner
+            if db.wgOwnerTime and db.wgOwnerTime > 0 then st.ownerAge = time() - db.wgOwnerTime end
+        end
     end
     return st
 end

@@ -204,5 +204,30 @@ ok(not CS.SetWGOwner("Naga"), "SetWGOwner rejects junk")
 GetWintergraspWaitTime = function() return nil end
 ok(CS.GetWGStatus().active == true and CS.GetWGStatus().wait == nil, "GetWGStatus battle active when wait nil")
 
+eq(CS.WGFactionFromText("Interface\\Icons\\Spell_Alliance_Banner"), "Alliance", "WGFactionFromText alliance")
+eq(CS.WGFactionFromText("Horde control"), "Horde", "WGFactionFromText horde")
+eq(CS.WGFactionFromText("Alliance vs Horde"), nil, "WGFactionFromText ambiguous")
+-- world-state scan
+GetNumWorldStateUI = function() return 2 end
+GetWorldStateUIInfo = function(i)
+    if i == 1 then return 1, 1, "Time Remaining: 4:00", "Interface\\x" end
+    return 1, 1, "Wintergrasp: Horde control", "Interface\\y"
+end
+eq(CS.ScanWGWorldState(), "Horde", "ScanWGWorldState finds Wintergrasp entry")
+AIP.db.wgOwner = ""
+eq(CS.GetWGStatus().owner, "Horde", "GetWGStatus adopts world-state holder")
+GetNumWorldStateUI = function() return 0 end
+-- stale holder dropped when a battle ends without a fresh announcement
+AIP.db.wgOwner = "Alliance"; AIP.db.wgOwnerTime = now - 1000
+GetWintergraspWaitTime = function() return nil end
+CS.GetWGStatus()
+GetWintergraspWaitTime = function() return 9000 end
+eq(CS.GetWGStatus().owner, nil, "holder cleared after battle end (stale)")
+AIP.db.wgOwner = "Alliance"; AIP.db.wgOwnerTime = now
+GetWintergraspWaitTime = function() return nil end
+CS.GetWGStatus()
+GetWintergraspWaitTime = function() return 9000 end
+eq(CS.GetWGStatus().owner, "Alliance", "fresh holder kept after battle end")
+
 print(string.format("%d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)
