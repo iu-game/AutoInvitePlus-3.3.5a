@@ -133,6 +133,21 @@ function WP.ApplyProfile(name, perCharacter)
     return pname
 end
 
+-- Back to the shipped defaults (everything on except the floating bar), for
+-- the account and for this character. Also resets the VOA pulse / sound.
+function WP.ResetDefaults()
+    for _, k in ipairs(WP.KEYS) do
+        WP.Set(k, not DEFAULT_OFF[k], false)
+    end
+    WP.ClearOverrides()
+    if type(AIP.db) == "table" then
+        AIP.db.voaAlert = true
+        AIP.db.voaSound = true
+    end
+    WP.Refresh()
+    return true
+end
+
 -- ---------------------------------------------------------------------------
 -- Reset window positions
 -- ---------------------------------------------------------------------------
@@ -377,6 +392,9 @@ function WP.SlashHandler(cmd, rest)
             else
                 AIP.Print("Usage: /aip windows context [on|off | <solo|party|raid|dungeon|raidinstance|battleground|arena> <Minimal|RaidLeader|Full|Multibox|none>]")
             end
+        elseif sub == "reset" or sub == "default" or sub == "defaults" then
+            WP.ResetDefaults()
+            AIP.Print("Window toggles reset to the defaults.")
         elseif sub == "profile" then
             local name, scope = arg:match("^(%S+)%s*(%S*)$")
             local perChar = scope and scope:lower() == "char"
@@ -387,7 +405,7 @@ function WP.SlashHandler(cmd, rest)
                 AIP.Print("Usage: /aip windows profile <Minimal|RaidLeader|Full|Multibox> [char]  (" .. tostring(err) .. ")")
             end
         else
-            AIP.Print("Usage: /aip windows [on|off|profile <Minimal|RaidLeader|Full|Multibox> [char]|context ...]")
+            AIP.Print("Usage: /aip windows [on|off|reset|profile <Minimal|RaidLeader|Full|Multibox> [char]|context ...]")
         end
     elseif cmd == "resetpos" then
         local n, skipped = WP.ResetPositions()

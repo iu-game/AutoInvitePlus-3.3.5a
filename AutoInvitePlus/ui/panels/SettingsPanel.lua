@@ -1637,6 +1637,16 @@ function SP.Create(parent)
         end
         prevProfBtn = pb
     end
+    local defBtn = AIP.UI.FlatButton(content, "Defaults", 86, 20, function()
+        local WP = AIP.WindowProfiles
+        if WP and WP.ResetDefaults then
+            WP.ResetDefaults()
+            SP.Update()
+        else
+            AIP.Print("Window profiles are not available (module not loaded).")
+        end
+    end, "Reset every window / bar switch below to its default (all on except the floating announcement bar)")
+    defBtn:SetPoint("LEFT", prevProfBtn, "RIGHT", 6, 0)
     y = y - 28
 
     local perCharLabel
