@@ -219,6 +219,21 @@ eq(CS.ScanWGWorldState(), "Horde", "ScanWGWorldState finds Wintergrasp entry")
 AIP.db.wgOwner = ""
 eq(CS.GetWGStatus().owner, "Horde", "GetWGStatus adopts world-state holder")
 GetNumWorldStateUI = function() return 0 end
+-- real 3.3.5a layout: both "Controlled" rows exist, state 1 is the holder
+GetNumWorldStateUI = function() return 3 end
+GetWorldStateUIInfo = function(i)
+    if i == 1 then return 1, 0, "Alliance Controlled", "Interface/TargetingFrame/UI-PVP-Alliance" end
+    if i == 2 then return 1, 1, "Horde Controlled", "Interface/TargetingFrame/UI-PVP-Horde" end
+    return 1, 0, "Next Battle: 43:10", ""
+end
+eq(CS.ScanWGWorldState(), "Horde", "ScanWGWorldState: Horde Controlled state 1")
+GetWorldStateUIInfo = function(i)
+    if i == 1 then return 1, 1, "Alliance Controlled", "x" end
+    if i == 2 then return 1, 0, "Horde Controlled", "y" end
+    return 1, 0, "Next Battle", ""
+end
+eq(CS.ScanWGWorldState(), "Alliance", "ScanWGWorldState: Alliance Controlled state 1")
+GetNumWorldStateUI = function() return 0 end
 -- stale holder dropped when a battle ends without a fresh announcement
 AIP.db.wgOwner = "Alliance"; AIP.db.wgOwnerTime = now - 1000
 GetWintergraspWaitTime = function() return nil end

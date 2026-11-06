@@ -179,19 +179,26 @@ function CS.WGFactionFromText(s)
     return nil
 end
 
--- Northrend zones show a Wintergrasp entry in the top world-state bar; its text
--- or icon names the holder. Best effort - returns the faction or nil.
+-- The Wintergrasp world-state bar lists "Alliance Controlled" and "Horde
+-- Controlled" rows; the active one has state 1 (seen live on 3.3.5a). Older
+-- layouts that name Wintergrasp with a faction in text/icon are accepted too.
+-- Best effort - returns the faction or nil.
 function CS.ScanWGWorldState()
     if not (GetNumWorldStateUI and GetWorldStateUIInfo) then return nil end
+    local fallback
     for i = 1, (GetNumWorldStateUI() or 0) do
-        local _, _, text, icon, _, tip = GetWorldStateUIInfo(i)
+        local _, state, text, icon, _, tip = GetWorldStateUIInfo(i)
+        local l = tostring(text or ""):lower()
+        if l:find("controlled", 1, true) then
+            local f = CS.WGFactionFromText(l)
+            if f and state == 1 then return f end
+        end
         local blob = tostring(text or "") .. " " .. tostring(icon or "") .. " " .. tostring(tip or "")
-        if blob:lower():find("wintergrasp", 1, true) then
-            local f = CS.WGFactionFromText(blob)
-            if f then return f end
+        if not fallback and blob:lower():find("wintergrasp", 1, true) then
+            fallback = CS.WGFactionFromText(blob)
         end
     end
-    return nil
+    return fallback
 end
 
 -- Northrend zone names: the holder's "Essence of Wintergrasp" aura is only
