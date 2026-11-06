@@ -1,4 +1,4 @@
-# AutoInvite Plus v6.4.1
+# AutoInvite Plus v7.0.0
 
 A comprehensive raid organization suite for World of Warcraft 3.3.5a (WotLK) with an LFM/LFG browser, auto-invite system, raid management & assist tools, loot tracking, and a full character-optimization / coaching suite (gear, spec, rotation, PvE **and** PvP).
 
@@ -10,6 +10,8 @@ A comprehensive raid organization suite for World of Warcraft 3.3.5a (WotLK) wit
 Browse and filter groups advertised in chat channels, organized by raid type with smart message parsing.
 
 ![LFM Browser](Screenshots/LFM.png)
+
+Groups are split by size (25-man / 10-man) and, where a raid has a heroic mode, by Normal / Heroic. Each row shows a best-effort progress badge (e.g. `8/12`) and a Discord tag parsed from the listing's own message.
 
 ### LFG Browser
 Find players looking for groups with class/spec detection and smart filtering.
@@ -60,6 +62,16 @@ Gear-tiered raid templates with draggable group placement, role/buff coverage, a
 Search, filter, and share blacklists with your guild (Simple / Full / CSV), with quick add/remove from browser rows.
 
 ![Blacklist](Screenshots/blacklist.png)
+
+### Windows & Bars (new in 7.0)
+Every popup, window and bar that opens by itself has its own switch, plus one-click profiles (Minimal / Raid Leader / Full / Multibox), a "this character only" scope and per-context auto-switching. Settings > GUI Appearance > Windows & Bars.
+
+![Windows & Bars](Screenshots/windows-and-bars.png)
+
+### VoA Portal Banner (new in 7.0)
+A small banner under the minimap shows who holds Wintergrasp (and therefore Vault of Archavon), how long until the portal closes / the next battle starts, and how many VOA groups are listed right now. The minimap button pulses and plays a sound when a VOA group is first listed. The banner, the pulse and the sound can each be switched off in Settings.
+
+![VoA banner](Screenshots/voa-banner.png)
 
 ---
 
@@ -148,13 +160,20 @@ Search, filter, and share blacklists with your guild (Simple / Full / CSV), with
 
 ### Windows & Bars
 Every popup, window and bar that opens by itself can be switched off permanently (Settings > Windows & Bars, or `/aip windows`). A window whose switch is off never opens - not on joining a group, not at login, not from a menu - until you turn it back on.
-- **Toggles** (8): Tank Cast window, Raid Groups window, auto-open those windows when you join or form a group, re-open them at login if they were open last session, floating announcement bar (off by default), countdown timer bars (pull / break / boss abilities), minimap bubbles ("VOA Listed" / "Favorites Listed"), Raid Groups assignment/note toasts.
-- **Profiles**: Minimal and Multibox turn all eight off; Raid Leader turns on Tank Cast, Raid Groups, auto-open, restore at login, timer bars and toasts; Full turns all eight on. Apply them from the Settings buttons, `/aip windows profile <name>`, or the minimap right-click menu (Window Profile).
+- **Toggles** (9): Tank Cast window, Raid Groups window, auto-open those windows when you join or form a group, re-open them at login if they were open last session, floating announcement bar (off by default), countdown timer bars (pull / break / boss abilities), minimap bubbles ("VOA Listed" / "Favorites Listed"), Raid Groups assignment/note toasts, and the VoA portal banner. Two more checkboxes control the VOA minimap pulse and the VOA sound.
+- **Profiles**: Minimal and Multibox turn all nine off; Raid Leader turns on Tank Cast, Raid Groups, auto-open, restore at login, timer bars and toasts; Full turns all nine on. Apply them from the Settings buttons, `/aip windows profile <name>`, or the minimap right-click menu (Window Profile).
 - **This character only**: tick it in Settings (or add `char` to the slash command) and the toggles/profiles are stored as an override for the character you are on; every other character keeps the account-wide values. Applying a profile account-wide also clears this character's overrides.
 - **Auto-switch by context**: optionally pick a profile for each of solo / party / raid group / dungeon / raid instance / battleground / arena. It applies only when the context changes (a manual change sticks until then) and never while in combat.
 - **Reset window positions**: Settings button, `/aip resetpos`, or the minimap menu. Tank Cast and Raid Groups cannot be moved in combat; any skipped are reported - run it again out of combat.
 - **Export / import**: `/aip export` shows a copyable string of your settings (`AIPS1:...`); `/aip import <string>` (or the Import button) applies it. The string is parsed, never executed; window positions, logs, caches and debug flags are not included. `/reload` after importing.
 - **Settings tab**: sections can be collapsed with the `-` / `+` button (remembered between sessions), each section with defaults has a Reset button, and the search box at the top filters sections and options by their label text.
+
+### VoA Banner & Wintergrasp Holder
+The banner under the minimap (drag it with Shift to move it, click to open the main window) reads:
+- **Holder**: "Alliance holds VoA" / "Horde holds VoA". It is detected, not set: from the Wintergrasp world-state bar ("Alliance/Horde Controlled"), from your own "Essence of Wintergrasp" aura, and from battle-end announcements. Both game sources only exist in Northrend, so the holder reads "not seen yet" until you pass through a Northrend zone (the right-click override on the banner is only a fallback). The holder is dropped when a battle ends without a result message, so it never shows a stale value.
+- **Timer**: "Portal closes in mm:ss" (the same moment the next battle starts), or "Battle in progress - portal closed".
+- **VOA LFM xN**: how many VOA groups are listed; the banner border flashes gold while there are any.
+- `/aip voa` prints the status, `/aip voa banner` / `/aip voa sound` toggle them, `/aip voa probe` dumps what the client exposes (useful for bug reports).
 
 ### Activity Log
 A 200-entry in-memory log (not saved between sessions) of what AIP did for you: invites, whispers, broadcasts, timers, queue/waitlist adds. Open it with `/aip activity window`, or "Activity Log" in the minimap right-click menu; filter chips narrow it by kind. `/aip activity [n]` prints the last n entries to chat instead.
@@ -197,6 +216,7 @@ The footer of the main window (both Full and Simplified view) shows `Chat: OK`, 
 | `/aip windows` | Show which popups/bars are on; `/aip windows off` / `on` switches all of them |
 | `/aip windows profile <Minimal\|RaidLeader\|Full\|Multibox> [char]` | Apply a window profile (add `char` for this character only) |
 | `/aip windows context [on\|off \| <context> <profile\|none>]` | Auto-switch profile by solo / party / raid / dungeon / raidinstance / battleground / arena |
+| `/aip voa [banner\|sound\|owner <alliance\|horde>\|probe]` | VoA status (holder + portal timer); toggle the banner / sound; manual holder override; diagnostics |
 | `/aip resetpos` | Move every AIP window back to its default position |
 | `/aip export` / `/aip import <string>` | Copy settings between characters or accounts |
 | `/aip activity [n]` / `/aip activity window` | Last n things AIP sent/did, or open the Activity Log window |
@@ -349,6 +369,13 @@ These windows used to re-open on every login and every time you joined a group. 
 ---
 
 ## Changelog
+
+### v7.0.0
+- **Windows & Bars** ([#6](https://github.com/iu-game/AutoInvitePlus-3.3.5a/issues/6)): every popup, window and bar that opens by itself can be switched off permanently (Settings > Windows & Bars, `/aip windows`). Added window profiles (Minimal / Raid Leader / Full / Multibox), per-character overrides, auto-switch by context (solo / party / raid / dungeon / raid instance / battleground / arena), reset window positions, settings export/import (`AIPS1:` strings), collapsible and searchable Settings sections, and per-section Reset buttons.
+- **VoA portal banner**: new always-on banner under the minimap showing the Wintergrasp holder (auto-detected), the time until the portal closes / next battle, and the VOA LFM count; a louder minimap pulse + halo and an optional sound when VOA groups are listed. The banner, pulse and sound have their own toggles, and the banner is part of the window profiles. `/aip voa` status, `banner`, `sound`, `owner`, `probe`.
+- **Activity Log** (`/aip activity window`): a filterable viewer of what AIP sent or did (invites, whispers, broadcasts, timers, queue/waitlist adds). Now fully opaque and above other panels.
+- **Chat-safety indicator**: footer shows `Chat: OK / n/min / BACKOFF` with a tooltip; reject whispers are rate-limited per sender and globally.
+- **Fixed**: `/aip windows context` slash path, hardened settings import, and a multi-agent audit pass of the panels, parsers and GUI (stale selections, scroll offsets, forward-referenced locals).
 
 ### v6.9.0
 - **LFM Browser**: the group tree now splits by size (25-man/10-man/Reputation Farm) and, within each size, by Normal/Heroic — but only when a category actually has more than one value for that split, so a raid tier with no heroic mode (Ulduar, Naxx, VoA, OS, Onyxia, EoE) stays flat instead of growing empty folders. Sibling folders now sort in a fixed order (25-man before 10-man, Normal before Heroic) instead of jumping to the top whenever that folder gets a new listing.
