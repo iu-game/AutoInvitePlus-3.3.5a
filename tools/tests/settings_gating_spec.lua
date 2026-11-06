@@ -68,7 +68,7 @@ local function loadWP(env)
 end
 
 local KEYS = { "tankCastEnabled", "raidGroupsEnabled", "restoreWindowsOnLogin", "autoShowOnGroup",
-               "minimapBubbles", "assignmentToasts", "timerBarsEnabled" }
+               "minimapBubbles", "assignmentToasts", "timerBarsEnabled", "voaBanner" }
 
 -- ---- WindowProfiles.Get semantics ---------------------------------------------------------
 do

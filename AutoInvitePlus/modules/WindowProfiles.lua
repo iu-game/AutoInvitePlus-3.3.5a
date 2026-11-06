@@ -14,7 +14,7 @@ local WP = AIP.WindowProfiles
 
 WP.KEYS = {
     "tankCastEnabled", "raidGroupsEnabled", "autoShowOnGroup", "restoreWindowsOnLogin",
-    "floatingBarEnabled", "timerBarsEnabled", "minimapBubbles", "assignmentToasts",
+    "floatingBarEnabled", "timerBarsEnabled", "minimapBubbles", "assignmentToasts", "voaBanner",
 }
 
 local DEFAULT_OFF = { floatingBarEnabled = true }   -- everything else defaults to ON
@@ -116,6 +116,8 @@ function WP.Refresh()
         end
     end
     if AIP.RaidTools and AIP.RaidTools.UpdateBar then AIP.RaidTools.UpdateBar() end
+    local vb = AIP.CentralGUI and AIP.CentralGUI.VoaBanner
+    if vb and not WP.Get("voaBanner") and vb.IsShown and vb:IsShown() then vb:Hide() end
 end
 
 -- Applying account-wide also drops this character's overrides, otherwise the
@@ -332,6 +334,7 @@ local LABELS = {
     autoShowOnGroup = "Auto-open on group", restoreWindowsOnLogin = "Restore at login",
     floatingBarEnabled = "Announcement bar", timerBarsEnabled = "Timer bars",
     minimapBubbles = "Minimap bubbles", assignmentToasts = "Assignment toasts",
+    voaBanner = "VoA portal banner",
 }
 
 function WP.Status()

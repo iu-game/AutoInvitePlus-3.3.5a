@@ -9,7 +9,7 @@ AutoInvitePlus = {
     Defaults = {
         tankCastEnabled = true, raidGroupsEnabled = true, autoShowOnGroup = true,
         restoreWindowsOnLogin = true, floatingBarEnabled = false, timerBarsEnabled = true,
-        minimapBubbles = true, assignmentToasts = true,
+        minimapBubbles = true, assignmentToasts = true, voaBanner = true,
         rollDuration = 10, responseInvite = "hello", enabled = true,
         guiPosition = "x", dbVersion = 5, debugLog = "x", windowsTipShown = false,
         queue = {}, blacklist = {},
@@ -32,7 +32,7 @@ local fails = 0
 local function check(name, cond) if not cond then fails = fails + 1; print("FAIL: " .. name) end end
 
 -- Get / Set precedence
-check("keys", #WP.KEYS == 8)
+check("keys", #WP.KEYS == 9)
 check("default on", WP.Get("tankCastEnabled") == true)
 check("default bar off", WP.Get("floatingBarEnabled") == false)
 WP.Set("tankCastEnabled", false)

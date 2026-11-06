@@ -885,7 +885,9 @@ end
 function GUI.UpdateVoaBanner(elapsed, voaCount, clock)
     local db = AIP.db
     local f = GUI.VoaBanner
-    if not (db and db.voaBanner ~= false) then
+    local WP = AIP.WindowProfiles
+    local bannerOn = db and ((WP and WP.Get) and WP.Get("voaBanner") or (not (WP and WP.Get) and db.voaBanner ~= false))
+    if not bannerOn then
         if f and f:IsShown() then f:Hide() end
         return
     end

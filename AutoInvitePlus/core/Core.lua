@@ -1570,8 +1570,11 @@ local function SlashHandler(msg)
                 i = i + 1
             end
         elseif sub == "banner" then
-            AIP.db.voaBanner = not (AIP.db.voaBanner ~= false)
-            Print("VoA banner: " .. (AIP.db.voaBanner and "ON" or "OFF"))
+            local WP = AIP.WindowProfiles
+            local on = not ((WP and WP.Get) and WP.Get("voaBanner") or (not (WP and WP.Get) and AIP.db.voaBanner ~= false))
+            if WP and WP.Set then WP.Set("voaBanner", on) else AIP.db.voaBanner = on end
+            if WP and WP.Refresh then WP.Refresh() end
+            Print("VoA banner: " .. (on and "ON" or "OFF"))
         elseif sub == "sound" then
             AIP.db.voaSound = not (AIP.db.voaSound ~= false)
             Print("VoA alert sound: " .. (AIP.db.voaSound and "ON" or "OFF"))

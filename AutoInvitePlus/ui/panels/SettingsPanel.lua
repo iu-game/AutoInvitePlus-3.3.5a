@@ -1451,7 +1451,7 @@ function SP.Create(parent)
     -- [8] GUI APPEARANCE
     -- ========================================================================
     do
-    local sec = BeginSection("appearance", "8", "GUI APPEARANCE", "guiAppearance", {"guiOpacity", "guiUnfocusedEnabled", "guiUnfocusedOpacity", "lfgWatch", "lfgShare", "lfgAutoRequeue", "tankCastEnabled", "raidGroupsEnabled", "autoShowOnGroup", "restoreWindowsOnLogin", "floatingBarEnabled", "timerBarsEnabled", "minimapBubbles", "assignmentToasts", "contextProfilesEnabled", "contextProfiles"})
+    local sec = BeginSection("appearance", "8", "GUI APPEARANCE", "guiAppearance", {"guiOpacity", "guiUnfocusedEnabled", "guiUnfocusedOpacity", "lfgWatch", "lfgShare", "lfgAutoRequeue", "tankCastEnabled", "raidGroupsEnabled", "autoShowOnGroup", "restoreWindowsOnLogin", "floatingBarEnabled", "timerBarsEnabled", "minimapBubbles", "assignmentToasts", "voaBanner", "voaAlert", "voaSound", "contextProfilesEnabled", "contextProfiles"})
 
     -- Opacity slider (WotLK 3.3.5a compatible - manual slider creation)
     local opacityLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1691,6 +1691,20 @@ function SP.Create(parent)
     winCheck("timerBarsEnabled", "Show countdown timer bars (pull / break / boss abilities)")
     winCheck("minimapBubbles", "Show minimap bubbles (\"VOA Listed\", \"Favorites Listed\")")
     winCheck("assignmentToasts", "Show Raid Groups assignment / note toasts")
+    winCheck("voaBanner", "Show the VoA portal banner under the minimap (holder, timer, LFM count)", function(on)
+        local vb = AIP.CentralGUI and AIP.CentralGUI.VoaBanner
+        if vb and not on then vb:Hide() end
+    end)
+    local function plainCheck(key, text)
+        local chk = CreateCheckbox(content, 15, y, key, text, function(self)
+            if AIP.db then AIP.db[key] = (self:GetChecked() == 1 or self:GetChecked() == true) end
+        end)
+        chk:SetChecked(DbBool(key))
+        frame.checks[key] = chk
+        y = y - 26
+    end
+    plainCheck("voaAlert", "Pulse the minimap icon when VOA groups are listed")
+    plainCheck("voaSound", "Play a sound when a VOA group is first listed")
 
     -- Context-aware automatic profiles (multiboxers / raid leaders). Manual
     -- changes above stick until the next context change.
