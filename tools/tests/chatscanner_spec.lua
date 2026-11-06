@@ -262,7 +262,7 @@ UnitBuff = function(_, i) local b = buffs[i]; if b then return b[1], nil, nil, n
 buffs = { { "Essence of Wintergrasp", 58045 } }
 eq(CS.ScanWGAura(false), "Horde", "aura: has Essence -> own faction holds")
 buffs = { { "Something", 1 } }
-eq(CS.ScanWGAura(false), "Alliance", "aura: Northrend without Essence -> other faction holds")
+eq(CS.ScanWGAura(false), nil, "aura: Northrend without Essence -> unknown (absence is not evidence)")
 eq(CS.ScanWGAura(true), nil, "aura: ignored during a battle")
 zone = "Orgrimmar"
 eq(CS.ScanWGAura(false), nil, "aura: outside Northrend is unknown")

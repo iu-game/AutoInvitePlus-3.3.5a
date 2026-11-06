@@ -212,8 +212,8 @@ local NORTHREND_ZONES = {
 
 -- Holder from the player's own aura: players of the faction that holds
 -- Wintergrasp carry "Essence of Wintergrasp" (spell 58045) in Northrend.
--- Returns faction, or nil when it can't be told (outside Northrend, battle on,
--- or the faction is unknown).
+-- Positive evidence only: the aura being absent proves nothing (it can lag
+-- after a battle), so that returns nil rather than guessing the other faction.
 function CS.ScanWGAura(inBattle)
     if inBattle or not UnitBuff then return nil end
     local mine = UnitFactionGroup and UnitFactionGroup("player")
@@ -228,7 +228,7 @@ function CS.ScanWGAura(inBattle)
         if spellId == 58045 or name == "Essence of Wintergrasp" then return mine end
         i = i + 1
     end
-    return (mine == "Alliance") and "Horde" or "Alliance"
+    return nil
 end
 
 -- { active = bool, wait = seconds|nil, owner = "Alliance"|"Horde"|nil, ownerAge = seconds|nil, source = string|nil }
@@ -242,6 +242,11 @@ function CS.GetWGStatus()
         if w and w > 0 then st.wait = w else st.active = true end
     end
     local db = AIP.db
+    if db and db.wgAuraFixed ~= true then
+        -- 7.0.0 guessed the holder from a missing aura; drop what that stored
+        if db.wgOwnerSource == "aura" then db.wgOwner = ""; db.wgOwnerSource = "" end
+        db.wgAuraFixed = true
+    end
     if db then
         local now = (GetTime and GetTime()) or 0
         if not CS.wgScanAt or now - CS.wgScanAt >= 2 then
