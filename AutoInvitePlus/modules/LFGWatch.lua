@@ -47,6 +47,7 @@ local function readStats()
     local function needBool(v) return (v ~= nil and v ~= false and v ~= 0) end
     return {
         instanceName = asStr(instanceName), instanceType = instanceType,
+        dpsNeedCount = (type(dpsNeeds) == "number") and dpsNeeds or nil,   -- open DPS slots, when the core reports a count
         needs  = { leader = needBool(leaderNeeds), tank = needBool(tankNeeds),
             healer = needBool(healerNeeds), dps = needBool(dpsNeeds) },
         totals = { tanks = num(totalTanks), healers = num(totalHealers), dps = num(totalDPS) },
@@ -239,10 +240,45 @@ end
 -- ============================================================================
 -- Phase 2 widget: a compact movable status box, auto-shown while in the queue.
 -- ============================================================================
+-- Dungeon Finder "Assembling Group..." look: five round role portraits (greyed
+-- until that slot is found), gold/white wait + queue time lines, and the roles
+-- you queued as.
+local ROLE_TEX = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
+local ROLE_COORDS = {
+    TANK    = { 0,      0.296875, 0.015625, 0.3125 },
+    HEALER  = { 0.3125, 0.609375, 0.015625, 0.3125 },
+    DAMAGER = { 0.625,  0.921875, 0.015625, 0.3125 },
+}
+local SLOT_ROLES = { "TANK", "HEALER", "DAMAGER", "DAMAGER", "DAMAGER" }
+local SLOT_SIZE, SLOT_GAP = 34, 6
+
+local function setRole(tex, role)
+    local c = ROLE_COORDS[role]
+    tex:SetTexture(ROLE_TEX); tex:SetTexCoord(c[1], c[2], c[3], c[4])
+end
+
+local function fmtLong(s)
+    s = math.floor(tonumber(s) or 0)
+    if s < 60 then return s .. " Sec" end
+    return math.floor(s / 60) .. " Min " .. (s % 60) .. " Sec"
+end
+
+local function fillSlot(tex, on)
+    if tex.SetDesaturated then tex:SetDesaturated(not on) end
+    local v = on and 1 or 0.55
+    tex:SetVertexColor(v, v, v)
+    tex:SetAlpha(on and 1 or 0.7)
+end
+
+local function placeLine(fs, y)
+    fs:ClearAllPoints()
+    fs:SetPoint("TOP", 0, y); fs:SetPoint("LEFT", 8, 0); fs:SetPoint("RIGHT", -8, 0)
+end
+
 function LW.CreateWidget()
     if LW.widget then return LW.widget end
     local f = CreateFrame("Frame", "AIPLFGWatch", UIParent)
-    f:SetSize(230, 66)
+    f:SetSize(250, 152)
     f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving)
     f:SetScript("OnDragStop", function(self)
@@ -255,21 +291,60 @@ function LW.CreateWidget()
     if pos then f:SetPoint(pos.point or "TOP", UIParent, pos.relPoint or "TOP", pos.x or 0, pos.y or -180)
     else f:SetPoint("TOP", UIParent, "TOP", 0, -180) end
     f:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 12,
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 14,
         insets = { left = 3, right = 3, top = 3, bottom = 3 } })
-    f:SetBackdropColor(0.02, 0.02, 0.05, 0.86); f:SetBackdropBorderColor(0.35, 0.35, 0.42, 0.95)
-    local strip = f:CreateTexture(nil, "ARTWORK")
-    strip:SetPoint("TOPLEFT", 5, -5); strip:SetPoint("TOPRIGHT", -5, -5); strip:SetHeight(16)
-    strip:SetTexture(0.16, 0.16, 0.24, 0.95)
-    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    f.title:SetPoint("LEFT", strip, "LEFT", 6, 0); f.title:SetText("|cff66bbffDungeon Finder|r")
-    f.line1 = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    f.line1:SetPoint("TOPLEFT", 8, -24); f.line1:SetPoint("RIGHT", -8, 0); f.line1:SetJustifyH("LEFT")
-    f.line2 = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    f.line2:SetPoint("TOPLEFT", 8, -44); f.line2:SetPoint("RIGHT", -8, 0); f.line2:SetJustifyH("LEFT")
+    f:SetBackdropColor(0.03, 0.03, 0.06, 0.9); f:SetBackdropBorderColor(0.6, 0.55, 0.35, 0.95)
+
+    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.title:SetPoint("TOP", 0, -10); f.title:SetTextColor(1, 1, 1)
+    f.sub = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.sub:SetPoint("TOP", f.title, "BOTTOM", 0, -2); f.sub:SetPoint("LEFT", 10, 0); f.sub:SetPoint("RIGHT", -10, 0)
+    f.sub:SetTextColor(0.6, 0.6, 0.65)
+
+    f.slots = {}
+    local total = #SLOT_ROLES * SLOT_SIZE + (#SLOT_ROLES - 1) * SLOT_GAP
+    for i, role in ipairs(SLOT_ROLES) do
+        local t = f:CreateTexture(nil, "ARTWORK")
+        t:SetSize(SLOT_SIZE, SLOT_SIZE)
+        t:SetPoint("TOPLEFT", f, "TOP", -total / 2 + (i - 1) * (SLOT_SIZE + SLOT_GAP), -40)
+        setRole(t, role); fillSlot(t, false)
+        f.slots[i] = t
+    end
+
+    f.line1 = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")   -- Average Wait Time
+    f.line2 = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")   -- Time In Queue
+    f.line3 = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- auto re-queue note
+    f.line3:SetTextColor(0.85, 0.85, 0.9)
+
+    f.queuedAs = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.queuedAs:SetPoint("TOPLEFT", 12, -134); f.queuedAs:SetText("You are queued as:")
+    f.myRoles = {}
+    for i = 1, 3 do
+        local t = f:CreateTexture(nil, "ARTWORK")
+        t:SetSize(16, 16)
+        t:SetPoint("LEFT", f.queuedAs, "RIGHT", 6 + (i - 1) * 18, 0)
+        t:Hide()
+        f.myRoles[i] = t
+    end
     f:Hide()
     LW.widget = f
     return f
+end
+
+-- Queue layout (slots + wait/queue lines + roles) vs the compact text-only layout.
+local function layoutWidget(f, queued)
+    for _, t in ipairs(f.slots) do if queued then t:Show() else t:Hide() end end
+    if queued then
+        f:SetHeight(154)
+        f.queuedAs:Show()
+        placeLine(f.line1, -82); placeLine(f.line2, -97); placeLine(f.line3, -112)
+    else
+        f:SetHeight(86)
+        f.queuedAs:Hide()
+        for _, t in ipairs(f.myRoles) do t:Hide() end
+        placeLine(f.line1, -36); placeLine(f.line2, -53)
+        f.line3:SetText("")
+    end
 end
 
 function LW.UpdateWidget()
@@ -279,7 +354,8 @@ function LW.UpdateWidget()
     -- When enabled the window stays visible (idle state when not queued), so the
     -- toggle / button / settings checkbox have immediate visible feedback.
     if not s.mode or s.mode == "abandonedInDungeon" then
-        f.title:SetText("|cff66bbffDungeon Finder|r")
+        layoutWidget(f, false)
+        f.title:SetText("Dungeon Finder"); f.sub:SetText("")
         f.line1:SetText("|cff888888Not in a queue|r")
         f.line2:SetText("|cff666666queue a dungeon to see live status|r")
         f:Show(); return
@@ -289,34 +365,56 @@ function LW.UpdateWidget()
         local p = s.proposal
         local acc = 0
         for _, m in ipairs(p.members) do if m.accepted then acc = acc + 1 end end
-        f.title:SetText("|cff55ff55READY:|r " .. (p.name or "?"))
-        f.line1:SetText(string.format("Accepted %d / %d", acc, p.numMembers or 5))
-        f.line2:SetText(p.hasResponded and ("Role: " .. (p.role or "?") .. " (responded)")
+        layoutWidget(f, false)
+        f.title:SetText("|cff55ff55Group Found!|r"); f.sub:SetText(p.name or "?")
+        f.line1:SetText(string.format("|cffffd100Accepted:|r %d / %d", acc, p.numMembers or 5))
+        f.line2:SetText(p.hasResponded and ("|cffffd100Your role:|r " .. (p.role or "?") .. " (responded)")
             or "|cffff5555ACCEPT the queue pop!|r")
     elseif s.mode == "queued" or s.mode == "suspended" then
         local st = s.stats
         local names = {}
         for _, d in ipairs(s.dungeons) do names[#names + 1] = d.name end
-        f.title:SetText("|cff66bbffQueued:|r " .. ((#names > 0 and names[1]) or (st and st.instanceName) or "Dungeon"))
-        local l1 = "In queue " .. fmtTime(s.elapsed)
-        if st and st.wait and st.wait.mine and st.wait.mine > 0 then l1 = l1 .. "  ~" .. fmtTime(st.wait.mine) .. " wait" end
-        if s.submode == "empowered" then l1 = "|cff55ff55Next up!|r  " .. l1 end
-        f.line1:SetText(l1)
-        local need = {}
-        if st and st.needs.tank then need[#need + 1] = "Tank" end
-        if st and st.needs.healer then need[#need + 1] = "Healer" end
-        if st and st.needs.dps then need[#need + 1] = "DPS" end
-        local l2 = #need > 0 and ("Needs: " .. table.concat(need, ", ")) or "Group filling..."
+        layoutWidget(f, true)
+        f.title:SetText(s.submode == "empowered" and "|cff55ff55Next up!|r Assembling Group..." or "Assembling Group...")
+        local what = (#names > 0 and (names[1] .. (#names > 1 and (" +" .. (#names - 1)) or ""))) or (st and st.instanceName) or ""
+        f.sub:SetText(s.mode == "suspended" and "(paused - you hold a group invite)" or what)
+
+        -- Slots: found = full colour, still needed = greyed.
+        local dpsOpen = 3
+        if st then
+            if st.dpsNeedCount then dpsOpen = math.max(0, math.min(3, st.dpsNeedCount))
+            else dpsOpen = st.needs.dps and 3 or 0 end
+        end
+        fillSlot(f.slots[1], st ~= nil and not st.needs.tank)
+        fillSlot(f.slots[2], st ~= nil and not st.needs.healer)
+        for i = 1, 3 do fillSlot(f.slots[2 + i], st ~= nil and i <= (3 - dpsOpen)) end
+
+        local avg = st and st.wait and st.wait.average or 0
+        f.line1:SetText("|cffffd100Average Wait Time:|r |cffffffff" .. (avg > 0 and fmtLong(avg) or "Unknown") .. "|r")
+        f.line2:SetText("|cffffd100Time In Queue:|r |cffffffff" .. fmtLong(s.elapsed) .. "|r")
+        local l3 = ""
         if AIP.db and AIP.db.lfgAutoRequeue then
             local left = math.max(0, (LW.REQUEUE_AFTER or 120) - (s.elapsed or 0))
-            l2 = l2 .. string.format("  |cff888888(re-queue %s)|r", fmtTime(left))
+            l3 = string.format("|cff888888(auto re-queue in %s)|r", fmtTime(left))
         end
-        f.line2:SetText(l2)
+        f.line3:SetText(l3)
+
+        local r, mine = s.roles, {}
+        if r then
+            if r.tank then mine[#mine + 1] = "TANK" end
+            if r.healer then mine[#mine + 1] = "HEALER" end
+            if r.dps then mine[#mine + 1] = "DAMAGER" end
+        end
+        for i, t in ipairs(f.myRoles) do
+            if mine[i] then setRole(t, mine[i]); t:Show() else t:Hide() end
+        end
     elseif s.mode == "rolecheck" then
-        f.title:SetText("|cffffcc55Role check|r")
+        layoutWidget(f, false)
+        f.title:SetText("|cffffcc55Role check|r"); f.sub:SetText("")
         f.line1:SetText("Confirm your role."); f.line2:SetText("")
     elseif s.mode == "lfgparty" then
-        f.title:SetText("|cff66bbffLFG group|r")
+        layoutWidget(f, false)
+        f.title:SetText("LFG group"); f.sub:SetText("")
         f.line1:SetText((s.proposal and s.proposal.name) or "In dungeon group."); f.line2:SetText("")
     else
         f:Hide(); return
