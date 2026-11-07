@@ -279,6 +279,31 @@ end
 -- Join panel (idle state): pick the dungeon type and your roles, then queue for
 -- the Dungeon Finder straight from this window.
 -- ----------------------------------------------------------------------------
+-- Dungeon Deserter debuff (seconds left, or nil). Aura scan: the most robust source.
+function LW.DeserterLeft()
+    if not (UnitDebuff and GetTime) then return nil end
+    for i = 1, 40 do
+        local name, _, _, _, _, _, expires = UnitDebuff("player", i)
+        if not name then break end
+        if name:find("Deserter") and expires and expires > 0 then
+            return math.max(0, expires - GetTime())
+        end
+    end
+    return nil
+end
+
+local function mmss(sec)
+    sec = math.floor(tonumber(sec) or 0)
+    return string.format("%d:%02d", math.floor(sec / 60), sec % 60)
+end
+
+-- Submit a queue for the given dungeon ids with the roles currently set.
+function LW.SubmitJoin(ids)
+    if ClearAllLFGDungeons then pcall(ClearAllLFGDungeons) end
+    if SetLFGDungeon then for _, id in ipairs(ids) do pcall(SetLFGDungeon, id) end end
+    return JoinLFG and pcall(JoinLFG) and true or false
+end
+
 local ROLE_ORDER = { "TANK", "HEALER", "DAMAGER" }
 local ROLE_NAMES = { TANK = "Tank", HEALER = "Healer", DAMAGER = "Damage" }
 
@@ -349,9 +374,12 @@ function LW.JoinQueue()
         if AIP.Print then AIP.Print("|cff33ccff[LFG]|r Pick at least one role first.") end
         return
     end
-    if ClearAllLFGDungeons then pcall(ClearAllLFGDungeons) end
-    if SetLFGDungeon then pcall(SetLFGDungeon, choice.id) end
-    local ok = JoinLFG and pcall(JoinLFG)
+    local dl = LW.DeserterLeft()
+    if dl then
+        if AIP.Print then AIP.Print("|cff33ccff[LFG]|r You have the Deserter debuff - you can queue again in " .. mmss(dl) .. ".") end
+        return
+    end
+    local ok = LW.SubmitJoin({ choice.id })
     if not ok and AIP.Print then AIP.Print("|cff33ccff[LFG]|r Could not join the queue (are you the group leader?).") end
 end
 
@@ -436,6 +464,12 @@ function LW.RefreshJoin()
         if not b.available then b.icon:SetAlpha(0.25) end
         if on then b.check:Show() else b.check:Hide() end
     end
+    local dl = LW.DeserterLeft()
+    if dl then
+        j.hint:SetText("|cffff5555Deserter - you can queue in " .. mmss(dl) .. "|r")
+        j.joinBtn:Disable()
+        return
+    end
     if not choice then
         j.hint:SetText("|cffff8866Nothing to queue for at your level.|r")
     elseif not any then
@@ -507,15 +541,14 @@ function LW.CreateWidget()
     rq:SetText("Requeue")
     rq:SetScript("OnClick", function()
         if LW.State.mode == "lfgparty" then
-            StaticPopup_Show("AIP_LFG_LEAVE_REQUEUE")
+            LW.ConfirmLeave(true)
             return
         end
         if LW.State.mode ~= "queued" then return end
         local now = GetTime and GetTime() or 0
         if (now - (LW.lastManualRequeue or 0)) < 5 then return end
         LW.lastManualRequeue = now
-        LW.Requeue()
-        if AIP.Print then AIP.Print("|cff33ccff[LFG]|r Left the queue and re-queuing...") end
+        if LW.Requeue() and AIP.Print then AIP.Print("|cff33ccff[LFG]|r Left the queue and re-queuing...") end
     end)
     rq:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -530,34 +563,102 @@ function LW.CreateWidget()
     end)
     rq:SetScript("OnLeave", function() GameTooltip:Hide() end)
     f.requeueBtn = rq
+
+    -- Leave Queue (queued) / Leave Group (in an LFG group)
+    local lv = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    lv:SetSize(70, 20)
+    lv:SetScript("OnClick", function()
+        local m = LW.State.mode
+        if m == "lfgparty" then
+            LW.ConfirmLeave(false)
+        elseif (m == "queued" or m == "suspended") and LeaveLFG then
+            pcall(LeaveLFG)
+            if AIP.Print then AIP.Print("|cff33ccff[LFG]|r Left the queue.") end
+        end
+    end)
+    lv:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        if LW.State.mode == "lfgparty" then
+            GameTooltip:AddLine("Leave this dungeon group", 1, 1, 1)
+        else
+            GameTooltip:AddLine("Leave the queue", 1, 1, 1)
+        end
+        GameTooltip:Show()
+    end)
+    lv:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f.leaveBtn = lv
+
+    -- Find Replacement (only when the group is short and the game allows a backfill)
+    local fb = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    fb:SetSize(110, 20)
+    fb:SetScript("OnClick", function()
+        if PartyLFGStartBackfill then pcall(PartyLFGStartBackfill) end
+    end)
+    fb:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Queue for a replacement member", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    fb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f.fillBtn = fb
     buildJoin(f)
     f:Hide()
     LW.widget = f
     return f
 end
 
-if StaticPopupDialogs then StaticPopupDialogs["AIP_LFG_LEAVE_REQUEUE"] = {
-    text = "Leave this dungeon group and queue again?\n\nLeaving an LFG group can give you the Deserter debuff.",
-    button1 = "Leave & Requeue", button2 = CANCEL,
-    OnAccept = function()
-        if LeaveParty then pcall(LeaveParty) end
-        if AIP.Utils and AIP.Utils.DelayedCall then AIP.Utils.DelayedCall(4, LW.Requeue) else LW.Requeue() end
+if StaticPopupDialogs then StaticPopupDialogs["AIP_LFG_CONFIRM"] = {
+    text = "%s",
+    button1 = ACCEPT, button2 = CANCEL,
+    OnAccept = function(self, data)
+        if data and data.requeue then
+            local c = LW.JoinChoice()
+            LW.Requeue({ leaveParty = true, ids = c and { c.id } or nil })
+        elseif LeaveParty then
+            pcall(LeaveParty)
+        end
     end,
     timeout = 0, whileDead = 1, hideOnEscape = 1,
 } end
 
+-- Confirm leaving the LFG group (optionally queueing again with our own dungeon pick).
+function LW.ConfirmLeave(requeue)
+    if UnitAffectingCombat and UnitAffectingCombat("player") then
+        if AIP.Print then AIP.Print("|cff33ccff[LFG]|r You can't leave the group during combat.") end
+        return
+    end
+    if not StaticPopup_Show then return end
+    local inside = IsInInstance and IsInInstance()
+    local msg = (requeue and "Leave this dungeon group and queue again?" or "Leave this dungeon group?") .. "\n\n" ..
+        (inside and "|cffff5555You are inside the dungeon: leaving can give you the Dungeon Deserter debuff.|r"
+            or "Leaving an LFG group may give you the Deserter debuff.")
+    StaticPopup_Show("AIP_LFG_CONFIRM", msg, nil, { requeue = requeue })
+end
+
 -- Which controls show for each state. Sizes/positions are NOT set here: fitWidget
 -- (below) measures the visible content and sizes the window around it.
-local function layoutWidget(f, queued, idle)
-    f.kind = idle and "idle" or (queued and "queued" or "text")
-    for _, t in ipairs(f.slots) do if queued then t:Show() else t:Hide() end end
+local function sizeBtn(b, label, minW)
+    b:SetText(label)
+    b:SetSize(math.max(minW or 0, b:GetFontString():GetStringWidth() + 24), 20)
+end
+
+local function layoutWidget(f, queued, idle, party)
+    f.kind = idle and "idle" or (party and "party") or (queued and "queued") or "text"
+    local slots = queued or party
+    for _, t in ipairs(f.slots) do if slots then t:Show() else t:Hide() end end
     if f.join then if idle then f.join:Show() else f.join:Hide() end end
+    f.requeueBtn:Hide(); f.leaveBtn:Hide(); f.fillBtn:Hide()
     if queued then
         f.queuedAs:Show()
-        f.requeueBtn:SetSize(58, 18); f.requeueBtn:SetText("Requeue"); f.requeueBtn:Show()
+        sizeBtn(f.requeueBtn, "Requeue", 58); f.requeueBtn:Show()
+        sizeBtn(f.leaveBtn, "Leave Queue", 58); f.leaveBtn:Show()
     else
-        f.queuedAs:Hide(); f.requeueBtn:Hide()
+        f.queuedAs:Hide()
         for _, t in ipairs(f.myRoles) do t:Hide() end
+        if party then
+            sizeBtn(f.requeueBtn, "Leave & Requeue", 80); f.requeueBtn:Show()
+            sizeBtn(f.leaveBtn, "Leave Group", 58); f.leaveBtn:Show()
+        end
         if not idle then f.line3:SetText("") end
     end
     if idle then f.line1:SetText(""); f.line2:SetText(""); f.line3:SetText("") end
@@ -567,22 +668,35 @@ end
 -- heights, then size the window to the widest line / the bottom edge. Call after
 -- the state's texts are set.
 local FIT_PAD = 10
+local BTN_GAP = 6
 local function fitWidget(f)
     local kind = f.kind or "text"
     local function txt(fs) local t = fs:GetText(); return t ~= nil and t ~= "" end
     local function hh(fs) return txt(fs) and fs:GetStringHeight() or 0 end
     local function ww(fs) return txt(fs) and fs:GetStringWidth() or 0 end
 
+    -- button row (right aligned): requeue is the right-most, leave next to it
+    local row = {}
+    if f.requeueBtn:IsShown() then row[#row + 1] = f.requeueBtn end
+    if f.leaveBtn:IsShown() then row[#row + 1] = f.leaveBtn end
+    local rowW = 0
+    for _, b in ipairs(row) do rowW = rowW + b:GetWidth() + BTN_GAP end
+    rowW = math.max(0, rowW - BTN_GAP)
+
     -- width: widest content + side margins, never below a readable minimum
     local width = 220
     for _, fs in ipairs({ f.title, f.sub, f.line1, f.line2, f.line3 }) do width = math.max(width, ww(fs) + 28) end
-    if kind == "queued" then
+    if kind == "queued" or kind == "party" then
         width = math.max(width, 5 * SLOT_SIZE + 4 * SLOT_GAP + 28)
-        width = math.max(width, f.queuedAs:GetStringWidth() + 6 + 3 * 18 + 58 + 36)
+    end
+    if kind == "queued" then
+        width = math.max(width, f.queuedAs:GetStringWidth() + 6 + 3 * 18 + rowW + 36)
+    elseif kind == "party" then
+        width = math.max(width, rowW + 20, f.fillBtn:IsShown() and (f.fillBtn:GetWidth() + 20) or 0)
     elseif kind == "idle" then
         width = math.max(width, 190 + 40)
-    elseif f.requeueBtn:IsShown() then
-        width = math.max(width, f.requeueBtn:GetWidth() + 28)
+    elseif rowW > 0 then
+        width = math.max(width, rowW + 20)
     end
     width = math.ceil(width)
     f:SetWidth(width)
@@ -596,6 +710,16 @@ local function fitWidget(f)
     local function line(fs)
         if not txt(fs) then return end
         placeLine(fs, -y); y = y + hh(fs) + 4
+    end
+    local function buttons()
+        local x = -8
+        local h = 0
+        for _, b in ipairs(row) do
+            b:ClearAllPoints(); b:SetPoint("TOPRIGHT", x, -y)
+            x = x - b:GetWidth() - BTN_GAP
+            h = math.max(h, b:GetHeight())
+        end
+        return h
     end
 
     if kind == "idle" then
@@ -614,7 +738,7 @@ local function fitWidget(f)
         y = y + hh(j.hint) + 8
         j.joinBtn:ClearAllPoints(); j.joinBtn:SetPoint("TOP", j, "TOP", 0, -y)
         y = y + j.joinBtn:GetHeight()
-    elseif kind == "queued" then
+    elseif kind == "queued" or kind == "party" then
         local total = 5 * SLOT_SIZE + 4 * SLOT_GAP
         for i, t in ipairs(f.slots) do
             t:ClearAllPoints()
@@ -623,15 +747,21 @@ local function fitWidget(f)
         y = y + SLOT_SIZE + 8
         line(f.line1); line(f.line2); line(f.line3)
         y = y + 2
-        f.queuedAs:ClearAllPoints(); f.queuedAs:SetPoint("TOPLEFT", 12, -(y + 2))
-        f.requeueBtn:ClearAllPoints(); f.requeueBtn:SetPoint("TOPRIGHT", -8, -y)
-        y = y + math.max(f.requeueBtn:GetHeight(), 16)
+        if kind == "queued" then
+            f.queuedAs:ClearAllPoints(); f.queuedAs:SetPoint("TOPLEFT", 12, -(y + 3))
+            y = y + math.max(buttons(), 16)
+        else
+            if f.fillBtn:IsShown() then
+                f.fillBtn:ClearAllPoints(); f.fillBtn:SetPoint("TOP", f, "TOP", 0, -y)
+                y = y + f.fillBtn:GetHeight() + BTN_GAP
+            end
+            y = y + buttons()
+        end
     else
         line(f.line1); line(f.line2)
-        if f.requeueBtn:IsShown() then
+        if rowW > 0 then
             y = y + 2
-            f.requeueBtn:ClearAllPoints(); f.requeueBtn:SetPoint("TOPRIGHT", -8, -y)
-            y = y + f.requeueBtn:GetHeight()
+            y = y + buttons()
         else
             y = y - 4
         end
@@ -667,6 +797,7 @@ function LW.UpdateWidget()
         local names = {}
         for _, d in ipairs(s.dungeons) do names[#names + 1] = d.name end
         layoutWidget(f, true)
+        for i, t in ipairs(f.slots) do setRole(t, SLOT_ROLES[i]) end
         f.title:SetText(s.submode == "empowered" and "|cff55ff55Next up!|r Assembling Group..." or "Assembling Group...")
         local what = (#names > 0 and (names[1] .. (#names > 1 and (" +" .. (#names - 1)) or ""))) or (st and st.instanceName) or ""
         f.sub:SetText(s.mode == "suspended" and "(paused - you hold a group invite)" or what)
@@ -692,6 +823,7 @@ function LW.UpdateWidget()
         f.line3:SetText(l3)
         -- Only a plain wait can be left safely; paused (holding a group invite) can't.
         if s.mode == "queued" then f.requeueBtn:Enable() else f.requeueBtn:Disable() end
+        f.leaveBtn:Enable()
 
         local r, mine = s.roles, {}
         if r then
@@ -707,10 +839,40 @@ function LW.UpdateWidget()
         f.title:SetText("|cffffcc55Role check|r"); f.sub:SetText("")
         f.line1:SetText("Confirm your role."); f.line2:SetText("")
     elseif s.mode == "lfgparty" then
-        layoutWidget(f, false)
-        f.title:SetText("LFG group"); f.sub:SetText("")
-        f.line1:SetText((s.proposal and s.proposal.name) or "In dungeon group."); f.line2:SetText("")
-        f.requeueBtn:SetText("Leave & Requeue"); f.requeueBtn:SetSize(math.max(104, f.requeueBtn:GetFontString():GetStringWidth() + 26), 18); f.requeueBtn:Enable(); f.requeueBtn:Show()
+        layoutWidget(f, false, false, true)
+        local id = GetPartyLFGID and GetPartyLFGID()
+        local dname = id and GetLFGDungeonInfo and asStr((GetLFGDungeonInfo(id)))
+        dname = dname or (s.proposal and s.proposal.name)
+        local leader = IsPartyLeader and IsPartyLeader()
+        f.title:SetText(leader and "LFG group |cffffd100(leader)|r" or "LFG group")
+        f.sub:SetText(dname or "")
+        local inside = IsInInstance and IsInInstance()
+        f.line1:SetText(inside and "|cff55ff55Inside the dungeon|r" or "|cffffd100Outside the dungeon|r")
+        f.line2:SetText("")
+        local dl = LW.DeserterLeft()
+        f.line3:SetText(dl and ("|cffff5555Deserter: " .. mmss(dl) .. "|r") or "")
+
+        -- Party composition: one portrait per member by assigned role, empty slots dimmed.
+        local counts = { TANK = 0, HEALER = 0, DAMAGER = 0 }
+        local units = { "player", "party1", "party2", "party3", "party4" }
+        for _, u in ipairs(units) do
+            if UnitExists and UnitExists(u) then
+                local r = UnitGroupRolesAssigned and UnitGroupRolesAssigned(u)
+                if r ~= "TANK" and r ~= "HEALER" then r = "DAMAGER" end
+                counts[r] = counts[r] + 1
+            end
+        end
+        local order = {}
+        for _, role in ipairs(ROLE_ORDER) do for _ = 1, counts[role] do order[#order + 1] = role end end
+        for i, t in ipairs(f.slots) do
+            if order[i] then setRole(t, order[i]); fillSlot(t, true)
+            else setRole(t, "DAMAGER"); fillSlot(t, false) end
+        end
+
+        f.requeueBtn:Enable(); f.leaveBtn:Enable()
+        if CanPartyLFGBackfill and CanPartyLFGBackfill() then
+            sizeBtn(f.fillBtn, "Find Replacement", 100); f.fillBtn:Show()
+        end
     else
         f:Hide(); return
     end
@@ -737,26 +899,75 @@ end
 -- a group is forming (rolecheck/proposal) or the queue is paused (suspended).
 -- Verified 3.3.5a: LeaveLFG() then LFDQueueFrame_Join() re-queues the same
 -- selection; leaving the QUEUE gives no Deserter (that's only for formed groups).
--- Leave the queue and re-submit the dungeon(s) selected in the LFD UI. Shared by
--- the auto re-queue timer and the window's Requeue button.
-function LW.Requeue()
-    if LeaveLFG then
+-- Leave the queue (and the group, when asked) and queue again for the same dungeons -
+-- or the ones in opts.ids. Event-driven: the rejoin only happens once the game
+-- reports the leave, never after a blind delay. Shared by the auto re-queue timer
+-- and the window's Requeue / Leave & Requeue buttons. Returns false if it did not start.
+LW.pending = nil
+function LW.Requeue(opts)
+    opts = opts or {}
+    if LW.pending then return false end
+    local ids = opts.ids
+    if not ids then
+        ids = {}
+        local m = LW.State.mode
+        if m == "queued" or m == "suspended" then
+            for _, d in ipairs(LW.State.dungeons or {}) do if d.id then ids[#ids + 1] = d.id end end
+        end
+        if #ids == 0 then
+            local c = LW.JoinChoice()
+            if c then ids[1] = c.id end
+        end
+    end
+    if #ids == 0 then
+        if AIP.Print then AIP.Print("|cff33ccff[LFG]|r No dungeon to requeue for.") end
+        return false
+    end
+    LW.pending = { ids = ids, leaveParty = opts.leaveParty, t0 = GetTime and GetTime() or 0, stage = "leaving" }
+    if opts.leaveParty and (GetNumPartyMembers() or 0) > 0 and LeaveParty then
+        pcall(LeaveParty)
+    elseif LeaveLFG then
         local ok = pcall(LeaveLFG)
         if not ok and AIP.Debug then AIP.Debug("[LFGWatch] LeaveLFG() errored during requeue") end
     end
-    -- Re-queue after the leave is confirmed server-side (LeaveLFG is async).
-    -- LFDQueueFrame_Join() re-submits whatever dungeon(s) are currently
-    -- selected in the LFD UI's own saved state - if that pcall fails (e.g.
-    -- nothing was ever selected there this session) it used to fail silently.
-    local function rejoin()
-        if LFDQueueFrame_Join then
-            local ok = pcall(LFDQueueFrame_Join)
-            if not ok and AIP.Debug then
-                AIP.Debug("[LFGWatch] LFDQueueFrame_Join() errored during requeue - open the Dungeon Finder and select a dungeon at least once this session")
-            end
+    return true
+end
+
+-- Driven by the 1s tick: advance a pending requeue once the leave has taken effect.
+function LW.AdvanceRequeue()
+    local p = LW.pending
+    if not p then return end
+    local now = GetTime and GetTime() or 0
+    local function finish(msg)
+        LW.pending = nil
+        if msg and AIP.Print then AIP.Print("|cff33ccff[LFG]|r " .. msg) end
+        if LW.UpdateWidget then LW.UpdateWidget() end
+    end
+    if now - p.t0 > 12 then
+        finish("Requeue timed out - use the Dungeon Finder to queue again.")
+        return
+    end
+    local mode = GetLFGMode and GetLFGMode()
+    local inQueueOrGroup = (mode == "queued" or mode == "suspended" or mode == "lfgparty"
+        or mode == "proposal" or mode == "rolecheck")
+    if p.stage == "leaving" then
+        if now - p.t0 < 1 then return end
+        if p.leaveParty and (GetNumPartyMembers() or 0) > 0 then return end
+        if inQueueOrGroup then return end
+        local dl = LW.DeserterLeft()
+        if dl then
+            finish("You have the Deserter debuff - you can queue again in " .. mmss(dl) .. ".")
+            return
+        end
+        LW.SubmitJoin(p.ids)
+        p.stage, p.t1 = "joining", now
+    elseif p.stage == "joining" then
+        if inQueueOrGroup then
+            finish("Queued again.")
+        elseif now - p.t1 > 5 then
+            finish("Requeue did not start - use the Dungeon Finder to queue again.")
         end
     end
-    if AIP.Utils and AIP.Utils.DelayedCall then AIP.Utils.DelayedCall(2, rejoin) else rejoin() end
 end
 
 LW.REQUEUE_AFTER = 120   -- seconds
@@ -841,6 +1052,7 @@ local EVENTS = {
     "LFG_ROLE_CHECK_SHOW", "LFG_ROLE_CHECK_HIDE", "LFG_ROLE_CHECK_ROLE_CHOSEN",
     "LFG_PROPOSAL_SHOW", "LFG_PROPOSAL_UPDATE", "LFG_PROPOSAL_SUCCEEDED", "LFG_PROPOSAL_FAILED",
     "LFG_ROLE_UPDATE", "LFG_LOCK_INFO_RECEIVED", "PLAYER_ENTERING_WORLD",
+    "PARTY_MEMBERS_CHANGED", "PARTY_LEADER_CHANGED",
 }
 for _, e in ipairs(EVENTS) do pcall(function() ev:RegisterEvent(e) end) end
 ev:SetScript("OnEvent", function() LW.Refresh() end)
@@ -854,6 +1066,16 @@ ev:SetScript("OnUpdate", function(self, e)
     if self.acc < 1 then return end
     self.acc = 0
     local m = LW.State.mode
+    if LW.pending and LW.AdvanceRequeue then LW.AdvanceRequeue() end
+    -- Idle / in-group states have no per-second data except the Deserter timer,
+    -- the join hint and the party composition: repaint every other tick.
+    if not m or m == "lfgparty" or m == "abandonedInDungeon" then
+        self.idleTick = (self.idleTick or 0) + 1
+        if self.idleTick >= 2 and LW.widget and LW.widget:IsShown() and LW.UpdateWidget then
+            self.idleTick = 0
+            LW.UpdateWidget()
+        end
+    end
     if not (m == "queued" or m == "suspended" or m == "rolecheck" or m == "proposal") then return end
     -- Cheap per-second nudge from our own tracked start (see LW.Refresh) rather
     -- than re-deriving from the server's queuedTime every tick - the slower
