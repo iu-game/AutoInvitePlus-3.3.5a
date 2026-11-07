@@ -243,11 +243,11 @@ end
 -- Dungeon Finder "Assembling Group..." look: five round role portraits (greyed
 -- until that slot is found), gold/white wait + queue time lines, and the roles
 -- you queued as.
-local ROLE_TEX = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
+local ROLE_TEX = "Interface\\LFGFrame\\UI-LFG-ICON-ROLES"
 local ROLE_COORDS = {
-    TANK    = { 0,      0.296875, 0.015625, 0.3125 },
-    HEALER  = { 0.3125, 0.609375, 0.015625, 0.3125 },
-    DAMAGER = { 0.625,  0.921875, 0.015625, 0.3125 },
+    TANK    = { 0,          0.26171875, 0.26171875, 0.5234375 },
+    HEALER  = { 0.26171875, 0.5234375,  0,          0.26171875 },
+    DAMAGER = { 0.26171875, 0.5234375,  0.26171875, 0.5234375 },
 }
 local SLOT_ROLES = { "TANK", "HEALER", "DAMAGER", "DAMAGER", "DAMAGER" }
 local SLOT_SIZE, SLOT_GAP = 34, 6
