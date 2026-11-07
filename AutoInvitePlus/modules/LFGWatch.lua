@@ -331,6 +331,10 @@ function LW.CreateWidget()
     rq:SetSize(58, 18); rq:SetPoint("BOTTOMRIGHT", -8, 8)
     rq:SetText("Requeue")
     rq:SetScript("OnClick", function()
+        if LW.State.mode == "lfgparty" then
+            StaticPopup_Show("AIP_LFG_LEAVE_REQUEUE")
+            return
+        end
         if LW.State.mode ~= "queued" then return end
         local now = GetTime and GetTime() or 0
         if (now - (LW.lastManualRequeue or 0)) < 5 then return end
@@ -340,8 +344,13 @@ function LW.CreateWidget()
     end)
     rq:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Leave and rejoin the queue", 1, 1, 1)
-        GameTooltip:AddLine("Resets your time in queue.", 0.7, 0.7, 0.7)
+        if LW.State.mode == "lfgparty" then
+            GameTooltip:AddLine("Leave this group and queue again", 1, 1, 1)
+            GameTooltip:AddLine("May apply the Deserter debuff.", 1, 0.5, 0.3)
+        else
+            GameTooltip:AddLine("Leave and rejoin the queue", 1, 1, 1)
+            GameTooltip:AddLine("Resets your time in queue.", 0.7, 0.7, 0.7)
+        end
         GameTooltip:Show()
     end)
     rq:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -351,13 +360,23 @@ function LW.CreateWidget()
     return f
 end
 
+StaticPopupDialogs["AIP_LFG_LEAVE_REQUEUE"] = {
+    text = "Leave this dungeon group and queue again?\n\nLeaving an LFG group can give you the Deserter debuff.",
+    button1 = "Leave & Requeue", button2 = CANCEL,
+    OnAccept = function()
+        if LeaveParty then pcall(LeaveParty) end
+        if AIP.Utils and AIP.Utils.DelayedCall then AIP.Utils.DelayedCall(4, LW.Requeue) else LW.Requeue() end
+    end,
+    timeout = 0, whileDead = 1, hideOnEscape = 1,
+}
+
 -- Queue layout (slots + wait/queue lines + roles) vs the compact text-only layout.
 local function layoutWidget(f, queued)
     for _, t in ipairs(f.slots) do if queued then t:Show() else t:Hide() end end
     if queued then
         f:SetHeight(154)
         f.queuedAs:Show()
-        f.requeueBtn:Show()
+        f.requeueBtn:SetSize(58, 18); f.requeueBtn:SetText("Requeue"); f.requeueBtn:Show()
         placeLine(f.line1, -82); placeLine(f.line2, -97); placeLine(f.line3, -112)
     else
         f:SetHeight(86)
@@ -440,6 +459,8 @@ function LW.UpdateWidget()
         layoutWidget(f, false)
         f.title:SetText("LFG group"); f.sub:SetText("")
         f.line1:SetText((s.proposal and s.proposal.name) or "In dungeon group."); f.line2:SetText("")
+        f:SetHeight(104)
+        f.requeueBtn:SetSize(104, 18); f.requeueBtn:SetText("Leave & Requeue"); f.requeueBtn:Enable(); f.requeueBtn:Show()
     else
         f:Hide(); return
     end
