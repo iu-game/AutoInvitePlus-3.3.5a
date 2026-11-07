@@ -665,6 +665,20 @@ local function acquireCell(index)
 
     cell.bg = cell:CreateTexture(nil, "BACKGROUND")
     cell.bg:SetAllPoints(); cell.bg:SetTexture(0.5, 0.5, 0.5, 0.85)
+    -- Grid2-style vitals: the class colour fills the cell left-to-right by
+    -- health % (bg is the darkened "missing health" backdrop), and the bottom
+    -- POWER_FRAC of the cell height is a resource bar (mana/rage/energy/runic
+    -- power). Created before cell.overlay so state washes tint them too (same
+    -- BORDER layer, creation order).
+    cell.hpTex = cell:CreateTexture(nil, "BORDER")
+    cell.hpTex:SetPoint("TOPLEFT"); cell.hpTex:SetPoint("BOTTOMLEFT")
+    cell.hpTex:SetWidth(CELL_W)
+    cell.pwBg = cell:CreateTexture(nil, "BORDER")
+    cell.pwBg:SetPoint("BOTTOMLEFT"); cell.pwBg:SetPoint("BOTTOMRIGHT")
+    cell.pwBg:SetHeight(math.floor(CELL_H * 0.3 + 0.5)); cell.pwBg:SetTexture(0, 0, 0, 0.6); cell.pwBg:Hide()
+    cell.pwTex = cell:CreateTexture(nil, "BORDER")
+    cell.pwTex:SetPoint("BOTTOMLEFT"); cell.pwTex:SetHeight(math.floor(CELL_H * 0.3 + 0.5))
+    cell.pwTex:SetWidth(CELL_W); cell.pwTex:Hide()
     -- RG-020 design pass finding: this "wash" was at OVERLAY, which sits
     -- ABOVE the raid icon/debuff/quick-cast icons (all ARTWORK) - every time
     -- it showed, it re-tinted those icons too, making them murky. Moved to
@@ -914,7 +928,30 @@ refreshValues = function()
     for _, cell in ipairs(cellPool) do
         if cell.member then
             local m = cell.member
-            cell.bg:SetTexture(classColor(m.class))
+            local cr, cg, cb = classColor(m.class)
+            cell.bg:SetTexture((cr or 0.5) * 0.3, (cg or 0.5) * 0.3, (cb or 0.5) * 0.3, 0.9)
+            cell.hpTex:SetTexture(cr or 0.5, cg or 0.5, cb or 0.5, 0.95)
+            -- Live vitals (polled on the same 0.25s tick as AFK/DND).
+            local hpFrac, pwFrac, pwR, pwG, pwB = 1, nil, 0.2, 0.4, 1
+            if m.unit and UnitHealthMax then
+                local hm = UnitHealthMax(m.unit) or 0
+                hpFrac = hm > 0 and math.min(1, (UnitHealth(m.unit) or 0) / hm) or 1
+                local pm = UnitPowerMax and UnitPowerMax(m.unit) or 0
+                if pm > 0 then
+                    pwFrac = math.min(1, (UnitPower(m.unit) or 0) / pm)
+                    local pt = UnitPowerType and UnitPowerType(m.unit)
+                    local col = PowerBarColor and pt and PowerBarColor[pt]
+                    if col then pwR, pwG, pwB = col.r, col.g, col.b end
+                end
+            end
+            cell.hpTex:SetWidth(math.max(0.01, hpFrac * cell:GetWidth()))
+            if pwFrac then
+                cell.pwBg:Show()
+                cell.pwTex:SetTexture(pwR, pwG, pwB, 1)
+                cell.pwTex:SetWidth(math.max(0.01, pwFrac * cell:GetWidth())); cell.pwTex:Show()
+            else
+                cell.pwBg:Hide(); cell.pwTex:Hide()
+            end
             cell.nameFS:SetText(m.name)
             -- BUG FOUND LIVE (2026-09-27): m.dead/m.online come from
             -- RG.Snapshot(), which only re-runs on structural roster events
