@@ -271,6 +271,7 @@ local defaults = {
     timerBarPos = nil,              -- {point, relPoint, x, y} for the countdown timer bars
     lfgWatch = true,                -- show the Dungeon Finder (RDF) queue-status widget while queued
     lfgWatchPos = nil,              -- {point, relPoint, x, y} for the LFGWatch widget
+    lfgJoinDungeon = 0,             -- dungeon id picked in the LFG window Join panel (0 = first joinable random dungeon)
     lfgShare = false,               -- opt-in: broadcast my RDF queue status to addon peers over the DataBus
     lfgAutoRequeue = false,         -- opt-in: auto leave + re-queue if no group forms within 2 min (resets queue position!)
 

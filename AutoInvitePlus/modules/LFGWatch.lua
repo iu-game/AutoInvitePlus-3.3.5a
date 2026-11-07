@@ -275,6 +275,181 @@ local function placeLine(fs, y)
     fs:SetPoint("TOP", 0, y); fs:SetPoint("LEFT", 8, 0); fs:SetPoint("RIGHT", -8, 0)
 end
 
+-- ----------------------------------------------------------------------------
+-- Join panel (idle state): pick the dungeon type and your roles, then queue for
+-- the Dungeon Finder straight from this window.
+-- ----------------------------------------------------------------------------
+local ROLE_ORDER = { "TANK", "HEALER", "DAMAGER" }
+local ROLE_NAMES = { TANK = "Tank", HEALER = "Healer", DAMAGER = "Damage" }
+
+local function randomChoices()
+    local out = {}
+    if GetNumRandomDungeons and GetLFGRandomDungeonInfo then
+        for i = 1, (GetNumRandomDungeons() or 0) do
+            local ok, id, name = pcall(GetLFGRandomDungeonInfo, i)
+            name = asStr(name)
+            if ok and id and name then
+                local joinable = true
+                if IsLFGDungeonJoinable then
+                    local okj, j = pcall(IsLFGDungeonJoinable, id)
+                    if okj then joinable = j and true or false end
+                end
+                out[#out + 1] = { id = id, name = name, joinable = joinable }
+            end
+        end
+    end
+    return out
+end
+
+-- The dungeon the Join button will queue for: the saved pick when it is still
+-- joinable, else the first joinable random dungeon.
+function LW.JoinChoice()
+    local list = randomChoices()
+    local want = AIP.db and tonumber(AIP.db.lfgJoinDungeon) or 0
+    local first
+    for _, c in ipairs(list) do
+        if c.joinable then
+            first = first or c
+            if c.id == want then return c, list end
+        end
+    end
+    return first, list
+end
+
+local function availableRoles()
+    if UnitGetAvailableRoles then
+        local ok, t, h, d = pcall(UnitGetAvailableRoles, "player")
+        if ok then return { TANK = t and true or false, HEALER = h and true or false, DAMAGER = d and true or false } end
+    end
+    return { TANK = true, HEALER = true, DAMAGER = true }
+end
+
+local function chosenRoles()
+    local r = readRoles() or {}
+    return { TANK = r.tank and true or false, HEALER = r.healer and true or false, DAMAGER = r.dps and true or false }
+end
+
+local function toggleRole(role)
+    if not SetLFGRoles then return end
+    local r = readRoles() or {}
+    local t, h, d = r.tank and true or false, r.healer and true or false, r.dps and true or false
+    if role == "TANK" then t = not t elseif role == "HEALER" then h = not h else d = not d end
+    pcall(SetLFGRoles, r.leader and true or false, t, h, d)
+    LW.Refresh()
+end
+
+function LW.JoinQueue()
+    local choice = LW.JoinChoice()
+    if not choice then
+        if AIP.Print then AIP.Print("|cff33ccff[LFG]|r No dungeon available to queue for.") end
+        return
+    end
+    local roles = chosenRoles()
+    if not (roles.TANK or roles.HEALER or roles.DAMAGER) then
+        if AIP.Print then AIP.Print("|cff33ccff[LFG]|r Pick at least one role first.") end
+        return
+    end
+    if ClearAllLFGDungeons then pcall(ClearAllLFGDungeons) end
+    if SetLFGDungeon then pcall(SetLFGDungeon, choice.id) end
+    local ok = JoinLFG and pcall(JoinLFG)
+    if not ok and AIP.Print then AIP.Print("|cff33ccff[LFG]|r Could not join the queue (are you the group leader?).") end
+end
+
+local function buildJoin(f)
+    local j = CreateFrame("Frame", nil, f)
+    j:SetAllPoints(f)
+    j:Hide()
+    f.join = j
+
+    local dd = CreateFrame("Frame", "AIPLFGTypeDropdown", j, "UIDropDownMenuTemplate")
+    dd:SetPoint("TOP", j, "TOP", 0, -26)
+    UIDropDownMenu_SetWidth(dd, 190)
+    UIDropDownMenu_Initialize(dd, function(self, level)
+        local choice, list = LW.JoinChoice()
+        local info = UIDropDownMenu_CreateInfo()
+        info.text = "Specific Dungeons..."; info.notCheckable = true
+        info.func = function()
+            -- Picking individual dungeons needs Blizzard's own list: open it.
+            if LFDParentFrame and not LFDParentFrame:IsShown() and ToggleLFDParentFrame then ToggleLFDParentFrame() end
+        end
+        UIDropDownMenu_AddButton(info, level)
+        for _, c in ipairs(list) do
+            info = UIDropDownMenu_CreateInfo()
+            info.text = c.joinable and c.name or ("|cff808080" .. c.name .. "|r")
+            info.disabled = not c.joinable
+            info.checked = (choice and choice.id == c.id) and true or false
+            info.func = function()
+                if AIP.db then AIP.db.lfgJoinDungeon = c.id end
+                LW.RefreshJoin()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    j.dropdown = dd
+
+    j.roleBtns = {}
+    local SZ, GAP = 34, 12
+    local total = 3 * SZ + 2 * GAP
+    for i, role in ipairs(ROLE_ORDER) do
+        local b = CreateFrame("Button", nil, j)
+        b:SetSize(SZ, SZ)
+        b:SetPoint("TOPLEFT", j, "TOP", -total / 2 + (i - 1) * (SZ + GAP), -62)
+        b.icon = b:CreateTexture(nil, "ARTWORK"); b.icon:SetAllPoints(); setRole(b.icon, role)
+        b.check = b:CreateTexture(nil, "OVERLAY")
+        b.check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+        b.check:SetSize(18, 18); b.check:SetPoint("BOTTOMRIGHT", 5, -5)
+        b.role = role
+        b:SetScript("OnClick", function(self) if self.available then toggleRole(self.role) end end)
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine(ROLE_NAMES[self.role], 1, 1, 1)
+            if not self.available then GameTooltip:AddLine("Your class cannot fill this role.", 1, 0.4, 0.3) end
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        j.roleBtns[i] = b
+    end
+
+    j.hint = j:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    j.hint:SetPoint("TOP", 0, -100); j.hint:SetPoint("LEFT", 8, 0); j.hint:SetPoint("RIGHT", -8, 0)
+    j.hint:SetTextColor(0.6, 0.6, 0.65)
+
+    j.joinBtn = CreateFrame("Button", nil, j, "UIPanelButtonTemplate")
+    j.joinBtn:SetSize(120, 22); j.joinBtn:SetPoint("BOTTOM", 0, 10)
+    j.joinBtn:SetText("Join Queue")
+    j.joinBtn:SetScript("OnClick", function() LW.JoinQueue() end)
+end
+
+function LW.RefreshJoin()
+    local f = LW.widget
+    local j = f and f.join
+    if not j then return end
+    local choice = LW.JoinChoice()
+    UIDropDownMenu_SetText(j.dropdown, choice and choice.name or "No dungeon available")
+    local avail, sel = availableRoles(), chosenRoles()
+    local any = false
+    for _, b in ipairs(j.roleBtns) do
+        b.available = avail[b.role]
+        local on = b.available and sel[b.role]
+        if on then any = true end
+        fillSlot(b.icon, on)
+        if not b.available then b.icon:SetAlpha(0.25) end
+        if on then b.check:Show() else b.check:Hide() end
+    end
+    if not choice then
+        j.hint:SetText("|cffff8866Nothing to queue for at your level.|r")
+    elseif not any then
+        j.hint:SetText("|cffffd100Pick at least one role.|r")
+    else
+        local names = {}
+        for _, role in ipairs(ROLE_ORDER) do
+            if sel[role] and avail[role] then names[#names + 1] = ROLE_NAMES[role] end
+        end
+        j.hint:SetText("Queue as " .. table.concat(names, " / "))
+    end
+    if choice and any then j.joinBtn:Enable() else j.joinBtn:Disable() end
+end
+
 function LW.CreateWidget()
     if LW.widget then return LW.widget end
     local f = CreateFrame("Frame", "AIPLFGWatch", UIParent)
@@ -355,6 +530,7 @@ function LW.CreateWidget()
     end)
     rq:SetScript("OnLeave", function() GameTooltip:Hide() end)
     f.requeueBtn = rq
+    buildJoin(f)
     f:Hide()
     LW.widget = f
     return f
@@ -371,9 +547,15 @@ if StaticPopupDialogs then StaticPopupDialogs["AIP_LFG_LEAVE_REQUEUE"] = {
 } end
 
 -- Queue layout (slots + wait/queue lines + roles) vs the compact text-only layout.
-local function layoutWidget(f, queued)
+local function layoutWidget(f, queued, idle)
     for _, t in ipairs(f.slots) do if queued then t:Show() else t:Hide() end end
-    if queued then
+    if f.join then if idle then f.join:Show() else f.join:Hide() end end
+    if idle then
+        f:SetHeight(148)
+        f.queuedAs:Hide(); f.requeueBtn:Hide()
+        for _, t in ipairs(f.myRoles) do t:Hide() end
+        f.line1:SetText(""); f.line2:SetText(""); f.line3:SetText("")
+    elseif queued then
         f:SetHeight(154)
         f.queuedAs:Show()
         f.requeueBtn:SetSize(58, 18); f.requeueBtn:SetText("Requeue"); f.requeueBtn:Show()
@@ -395,10 +577,9 @@ function LW.UpdateWidget()
     -- When enabled the window stays visible (idle state when not queued), so the
     -- toggle / button / settings checkbox have immediate visible feedback.
     if not s.mode or s.mode == "abandonedInDungeon" then
-        layoutWidget(f, false)
+        layoutWidget(f, false, true)
         f.title:SetText("Dungeon Finder"); f.sub:SetText("")
-        f.line1:SetText("|cff888888Not in a queue|r")
-        f.line2:SetText("|cff666666queue a dungeon to see live status|r")
+        LW.RefreshJoin()
         f:Show(); return
     end
 
