@@ -43,6 +43,8 @@ local CELL_W = 130
 local ROW1_H, ROW2_H, ROW_GAP = 11, 10, 1
 local CELL_H, CELL_GAP = ROW1_H + ROW_GAP + ROW2_H, 2
 local GROUP_GAP = 4
+-- Power strip: 10% of the cell height, but never under 3px (2px is unreadable).
+local POWER_H = math.max(3, math.floor(CELL_H * 0.1 + 0.5))
 -- Distinct from GROUP_GAP (spacing between group COLUMNS in the same grid-row):
 -- with only GROUP_GAP governing row-to-row spacing too, the manager view's two
 -- rows (groups 1-4, then 5-8 - GridSize(8) = 4x2) read as one undifferentiated
@@ -675,9 +677,13 @@ local function acquireCell(index)
     cell.hpTex:SetWidth(CELL_W)
     cell.pwBg = cell:CreateTexture(nil, "BORDER")
     cell.pwBg:SetPoint("BOTTOMLEFT"); cell.pwBg:SetPoint("BOTTOMRIGHT")
-    cell.pwBg:SetHeight(math.floor(CELL_H * 0.3 + 0.5)); cell.pwBg:SetTexture(0, 0, 0, 0.6); cell.pwBg:Hide()
+    cell.pwBg:SetHeight(POWER_H); cell.pwBg:SetTexture(0.02, 0.02, 0.03, 0.85); cell.pwBg:Hide()
+    -- 1px dark rule above the strip so it reads as a separate gauge, not a stripe.
+    cell.pwRule = cell:CreateTexture(nil, "BORDER")
+    cell.pwRule:SetPoint("BOTTOMLEFT", 0, POWER_H); cell.pwRule:SetPoint("BOTTOMRIGHT", 0, POWER_H)
+    cell.pwRule:SetHeight(1); cell.pwRule:SetTexture(0, 0, 0, 0.7); cell.pwRule:Hide()
     cell.pwTex = cell:CreateTexture(nil, "BORDER")
-    cell.pwTex:SetPoint("BOTTOMLEFT"); cell.pwTex:SetHeight(math.floor(CELL_H * 0.3 + 0.5))
+    cell.pwTex:SetPoint("BOTTOMLEFT"); cell.pwTex:SetHeight(POWER_H)
     cell.pwTex:SetWidth(CELL_W); cell.pwTex:Hide()
     -- RG-020 design pass finding: this "wash" was at OVERLAY, which sits
     -- ABOVE the raid icon/debuff/quick-cast icons (all ARTWORK) - every time
@@ -946,11 +952,14 @@ refreshValues = function()
             end
             cell.hpTex:SetWidth(math.max(0.01, hpFrac * cell:GetWidth()))
             if pwFrac then
-                cell.pwBg:Show()
-                cell.pwTex:SetTexture(pwR, pwG, pwB, 1)
+                cell.pwBg:Show(); cell.pwRule:Show()
+                -- Vertical gradient (lighter top) gives the thin strip some depth.
+                cell.pwTex:SetTexture(WHITE)
+                cell.pwTex:SetGradientAlpha("VERTICAL", pwR, pwG, pwB, 1,
+                    math.min(1, pwR + 0.35), math.min(1, pwG + 0.35), math.min(1, pwB + 0.35), 1)
                 cell.pwTex:SetWidth(math.max(0.01, pwFrac * cell:GetWidth())); cell.pwTex:Show()
             else
-                cell.pwBg:Hide(); cell.pwTex:Hide()
+                cell.pwBg:Hide(); cell.pwRule:Hide(); cell.pwTex:Hide()
             end
             cell.nameFS:SetText(m.name)
             -- BUG FOUND LIVE (2026-09-27): m.dead/m.online come from
