@@ -360,7 +360,7 @@ function LW.CreateWidget()
     return f
 end
 
-StaticPopupDialogs["AIP_LFG_LEAVE_REQUEUE"] = {
+if StaticPopupDialogs then StaticPopupDialogs["AIP_LFG_LEAVE_REQUEUE"] = {
     text = "Leave this dungeon group and queue again?\n\nLeaving an LFG group can give you the Deserter debuff.",
     button1 = "Leave & Requeue", button2 = CANCEL,
     OnAccept = function()
@@ -368,7 +368,7 @@ StaticPopupDialogs["AIP_LFG_LEAVE_REQUEUE"] = {
         if AIP.Utils and AIP.Utils.DelayedCall then AIP.Utils.DelayedCall(4, LW.Requeue) else LW.Requeue() end
     end,
     timeout = 0, whileDead = 1, hideOnEscape = 1,
-}
+} end
 
 -- Queue layout (slots + wait/queue lines + roles) vs the compact text-only layout.
 local function layoutWidget(f, queued)
