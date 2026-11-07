@@ -546,28 +546,97 @@ if StaticPopupDialogs then StaticPopupDialogs["AIP_LFG_LEAVE_REQUEUE"] = {
     timeout = 0, whileDead = 1, hideOnEscape = 1,
 } end
 
--- Queue layout (slots + wait/queue lines + roles) vs the compact text-only layout.
+-- Which controls show for each state. Sizes/positions are NOT set here: fitWidget
+-- (below) measures the visible content and sizes the window around it.
 local function layoutWidget(f, queued, idle)
+    f.kind = idle and "idle" or (queued and "queued" or "text")
     for _, t in ipairs(f.slots) do if queued then t:Show() else t:Hide() end end
     if f.join then if idle then f.join:Show() else f.join:Hide() end end
-    if idle then
-        f:SetHeight(148)
-        f.queuedAs:Hide(); f.requeueBtn:Hide()
-        for _, t in ipairs(f.myRoles) do t:Hide() end
-        f.line1:SetText(""); f.line2:SetText(""); f.line3:SetText("")
-    elseif queued then
-        f:SetHeight(154)
+    if queued then
         f.queuedAs:Show()
         f.requeueBtn:SetSize(58, 18); f.requeueBtn:SetText("Requeue"); f.requeueBtn:Show()
-        placeLine(f.line1, -82); placeLine(f.line2, -97); placeLine(f.line3, -112)
     else
-        f:SetHeight(86)
-        f.queuedAs:Hide()
-        f.requeueBtn:Hide()
+        f.queuedAs:Hide(); f.requeueBtn:Hide()
         for _, t in ipairs(f.myRoles) do t:Hide() end
-        placeLine(f.line1, -36); placeLine(f.line2, -53)
-        f.line3:SetText("")
+        if not idle then f.line3:SetText("") end
     end
+    if idle then f.line1:SetText(""); f.line2:SetText(""); f.line3:SetText("") end
+end
+
+-- Elastic sizing: stack the visible pieces top-down using their measured text
+-- heights, then size the window to the widest line / the bottom edge. Call after
+-- the state's texts are set.
+local FIT_PAD = 10
+local function fitWidget(f)
+    local kind = f.kind or "text"
+    local function txt(fs) local t = fs:GetText(); return t ~= nil and t ~= "" end
+    local function hh(fs) return txt(fs) and fs:GetStringHeight() or 0 end
+    local function ww(fs) return txt(fs) and fs:GetStringWidth() or 0 end
+
+    -- width: widest content + side margins, never below a readable minimum
+    local width = 220
+    for _, fs in ipairs({ f.title, f.sub, f.line1, f.line2, f.line3 }) do width = math.max(width, ww(fs) + 28) end
+    if kind == "queued" then
+        width = math.max(width, 5 * SLOT_SIZE + 4 * SLOT_GAP + 28)
+        width = math.max(width, f.queuedAs:GetStringWidth() + 6 + 3 * 18 + 58 + 36)
+    elseif kind == "idle" then
+        width = math.max(width, 190 + 40)
+    elseif f.requeueBtn:IsShown() then
+        width = math.max(width, f.requeueBtn:GetWidth() + 28)
+    end
+    width = math.ceil(width)
+    f:SetWidth(width)
+
+    local y = FIT_PAD
+    f.title:ClearAllPoints(); f.title:SetPoint("TOP", 0, -y)
+    y = y + hh(f.title) + 2
+    if txt(f.sub) then y = y + hh(f.sub) + 2 end
+    y = y + 6
+
+    local function line(fs)
+        if not txt(fs) then return end
+        placeLine(fs, -y); y = y + hh(fs) + 4
+    end
+
+    if kind == "idle" then
+        local j = f.join
+        j.dropdown:ClearAllPoints(); j.dropdown:SetPoint("TOP", j, "TOP", 0, -(y - 4))
+        y = y + 28
+        local SZ, GAP = 34, 12
+        local total = 3 * SZ + 2 * GAP
+        for i, b in ipairs(j.roleBtns) do
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", j, "TOP", -total / 2 + (i - 1) * (SZ + GAP), -y)
+        end
+        y = y + SZ + 8
+        j.hint:ClearAllPoints(); j.hint:SetPoint("TOP", j, "TOP", 0, -y)
+        j.hint:SetPoint("LEFT", 8, 0); j.hint:SetPoint("RIGHT", -8, 0)
+        y = y + hh(j.hint) + 8
+        j.joinBtn:ClearAllPoints(); j.joinBtn:SetPoint("TOP", j, "TOP", 0, -y)
+        y = y + j.joinBtn:GetHeight()
+    elseif kind == "queued" then
+        local total = 5 * SLOT_SIZE + 4 * SLOT_GAP
+        for i, t in ipairs(f.slots) do
+            t:ClearAllPoints()
+            t:SetPoint("TOPLEFT", f, "TOP", -total / 2 + (i - 1) * (SLOT_SIZE + SLOT_GAP), -y)
+        end
+        y = y + SLOT_SIZE + 8
+        line(f.line1); line(f.line2); line(f.line3)
+        y = y + 2
+        f.queuedAs:ClearAllPoints(); f.queuedAs:SetPoint("TOPLEFT", 12, -(y + 2))
+        f.requeueBtn:ClearAllPoints(); f.requeueBtn:SetPoint("TOPRIGHT", -8, -y)
+        y = y + math.max(f.requeueBtn:GetHeight(), 16)
+    else
+        line(f.line1); line(f.line2)
+        if f.requeueBtn:IsShown() then
+            y = y + 2
+            f.requeueBtn:ClearAllPoints(); f.requeueBtn:SetPoint("TOPRIGHT", -8, -y)
+            y = y + f.requeueBtn:GetHeight()
+        else
+            y = y - 4
+        end
+    end
+    f:SetHeight(math.ceil(y + FIT_PAD))
 end
 
 function LW.UpdateWidget()
@@ -580,6 +649,7 @@ function LW.UpdateWidget()
         layoutWidget(f, false, true)
         f.title:SetText("Dungeon Finder"); f.sub:SetText("")
         LW.RefreshJoin()
+        fitWidget(f)
         f:Show(); return
     end
 
@@ -640,11 +710,11 @@ function LW.UpdateWidget()
         layoutWidget(f, false)
         f.title:SetText("LFG group"); f.sub:SetText("")
         f.line1:SetText((s.proposal and s.proposal.name) or "In dungeon group."); f.line2:SetText("")
-        f:SetHeight(104)
         f.requeueBtn:SetSize(104, 18); f.requeueBtn:SetText("Leave & Requeue"); f.requeueBtn:Enable(); f.requeueBtn:Show()
     else
         f:Hide(); return
     end
+    fitWidget(f)
     f:Show()
 end
 
