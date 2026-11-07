@@ -710,7 +710,7 @@ function LW.UpdateWidget()
         layoutWidget(f, false)
         f.title:SetText("LFG group"); f.sub:SetText("")
         f.line1:SetText((s.proposal and s.proposal.name) or "In dungeon group."); f.line2:SetText("")
-        f.requeueBtn:SetSize(104, 18); f.requeueBtn:SetText("Leave & Requeue"); f.requeueBtn:Enable(); f.requeueBtn:Show()
+        f.requeueBtn:SetText("Leave & Requeue"); f.requeueBtn:SetSize(math.max(104, f.requeueBtn:GetFontString():GetStringWidth() + 26), 18); f.requeueBtn:Enable(); f.requeueBtn:Show()
     else
         f:Hide(); return
     end
