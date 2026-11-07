@@ -326,6 +326,26 @@ function LW.CreateWidget()
         t:Hide()
         f.myRoles[i] = t
     end
+    -- Leave + rejoin (bottom right), queue state only.
+    local rq = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    rq:SetSize(58, 18); rq:SetPoint("BOTTOMRIGHT", -8, 8)
+    rq:SetText("Requeue")
+    rq:SetScript("OnClick", function()
+        if LW.State.mode ~= "queued" then return end
+        local now = GetTime and GetTime() or 0
+        if (now - (LW.lastManualRequeue or 0)) < 5 then return end
+        LW.lastManualRequeue = now
+        LW.Requeue()
+        if AIP.Print then AIP.Print("|cff33ccff[LFG]|r Left the queue and re-queuing...") end
+    end)
+    rq:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Leave and rejoin the queue", 1, 1, 1)
+        GameTooltip:AddLine("Resets your time in queue.", 0.7, 0.7, 0.7)
+        GameTooltip:Show()
+    end)
+    rq:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f.requeueBtn = rq
     f:Hide()
     LW.widget = f
     return f
@@ -337,10 +357,12 @@ local function layoutWidget(f, queued)
     if queued then
         f:SetHeight(154)
         f.queuedAs:Show()
+        f.requeueBtn:Show()
         placeLine(f.line1, -82); placeLine(f.line2, -97); placeLine(f.line3, -112)
     else
         f:SetHeight(86)
         f.queuedAs:Hide()
+        f.requeueBtn:Hide()
         for _, t in ipairs(f.myRoles) do t:Hide() end
         placeLine(f.line1, -36); placeLine(f.line2, -53)
         f.line3:SetText("")
@@ -398,6 +420,8 @@ function LW.UpdateWidget()
             l3 = string.format("|cff888888(auto re-queue in %s)|r", fmtTime(left))
         end
         f.line3:SetText(l3)
+        -- Only a plain wait can be left safely; paused (holding a group invite) can't.
+        if s.mode == "queued" then f.requeueBtn:Enable() else f.requeueBtn:Disable() end
 
         local r, mine = s.roles, {}
         if r then
@@ -441,18 +465,12 @@ end
 -- a group is forming (rolecheck/proposal) or the queue is paused (suspended).
 -- Verified 3.3.5a: LeaveLFG() then LFDQueueFrame_Join() re-queues the same
 -- selection; leaving the QUEUE gives no Deserter (that's only for formed groups).
-LW.REQUEUE_AFTER = 120   -- seconds
-local lastRequeueAt = 0
-function LW.CheckAutoRequeue()
-    if not (AIP.db and AIP.db.lfgAutoRequeue) then return end
-    if LW.State.mode ~= "queued" then return end
-    if (LW.State.elapsed or 0) < LW.REQUEUE_AFTER then return end
-    local now = (GetTime and GetTime()) or 0
-    if (now - lastRequeueAt) < 30 then return end   -- guard the leave/rejoin transition
-    lastRequeueAt = now
+-- Leave the queue and re-submit the dungeon(s) selected in the LFD UI. Shared by
+-- the auto re-queue timer and the window's Requeue button.
+function LW.Requeue()
     if LeaveLFG then
         local ok = pcall(LeaveLFG)
-        if not ok and AIP.Debug then AIP.Debug("[LFGWatch] LeaveLFG() errored during auto-requeue") end
+        if not ok and AIP.Debug then AIP.Debug("[LFGWatch] LeaveLFG() errored during requeue") end
     end
     -- Re-queue after the leave is confirmed server-side (LeaveLFG is async).
     -- LFDQueueFrame_Join() re-submits whatever dungeon(s) are currently
@@ -462,11 +480,23 @@ function LW.CheckAutoRequeue()
         if LFDQueueFrame_Join then
             local ok = pcall(LFDQueueFrame_Join)
             if not ok and AIP.Debug then
-                AIP.Debug("[LFGWatch] LFDQueueFrame_Join() errored during auto-requeue - open the Dungeon Finder and select a dungeon at least once this session")
+                AIP.Debug("[LFGWatch] LFDQueueFrame_Join() errored during requeue - open the Dungeon Finder and select a dungeon at least once this session")
             end
         end
     end
     if AIP.Utils and AIP.Utils.DelayedCall then AIP.Utils.DelayedCall(2, rejoin) else rejoin() end
+end
+
+LW.REQUEUE_AFTER = 120   -- seconds
+local lastRequeueAt = 0
+function LW.CheckAutoRequeue()
+    if not (AIP.db and AIP.db.lfgAutoRequeue) then return end
+    if LW.State.mode ~= "queued" then return end
+    if (LW.State.elapsed or 0) < LW.REQUEUE_AFTER then return end
+    local now = (GetTime and GetTime()) or 0
+    if (now - lastRequeueAt) < 30 then return end   -- guard the leave/rejoin transition
+    lastRequeueAt = now
+    LW.Requeue()
     if AIP.Print then AIP.Print("|cff33ccff[LFG]|r No group after " ..
         math.floor(LW.REQUEUE_AFTER / 60) .. " min - left and re-queued.") end
 end

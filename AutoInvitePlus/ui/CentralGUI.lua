@@ -910,6 +910,11 @@ function GUI.UpdateVoaBanner(elapsed, voaCount, clock)
         f.l3:SetText(lines[3] or "")
         f.baseColor = { r, g, b }
         f:SetHeight(#lines >= 3 and 58 or 44)
+        -- Width follows the widest line (the "Battle in progress - portal closed"
+        -- line is wider than any fixed guess and used to spill out of the box).
+        local w = 150
+        for _, fs in ipairs({ f.l1, f.l2, f.l3 }) do w = math.max(w, (fs:GetStringWidth() or 0) + 20) end
+        f:SetWidth(math.ceil(w))
     end
     -- Border flashes gold while VOA listings exist, otherwise the holder's colour
     local c = f.baseColor or { 0.4, 0.4, 0.45 }
