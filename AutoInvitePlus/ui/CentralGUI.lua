@@ -813,168 +813,6 @@ local BANNER_ICON = 40
 local BANNER_PAD = 12
 local DEFAULT_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 
--- ----------------------------------------------------------------------------
--- Mini "what to do" animations shown in a stage on the right of a mechanic
--- banner. Each is a looping function(p, E) over p in [0,1) that places a handful
--- of coloured squares / glows on a 64x64 stage (y down). Shapes only: no art
--- assets beyond Blizzard's own glow + arrow textures.
--- ----------------------------------------------------------------------------
-local STAGE = 64
-local TEX_SQ = "Interface\\Buttons\\WHITE8X8"
-local TEX_GLOW = "Interface\\Buttons\\UI-ActionButton-Border"
-local TEX_ARROW = "Interface\\Minimap\\ROTATING-MINIMAPARROW"
-
-local function clamp01(x) return x < 0 and 0 or (x > 1 and 1 or x) end
-local function smooth(a, b, p)                  -- 0 before a, 1 after b, eased between
-    local x = clamp01((p - a) / (b - a))
-    return x * x * (3 - 2 * x)
-end
-local function lerp(a, b, k) return a + (b - a) * k end
-local function pulse(p, n) return 0.5 + 0.5 * math.sin(p * n * 2 * math.pi) end
-
-local WHITE, RED, GREEN, BLUE, PURPLE, CYAN = { 1, 1, 1 }, { 1, 0.25, 0.2 }, { 0.3, 0.95, 0.4 }, { 0.35, 0.6, 1 }, { 0.75, 0.45, 1 }, { 0.35, 0.85, 1 }
-
--- E(layer, kind, x, y, w, h, color, alpha [, angle])  layer: 1 floor, 2 actors, 3 fx
-B.Anims = {
-    move = { T = 2.8, fn = function(p, E)
-        E(1, "glow", 26, 32, 46, 46, RED, 0.55 + 0.35 * pulse(p, 3))
-        E(1, "sq", 54, 32, 12, 40, GREEN, 0.3 + 0.2 * pulse(p, 2))
-        local k = smooth(0.25, 0.65, p)
-        E(2, "sq", lerp(26, 54, k), 32, 9, 9, WHITE, 1 - smooth(0.9, 1, p))
-        E(3, "arrow", 40, 12, 14, 14, WHITE, (smooth(0.05, 0.2, p) - smooth(0.7, 0.85, p)), math.pi / 2)
-    end },
-    spread = { T = 2.8, fn = function(p, E)
-        local k = smooth(0.2, 0.6, p)
-        local pts = { { 32, 32, 32, 32 }, { 28, 28, 10, 10 }, { 36, 28, 54, 10 }, { 28, 36, 10, 54 }, { 36, 36, 54, 54 } }
-        for i, q in ipairs(pts) do
-            local x, y = lerp(q[1], q[3], k), lerp(q[2], q[4], k)
-            E(3, "glow", x, y, 22, 22, RED, 0.8 * smooth(0.55, 0.7, p) * (1 - smooth(0.9, 1, p)))
-            E(2, "sq", x, y, 8, 8, WHITE, 1)
-        end
-    end },
-    stack = { T = 2.8, fn = function(p, E)
-        local k = smooth(0.2, 0.6, p)
-        local pts = { { 10, 10 }, { 54, 10 }, { 10, 54 }, { 54, 54 }, { 32, 8 } }
-        for i, q in ipairs(pts) do
-            E(2, "sq", lerp(q[1], 32 + (i - 3) * 3, k), lerp(q[2], 32 + ((i % 2) * 6 - 3), k), 8, 8, WHITE, 1)
-        end
-        E(3, "glow", 32, 32, 40, 40, GREEN, 0.85 * smooth(0.55, 0.75, p) * (0.7 + 0.3 * pulse(p, 3)))
-    end },
-    dispel = { T = 2.6, fn = function(p, E)
-        E(2, "sq", 12, 52, 9, 9, GREEN, 1)
-        E(2, "sq", 50, 32, 9, 9, WHITE, 1)
-        local mark = 1 - smooth(0.6, 0.7, p)
-        E(3, "sq", 50, 21, 7, 7, PURPLE, mark * (0.7 + 0.3 * pulse(p, 6)))
-        local k = smooth(0.15, 0.55, p)
-        E(3, "sq", lerp(12, 50, k), lerp(52, 32, k), 6, 6, CYAN, k > 0 and k < 1 and 1 or 0)
-        E(3, "glow", 50, 32, 28, 28, CYAN, smooth(0.6, 0.7, p) * (1 - smooth(0.85, 1, p)))
-    end },
-    tank = { T = 2.4, fn = function(p, E)
-        E(2, "sq", 32, 11, 20, 14, RED, 1)
-        local hit = pulse(p, 2)
-        E(1, "sq", 32, 22, 4, 10, RED, 0.35 + 0.5 * hit)
-        E(3, "glow", 32, 34, 28, 28, BLUE, 0.4 + 0.5 * hit)
-        E(2, "sq", 32, 34, 10, 10, BLUE, 1)
-        E(2, "sq", 14, 54, 8, 8, WHITE, 0.6); E(2, "sq", 50, 54, 8, 8, WHITE, 0.6)
-        E(2, "sq", 32, 54, 8, 8, GREEN, 0.9)
-    end },
-    heal = { T = 2.6, fn = function(p, E)
-        local k = smooth(0.15, 0.7, p)
-        for i = 1, 3 do
-            local x = 12 + (i - 1) * 20
-            E(1, "sq", x, 32, 14, 8, { 0.1, 0.1, 0.1 }, 0.9)
-            E(2, "sq", x - 7 + lerp(2, 14, k) / 2, 32, lerp(2, 14, k), 6, { lerp(1, 0.3, k), lerp(0.3, 0.95, k), 0.3 }, 1)
-            E(3, "glow", x, 32, 24, 24, GREEN, smooth(0.6, 0.8, p) * (1 - smooth(0.9, 1, p)) * 0.8)
-        end
-        E(3, "arrow", 32, 12, 12, 12, GREEN, 0.5 + 0.5 * pulse(p, 2), 0)
-    end },
-    kill = { T = 2.2, fn = function(p, E)
-        local hp = 1 - smooth(0.2, 0.8, p)
-        E(2, "sq", 32, 14, 8 + 10 * hp, 8 + 10 * hp, RED, 0.3 + 0.7 * hp)
-        E(3, "glow", 32, 14, 30, 30, RED, 0.3 + 0.5 * pulse(p, 4) * hp)
-        for i = 1, 3 do
-            local x = 12 + (i - 1) * 20
-            E(2, "sq", x, 54, 8, 8, WHITE, 1)
-            local q = (p * 2 + i * 0.33) % 1
-            E(3, "sq", lerp(x, 32, q), lerp(50, 18, q), 3, 3, { 1, 0.9, 0.4 }, 1 - q * 0.4)
-        end
-    end },
-    cc = { T = 2.6, fn = function(p, E)
-        local c = smooth(0.4, 0.5, p)
-        local x = lerp(32 + 14 * math.sin(p * 18), 32, c)
-        E(2, "sq", x, 32, 10, 10, { lerp(1, 0.75, c), lerp(0.25, 0.45, c), lerp(0.2, 1, c) }, 1)
-        E(3, "glow", 32, 32, 30 + 6 * pulse(p, 3), 30 + 6 * pulse(p, 3), PURPLE, c * (0.7 + 0.3 * pulse(p, 3)))
-    end },
-    fear = { T = 2.0, fn = function(p, E)
-        local j = 1 - smooth(0.55, 0.6, p)
-        E(2, "sq", 32 + j * 9 * math.sin(p * 40), 32, 10, 10, WHITE, 1)
-        E(3, "glow", 32, 32, 36, 36, PURPLE, 0.5 + 0.4 * pulse(p, 4))
-        E(3, "glow", 32, 32, 46, 46, BLUE, smooth(0.55, 0.65, p) * 0.9)
-    end },
-    phase = { T = 2.8, fn = function(p, E)
-        local hp = 1 - 0.65 * smooth(0.1, 0.75, p)
-        E(1, "sq", 32, 32, 52, 10, { 0.1, 0.1, 0.1 }, 0.95)
-        E(2, "sq", 6 + 26 * hp, 32, 52 * hp, 6, RED, 1)
-        E(3, "sq", 6 + 52 * 0.35, 32, 2, 14, WHITE, 0.6 + 0.4 * pulse(p, 3))
-        E(3, "glow", 6 + 52 * 0.35, 32, 22, 22, { 1, 0.8, 0.2 }, smooth(0.7, 0.8, p) * 0.9)
-    end },
-    alert = { T = 1.8, fn = function(p, E)
-        E(3, "glow", 32, 32, 36 + 10 * pulse(p, 1), 36 + 10 * pulse(p, 1), { 1, 0.5, 0.15 }, 0.9)
-        E(2, "sq", 32, 28, 5, 14, { 1, 0.85, 0.3 }, 1)
-        E(2, "sq", 32, 42, 5, 5, { 1, 0.85, 0.3 }, 1)
-    end },
-}
-
-local function stageElement(stage, layer, i)
-    stage.els = stage.els or {}
-    local key = layer * 100 + i
-    local t = stage.els[key]
-    if not t then
-        t = stage:CreateTexture(nil, layer == 1 and "BORDER" or (layer == 2 and "ARTWORK" or "OVERLAY"))
-        stage.els[key] = t
-    end
-    return t
-end
-
--- Advance the stage animation by `elapsed` seconds and redraw it.
-function B.Animate(f, elapsed)
-    local stage, anim = f.stage, f.animId and B.Anims[f.animId]
-    if not stage or not stage:IsShown() or not anim then return end
-    f.animT = ((f.animT or 0) + elapsed) % anim.T
-    local p = f.animT / anim.T
-    local used = { 0, 0, 0 }
-    anim.fn(p, function(layer, kind, x, y, w, h, col, a, ang)
-        used[layer] = used[layer] + 1
-        local t = stageElement(stage, layer, used[layer])
-        t:ClearAllPoints()
-        t:SetPoint("CENTER", stage, "TOPLEFT", x, -y)
-        t:SetSize(math.max(0.5, w), math.max(0.5, h))
-        if kind == "glow" then
-            t:SetTexture(TEX_GLOW); t:SetTexCoord(0, 1, 0, 1); t:SetBlendMode("ADD")
-            t:SetVertexColor(col[1], col[2], col[3], 1)
-        elseif kind == "arrow" then
-            t:SetTexture(TEX_ARROW); t:SetBlendMode("BLEND")
-            local c, s = math.cos(ang or 0), math.sin(ang or 0)
-            local function q(px, py) return 0.5 + px * c + py * s, 0.5 - px * s + py * c end
-            local ulx, uly = q(-0.5, -0.5); local llx, lly = q(-0.5, 0.5)
-            local urx, ury = q(0.5, -0.5);  local lrx, lry = q(0.5, 0.5)
-            t:SetTexCoord(ulx, uly, llx, lly, urx, ury, lrx, lry)
-            t:SetVertexColor(col[1], col[2], col[3], 1)
-        else
-            t:SetTexture(TEX_SQ); t:SetTexCoord(0, 1, 0, 1); t:SetBlendMode("BLEND")
-            t:SetVertexColor(col[1], col[2], col[3], 1)
-        end
-        t:SetAlpha(clamp01(a or 1))
-        t:Show()
-    end)
-    for layer = 1, 3 do
-        for i = used[layer] + 1, 12 do
-            local t = stage.els and stage.els[layer * 100 + i]
-            if t then t:Hide() end
-        end
-    end
-end
-
 local function bannerFrame()
     if B.frame then return B.frame end
     local f = CreateFrame("Button", "AIPBanner", UIParent)
@@ -1043,17 +881,6 @@ local function bannerFrame()
     f.timeBar = f:CreateTexture(nil, "OVERLAY")
     f.timeBar:SetHeight(2); f.timeBar:SetTexture("Interface\\Buttons\\WHITE8X8")
     f.timeBar:SetPoint("BOTTOMLEFT", 5, 4)
-    -- "What to do" animation stage on the right (only for specs that carry `anim`).
-    f.stage = CreateFrame("Frame", nil, f)
-    f.stage:SetSize(STAGE, STAGE)
-    f.stage:SetPoint("RIGHT", f, "RIGHT", -10, 0)
-    f.stage:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 10,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
-    })
-    f.stage:SetBackdropColor(0.02, 0.02, 0.03, 0.95)
-    f.stage:Hide()
 
     f:SetScript("OnClick", function(self)
         local spec = self.spec
@@ -1127,18 +954,8 @@ local function applySpec(f, spec)
     local contentH = titleH + (hasTitle and 6 or 0) + textH + (hasBody and (4 + bodyH) or 0)
 
     local left = BANNER_ICON + 8 + 5 + BANNER_PAD
-    local stageW = spec.anim and B.Anims[spec.anim] and (STAGE + 14) or 0
-    f:SetWidth(math.ceil(left + contentW + BANNER_PAD + stageW))
-    f:SetHeight(math.ceil(math.max(BANNER_ICON + 18, contentH + 24, stageW > 0 and (STAGE + 20) or 0)))
-    if stageW > 0 then
-        if f.animId ~= spec.anim then f.animT = 0 end
-        f.animId = spec.anim
-        f.stage:SetBackdropBorderColor(r, g, b, 1)
-        f.stage:Show()
-    else
-        f.animId = nil
-        f.stage:Hide()
-    end
+    f:SetWidth(math.ceil(left + contentW + BANNER_PAD))
+    f:SetHeight(math.ceil(math.max(BANNER_ICON + 18, contentH + 24)))
 
     local cx = left + contentW / 2         -- text block centre, from the frame's left edge
     local topY = (f:GetHeight() - contentH) / 2 + 1
@@ -1182,7 +999,6 @@ function B.Tick(elapsed)
     if not f or not f:IsShown() then return end
     local st = B.state
     B.t = (B.t or 0) + elapsed
-    if f.animId then B.Animate(f, elapsed) end
     if B.peek then
         -- Peek: keep the status fresh while the mouse rests on the top edge.
         B.peekAcc = (B.peekAcc or 0) + elapsed

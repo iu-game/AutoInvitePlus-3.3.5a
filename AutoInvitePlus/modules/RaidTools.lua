@@ -806,7 +806,7 @@ function RT.BuildCallout(text, opts)
     if opts.duty then head, lines = (opts.mechanic or "Your duty"), (lines or text) end
     return {
         key = opts.key, title = title, text = head, body = lines, icon = cat.icon, color = cat.color,
-        textIcon = textIcon, badges = badges, sound = "RaidWarning", anim = cat.id,
+        textIcon = textIcon, badges = badges, sound = "RaidWarning",
         duration = math.min(11, 4.5 + #(lines or "") / 22),
     }
 end

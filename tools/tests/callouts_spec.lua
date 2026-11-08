@@ -42,7 +42,6 @@ eq(d.body, "Polymorph the mind-controlled player!", "duty body is the action")
 eq(#d.badges, 1, "duty carries your class badge")
 eq(d.badges[1].tex, "Interface\\WorldStateFrame\\Icons-Classes", "class badge uses the class sheet")
 
-eq(s.anim, "kill", "spec carries its animation id (blood beasts -> kill)")
 local t = RT.BuildCallout("Soul Reaper on the tank - healers big cooldown!")
 eq(#t.badges, 2, "tank + healer medallions")
 
