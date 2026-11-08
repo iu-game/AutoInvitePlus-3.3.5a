@@ -762,9 +762,22 @@ local function acquireCell(index)
     -- ~60px of row-2 width left over after the debuff icons and before the
     -- missing-buff dot.
     cell.stateFS = fontize(cell:CreateFontString(nil, "OVERLAY"), 8, "OUTLINE")
-    cell.stateFS:SetPoint("TOPRIGHT", cell, "TOPRIGHT", -6, -(ROW1_H + ROW_GAP + 1))
+    cell.stateFS:SetPoint("TOPRIGHT", cell, "TOPRIGHT", -17, -(ROW1_H + ROW_GAP + 1))
     cell.stateFS:SetJustifyH("RIGHT")
     cell.stateFS:Hide()
+
+    -- Location: where this member is relative to me (shares the state label's
+    -- spot, shown only when no persistent state label is) plus a rotating arrow in
+    -- the reserved right-hand column that points at them when they are 15+ yd away.
+    cell.locFS = fontize(cell:CreateFontString(nil, "OVERLAY"), 8, "OUTLINE")
+    cell.locFS:SetPoint("TOPRIGHT", cell, "TOPRIGHT", -17, -(ROW1_H + ROW_GAP + 1))
+    cell.locFS:SetJustifyH("RIGHT")
+    cell.locFS:Hide()
+    cell.arrow = cell:CreateTexture(nil, "OVERLAY")
+    cell.arrow:SetSize(13, 13)
+    cell.arrow:SetPoint("TOPRIGHT", cell, "TOPRIGHT", -3, -(ROW1_H + ROW_GAP - 1))
+    cell.arrow:SetTexture("Interface\\Minimap\\ROTATING-MINIMAPARROW")
+    cell.arrow:Hide()
 
     -- Ready-check icon (RG-020's 4th, fully independent channel - shown or
     -- hidden purely on whether a check is currently active/lingering for
@@ -931,6 +944,7 @@ end
 refreshValues = function()
     if not win or not win:IsShown() or not applied.snap then return end
     local targetName = UnitName and UnitExists and UnitExists("target") and UnitName("target")
+    local locCtx = RG.LocateContext()
     for _, cell in ipairs(cellPool) do
         if cell.member then
             local m = cell.member
@@ -1040,6 +1054,27 @@ refreshValues = function()
                 wR, wG, wB, wA = 0.05, 0.05, 0.05, 0.2
                 rR, rG, rB = 0.2, 0.65, 0.65
                 label, lR, lG, lB = "AFK", 0.44, 0.84, 0.84
+            end
+
+            -- Location relative to me; the text yields to a persistent state label
+            -- (the arrow does not), and the arrow only appears with a known bearing.
+            local loc = RG.Locate(m, locCtx, isOnline)
+            if loc and not loc.near then
+                if label then
+                    cell.locFS:Hide()
+                else
+                    cell.locFS:SetText(loc.label)
+                    if loc.label == "Outside" then cell.locFS:SetTextColor(1, 0.45, 0.35)
+                    else cell.locFS:SetTextColor(1, 0.75, 0.25) end
+                    cell.locFS:Show()
+                end
+                if loc.angle then
+                    cell.arrow:SetTexCoord(RG.ArrowTexCoords(loc.angle)); cell.arrow:Show()
+                else
+                    cell.arrow:Hide()
+                end
+            else
+                cell.locFS:Hide(); cell.arrow:Hide()
             end
 
             if label then

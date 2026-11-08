@@ -211,6 +211,98 @@ function RG.Snapshot()
     return { mode = mode, members = members, groups = groups, counts = counts, myRank = meRank, isLeader = isPartyLeader, canManage = false }
 end
 
+-- ============================================================================
+-- LOCATION (where is everyone relative to me?)
+-- ============================================================================
+
+-- Linen Bandage: IsItemInRange reports a friendly target within 15 yards (the
+-- same probe LibRangeCheck uses for its 15yd step).
+RG.NEAR_ITEM = 1251
+-- Zone maps are ~3:2; only the bearing matters here, so a flat aspect is enough.
+RG.ZONE_ASPECT = 1.5
+
+-- Clockwise angle (radians, 0 = straight ahead) from the player to a map point.
+-- px/py and tx/ty are map fractions (0..1, y down); facing is GetPlayerFacing()
+-- (radians counter-clockwise from north). Nil when either position is unknown.
+function RG.ArrowAngle(px, py, tx, ty, facing)
+    if not (px and py and tx and ty) then return nil end
+    if (px == 0 and py == 0) or (tx == 0 and ty == 0) then return nil end
+    local dx, dy = (tx - px) * RG.ZONE_ASPECT, (ty - py)
+    if dx == 0 and dy == 0 then return 0 end
+    return (math.atan2(dx, -dy) + (facing or 0)) % (2 * math.pi)
+end
+
+-- Texture coordinates (UL, LL, UR, LR pairs) that display an up-pointing arrow
+-- texture rotated clockwise by `angle` (3.3.5a textures have no SetRotation).
+function RG.ArrowTexCoords(angle)
+    local c, s = math.cos(angle), math.sin(angle)
+    local function q(px, py) return 0.5 + px * c + py * s, 0.5 - px * s + py * c end
+    local ulx, uly = q(-0.5, -0.5)
+    local llx, lly = q(-0.5, 0.5)
+    local urx, ury = q(0.5, -0.5)
+    local lrx, lry = q(0.5, 0.5)
+    return ulx, uly, llx, lly, urx, ury, lrx, lry
+end
+
+-- Per-refresh context: my zone, whether I am in an instance, and (lazily) my map
+-- position. The map is only re-pointed at the current zone when the player's own
+-- world map is closed, so it never yanks an open map away from them.
+function RG.LocateContext()
+    local ctx = {}
+    ctx.zone = GetRealZoneText and GetRealZoneText() or nil
+    ctx.inInstance = (IsInInstance and IsInInstance()) and true or false
+    ctx.mapBusy = WorldMapFrame and WorldMapFrame.IsShown and WorldMapFrame:IsShown() and true or false
+    return ctx
+end
+
+local function ensureMap(ctx)
+    if ctx.mapReady ~= nil then return ctx.mapReady end
+    ctx.mapReady = false
+    if ctx.mapBusy or not GetPlayerMapPosition then return false end
+    if SetMapToCurrentZone then SetMapToCurrentZone() end
+    local px, py = GetPlayerMapPosition("player")
+    if px and py and not (px == 0 and py == 0) then
+        ctx.px, ctx.py = px, py
+        ctx.facing = GetPlayerFacing and GetPlayerFacing() or 0
+        ctx.mapReady = true
+    end
+    return ctx.mapReady
+end
+
+-- Where a member is relative to the viewer. Returns nil when nothing useful can
+-- be claimed (self, offline, range unknown), or {near=true} inside 15yd, or
+-- {near=false, label=..., angle=radians|nil} when they are further than that.
+function RG.Locate(m, ctx, online)
+    if not m or m.isSelf or not m.unit or not online then return nil end
+    local r = IsItemInRange and IsItemInRange(RG.NEAR_ITEM, m.unit)
+    local near
+    if r == 1 or r == true then near = true elseif r == 0 or r == false then near = false end
+    local visible = UnitIsVisible and UnitIsVisible(m.unit)
+    if near == nil and visible then return nil end   -- visible, range unknown: no claim
+    if near then return { near = true } end
+
+    local zone
+    if GetRaidRosterInfo and m.index and m.index > 0 and string.sub(m.unit, 1, 4) == "raid" then
+        local name, _, _, _, _, _, z = GetRaidRosterInfo(m.index)
+        if name == m.name then zone = z end
+    end
+    local label
+    if zone and zone ~= "" and ctx.zone and zone ~= ctx.zone then
+        label = ctx.inInstance and "Outside" or zone
+    elseif visible then
+        label = "15+ yd"
+    else
+        label = "Far"
+    end
+
+    local angle
+    if ensureMap(ctx) and GetPlayerMapPosition then
+        local tx, ty = GetPlayerMapPosition(m.unit)
+        angle = RG.ArrowAngle(ctx.px, ctx.py, tx, ty, ctx.facing)
+    end
+    return { near = false, label = label, angle = angle }
+end
+
 -- Which groups a viewer gets to see: managers get all 8 (so they can drag into an
 -- empty one); everyone else only sees groups that actually have someone in them.
 function RG.VisibleGroups(snap)

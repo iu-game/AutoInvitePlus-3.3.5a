@@ -816,5 +816,56 @@ eq(RG.readyCheck.status["aa"], "ready", "ready check: the underlying data is unt
 RG.OnReadyCheckStart()
 eq(RG.GetReadyStatus("Aa"), "waiting", "ready check: a fresh start wipes, re-seeds everyone, and resets the expiry")
 
+
+-- ---- Location: arrow bearing, texcoords, Locate ----------------------------
+local function ok(c, label) eq(c and true or false, true, label) end
+local function near(a, b) return a ~= nil and math.abs(a - b) < 1e-6 end
+-- Player at (0.5,0.5) facing north; target due east / south / north / west.
+local PI = math.pi
+ok(near(RG.ArrowAngle(0.5, 0.5, 0.6, 0.5, 0), PI / 2), "arrow: target east, facing north -> 90deg clockwise")
+ok(near(RG.ArrowAngle(0.5, 0.5, 0.5, 0.6, 0), PI), "arrow: target south, facing north -> 180deg")
+ok(near(RG.ArrowAngle(0.5, 0.5, 0.5, 0.4, 0), 0), "arrow: target north, facing north -> straight ahead")
+ok(near(RG.ArrowAngle(0.5, 0.5, 0.4, 0.5, 0), 3 * PI / 2), "arrow: target west, facing north -> 270deg")
+ok(near(RG.ArrowAngle(0.5, 0.5, 0.6, 0.5, PI / 2), PI), "arrow: facing west, target east -> behind you (180deg)")
+eq(RG.ArrowAngle(0, 0, 0.5, 0.5, 0), nil, "arrow: unknown player position -> nil")
+eq(RG.ArrowAngle(0.5, 0.5, 0, 0, 0), nil, "arrow: unknown target position (instance/other zone) -> nil")
+do
+    local ulx, uly, llx, lly, urx, ury, lrx, lry = RG.ArrowTexCoords(0)
+    ok(near(ulx, 0) and near(uly, 0) and near(lrx, 1) and near(lry, 1) and near(urx, 1) and near(ury, 0) and near(llx, 0) and near(lly, 1),
+        "texcoords: angle 0 is the identity mapping")
+    -- 90deg clockwise: the screen's right-middle must show the texture's top-middle (arrow tip).
+    ulx, uly, llx, lly, urx, ury, lrx, lry = RG.ArrowTexCoords(PI / 2)
+    ok(near((urx + lrx) / 2, 0.5) and near((ury + lry) / 2, 0), "texcoords: 90deg puts the arrow tip on the right edge")
+end
+
+do
+    local inRange, visible = {}, {}
+    IsItemInRange = function(_, unit) return inRange[unit] end
+    UnitIsVisible = function(unit) return visible[unit] end
+    GetRealZoneText = function() return "Zone" end
+    IsInInstance = function() return 1 end
+    GetPlayerMapPosition = function(unit) if unit == "player" then return 0.5, 0.5 end return 0.6, 0.5 end
+    GetPlayerFacing = function() return 0 end
+    SetMapToCurrentZone = function() end
+    local ctx = RG.LocateContext()
+    local m = { unit = "raid2", name = "Bob", index = 2, isSelf = false }
+    raid[2] = { name = "Bob" }
+    inRange["raid2"] = 1; visible["raid2"] = true
+    eq(RG.Locate(m, ctx, true).near, true, "locate: inside 15yd -> near")
+    inRange["raid2"] = 0
+    local l = RG.Locate(m, RG.LocateContext(), true)
+    ok(l and l.near == false and l.label == "15+ yd" and near(l.angle, PI / 2), "locate: visible but 15+ yd -> label + arrow bearing")
+    visible["raid2"] = false; inRange["raid2"] = nil
+    l = RG.Locate(m, RG.LocateContext(), true)
+    eq(l.label, "Far", "locate: same zone, not visible -> Far")
+    eq(RG.Locate(m, ctx, false), nil, "locate: offline -> no claim")
+    eq(RG.Locate({ unit = "player", isSelf = true }, ctx, true), nil, "locate: self -> no claim")
+    inRange["raid2"] = nil; visible["raid2"] = true
+    eq(RG.Locate(m, RG.LocateContext(), true), nil, "locate: visible with unknown range -> no claim")
+    GetPlayerMapPosition = function() return 0, 0 end
+    inRange["raid2"] = 0
+    l = RG.Locate(m, RG.LocateContext(), true)
+    ok(l and l.angle == nil, "locate: no map position (inside an instance) -> no arrow")
+end
 print(string.format("%d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)
