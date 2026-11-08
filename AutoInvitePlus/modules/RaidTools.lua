@@ -344,10 +344,18 @@ local function debuffDispelVerb(dtype)
     else return nil end
 end
 
+-- Capitalise the first letter of a sentence and of any clause after " - ".
+function RT.Cap(s)
+    s = tostring(s or "")
+    s = s:gsub("^(%s*)(%l)", function(a, b) return a .. b:upper() end)
+    s = s:gsub("(%s%-%s)(%l)", function(a, b) return a .. b:upper() end)
+    return s
+end
+
 function RT.SayDebuff(name, stacks, action, channel)
     local txt = name
     if stacks > 1 then txt = txt .. " x" .. stacks end
-    RT.Send(txt .. " - " .. action, channel or "SAY")
+    RT.Send(RT.Cap(txt .. " - " .. action), channel or "SAY")
 end
 
 -- Scan the player's debuffs and announce the noteworthy ones. Called from
@@ -382,7 +390,7 @@ function RT.ScanSelfDebuffs()
         elseif dispelHint then
             action = dispelHint
         elseif stacks > 1 then
-            action = "stacking on you - react!"
+            action = "Stacking on you - react!"
         end
 
         if action then
@@ -419,61 +427,61 @@ end
 -- boss's SPELL_CAST_START / SPELL_AURA_APPLIED.
 RT.MechanicSpells = {
     -- ===== Icecrown Citadel =====
-    ["Bone Storm"]            = "Bone Storm - run away from Marrowgar!",
-    ["Coldflame"]            = "Coldflame - step off the fire lines!",
-    ["Bone Spike Graveyard"] = "Bone Spike - DPS the impaled players free!",
-    ["Death and Decay"]      = "move out of Death and Decay (the ground pool)!",
-    ["Dominate Mind"]        = "Mind Control - crowd-control the charmed player!",
-    ["Call Blood Beast"]     = "Blood Beasts up - SLOW/root & single-target them (95% AoE-resistant); ranged kill them!",
-    ["Pungent Blight"]       = "Pungent Blight - spore stacks reset (Festergut)!",
-    ["Malleable Goo"]        = "Malleable Goo thrown - dodge the green blob!",
-    ["Choking Gas Bomb"]     = "Gas Bombs dropped - move out of the gas!",
-    ["Unstable Experiment"]  = "Ooze/Gas spawned - kite it to its matching side!",
-    ["Ooze Flood"]           = "Ooze Flood - move away from the flooding side!",
-    ["Unstable Ooze Explosion"] = "Ooze Explosion - spread out, it chains between players!",
-    ["Empowered Shock Vortex"] = "Empowered Shock Vortex - SPREAD OUT NOW!",
-    ["Bloodbolt Whirl"]      = "Bloodbolt Whirl - spread out (hits nearby players)!",
-    ["Frost Breath"]         = "Frost Breath on the tank - do NOT stand in front of Sindragosa!",
-    ["Blistering Cold"]      = "Blistering Cold - run 25yd AWAY from Sindragosa NOW!",
-    ["Icy Grip"]             = "Icy Grip - pulled in! Run 25yd AWAY from Sindragosa NOW!",  -- DBM keys the warning here (70117); Blistering Cold logs too late
-    ["Defile"]               = "Defile - move OUT of the black circle (it grows if stood in)!",
-    ["Soul Reaper"]          = "Soul Reaper on the tank - healers big cooldown!",
-    ["Remorseless Winter"]   = "Transition - spread, dodge Ice Spheres, kill Raging Spirits!",
-    ["Vile Spirits"]         = "Vile Spirits up - ranged shoot them before they reach the raid!",
-    ["Harvest Soul"]         = "Harvest Soul - target pulled in, kill the spirit in Frostmourne!",
+    ["Bone Storm"]            = "Bone Storm - Run away from Marrowgar!",
+    ["Coldflame"]             = "Coldflame - Step out of the fire line!",
+    ["Bone Spike Graveyard"]  = "Bone Spike - Kill the spike to free the player!",
+    ["Death and Decay"]       = "Death and Decay - Move out of the pool!",
+    ["Dominate Mind"]         = "Dominate Mind - Crowd-control the charmed player!",
+    ["Call Blood Beast"]      = "Blood Beasts - Slow and single-target them (resistant to AoE)!",
+    ["Pungent Blight"]        = "Pungent Blight - Spore stacks have reset!",
+    ["Malleable Goo"]         = "Malleable Goo - Dodge the green blob!",
+    ["Choking Gas Bomb"]      = "Gas Bombs - Move out of the gas!",
+    ["Unstable Experiment"]   = "Unstable Experiment - Kite the ooze or gas to its matching side!",
+    ["Ooze Flood"]            = "Ooze Flood - Move away from the flooding side!",
+    ["Unstable Ooze Explosion"] = "Ooze Explosion - Spread out, it chains between players!",
+    ["Empowered Shock Vortex"] = "Shock Vortex - Spread out now!",
+    ["Bloodbolt Whirl"]       = "Bloodbolt Whirl - Spread out!",
+    ["Frost Breath"]          = "Frost Breath - Stay out of the cone in front of Sindragosa!",
+    ["Blistering Cold"]       = "Blistering Cold - Run 25 yards away from Sindragosa now!",
+    ["Icy Grip"]              = "Icy Grip - Run 25 yards away from Sindragosa now!",  -- DBM keys the warning here (70117); Blistering Cold logs too late
+    ["Defile"]                = "Defile - Move out of the black circle!",
+    ["Soul Reaper"]           = "Soul Reaper - Tank takes it, healers use a big cooldown!",
+    ["Remorseless Winter"]    = "Remorseless Winter - Spread out, dodge the spheres, kill the spirits!",
+    ["Vile Spirits"]          = "Vile Spirits - Ranged kill them before they reach the raid!",
+    ["Harvest Soul"]          = "Harvest Soul - Kill the spirit inside Frostmourne!",
     -- ===== Ruby Sanctum =====
-    ["Twilight Cutter"]      = "Twilight beam - move out from between the orbs!",
-    ["Meteor Strike"]        = "Meteor marked - clear that spot, stack behind the flame wall!",
+    ["Twilight Cutter"]       = "Twilight Cutter - Move out from between the orbs!",
+    ["Meteor Strike"]         = "Meteor Strike - Clear the marked spot, stack behind the flame wall!",
     -- ===== Ulduar =====
-    ["Tympanic Tantrum"]     = "Tympanic Tantrum - raid-wide damage, heal through it!",
-    ["Gravity Bomb"]         = "Gravity Bomb - marked player moves away from the raid!",
-    ["Searing Light"]        = "Searing Light - marked player moves away from the raid!",
-    ["Rocket Strike"]        = "Rockets incoming - move off the target lines!",
-    ["Plasma Blast"]         = "Plasma Blast - tank pop a big cooldown!",
-    ["Shock Blast"]          = "Shock Blast - get OUT of melee range of Leviathan Mk II!",
-    ["Frost Bomb"]           = "Frost Bomb landing - move away before it explodes (it also clears the fires)!",
-    ["Saronite Vapors"]      = "Saronite Vapors up - careful, they heal mana but hurt (Vezax)!",
-    ["Shadow Crash"]         = "Shadow Crash - move out of the shadow void zone!",
-    ["Flash Freeze"]         = "Flash Freeze - get onto a Snow Drift NOW (Hodir)!",
-    ["Nature Bomb"]          = "Nature Bombs down - move away before they explode (Freya)!",
+    ["Tympanic Tantrum"]      = "Tympanic Tantrum - Raid damage, heal through it!",
+    ["Gravity Bomb"]          = "Gravity Bomb - Marked player, move away from the raid!",
+    ["Searing Light"]         = "Searing Light - Marked player, move away from the raid!",
+    ["Rocket Strike"]         = "Rocket Strike - Move off the target lines!",
+    ["Plasma Blast"]          = "Plasma Blast - Tank, use a big cooldown!",
+    ["Shock Blast"]           = "Shock Blast - Get out of melee range of Leviathan Mk II!",
+    ["Frost Bomb"]            = "Frost Bomb - Move away before it explodes!",
+    ["Saronite Vapors"]       = "Saronite Vapors - They restore mana but hurt, be careful!",
+    ["Shadow Crash"]          = "Shadow Crash - Move out of the shadow zone!",
+    ["Flash Freeze"]          = "Flash Freeze - Get onto a Snow Drift now!",
+    ["Nature Bomb"]           = "Nature Bombs - Move away before they explode!",
     -- ===== Trial of the (Grand) Crusader =====
-    ["Fire Bomb"]            = "Fire Bombs dropping - move out of the fire!",
-    ["Massive Crash"]        = "Massive Crash - glared player: sidestep the charge at the LAST second so Icehowl hits the wall!",
-    ["Nether Power"]         = "Nether Power - dispel the magic buff OFF Jaraxxus!",
-    ["Legion Flame"]         = "Legion Flame - marked player runs it away (leaves a fire trail)!",
-    ["Incinerate Flesh"]     = "Incinerate Flesh - burst-heal the target before it blows!",
+    ["Fire Bomb"]             = "Fire Bombs - Move out of the fire!",
+    ["Massive Crash"]         = "Massive Crash - Glared player, sidestep at the last second so Icehowl hits the wall!",
+    ["Nether Power"]          = "Nether Power - Dispel the magic buff off Jaraxxus!",
+    ["Legion Flame"]          = "Legion Flame - Marked player, run away from the raid!",
+    ["Incinerate Flesh"]      = "Incinerate Flesh - Burst-heal the target before it blows!",
     -- ===== Naxxramas =====
-    ["Mutating Injection"]   = "Mutating Injection - move out, THEN get dispelled (spawns cloud+slime)!",
-    ["Frost Blast"]          = "Frost Blast - player frozen (not attackable), healers BURST-HEAL them through it!",
-    ["Polarity Shift"]       = "Polarity Shift - group with players of your SAME charge (+/-)!",
-    ["Shadow Fissure"]       = "Shadow Fissure - move out of the purple void zone!",
+    ["Mutating Injection"]    = "Mutating Injection - Move out, then get dispelled!",
+    ["Frost Blast"]           = "Frost Blast - Frozen player, healers burst-heal them!",
+    ["Polarity Shift"]        = "Polarity Shift - Group with players of your charge!",
+    ["Shadow Fissure"]        = "Shadow Fissure - Move out of the purple zone!",
     -- ===== Obsidian Sanctum / Eye of Eternity / Onyxia / VoA =====
-    ["Flame Tsunami"]        = "Flame Tsunami - move into a GAP between the lava waves!",
-    ["Surge of Power"]       = "Surge of Power - targeted drake riders use Flame Shield (drake button 5)!",
-    ["Vortex"]               = "Vortex - raid pulled in and takes damage, heal up!",
-    ["Breath"]               = "Deep Breath - Onyxia is about to breathe, clear the middle NOW!",  -- 3.3.5a logs the cast as "Breath" (17086 family)
-    ["Bellowing Roar"]       = "Bellowing Roar = FEAR - use Tremor Totem / Fear Ward / Berserker Rage!",
-    ["Overcharge"]           = "Overcharge - switch DPS, kill the Overcharged Tempest Minion before 10 stacks!",
+    ["Flame Tsunami"]         = "Flame Tsunami - Move into a gap between the waves!",
+    ["Surge of Power"]        = "Surge of Power - Targeted riders, use Flame Shield (drake button 5)!",
+    ["Vortex"]                = "Vortex - Raid pulled in and damaged, heal up!",
+    ["Breath"]                = "Deep Breath - Clear the middle now!",  -- 3.3.5a logs the cast as "Breath" (17086 family)
+    ["Bellowing Roar"]        = "Bellowing Roar - Fear! Use Tremor Totem, Fear Ward or Berserker Rage!",
+    ["Overcharge"]            = "Overcharge - Switch DPS and kill the Tempest Minion before 10 stacks!",
 }
 
 -- Boss emote substrings (lowercased) -> short call-out. Only matched against the
@@ -486,11 +494,11 @@ RT.BossEmotes = {
     -- (AzerothCore DB / DBM-Warmane localization triggers). The old triggers
     -- ("inhales deeply", "frost beacon", "fixate") do not exist as
     -- RAID_BOSS_EMOTE text on this client and could never fire.
-    ["releases gas spores"]       = "Gas Spores out - group up to share the damage (Festergut)!",        -- "%s releases Gas Spores!"
-    ["fires a frozen orb"]        = "Frost Bomb incoming - move away from the marked spot (Sindragosa)!", -- "%s fires a frozen orb towards $n!" (air phase)
-    ["deep breath"]               = "Deep Breath - Onyxia is about to breathe, clear the middle!",        -- "... takes a deep breath"
-    ["shadows amass and swarm"]   = "Swarming Shadows - move the trail away from the raid (Blood-Queen)!", -- "Shadows amass and swarm around $n!"
-    ["spikes pursue"]             = "Impale spikes chasing a player - run toward permafrost, make way (Anub'arak)!", -- "%s's spikes pursue $n!"
+    ["releases gas spores"]       = "Gas Spores - Group up to share the damage (Festergut)!",        -- "%s releases Gas Spores!"
+    ["fires a frozen orb"]        = "Frost Bomb - Move away from the marked spot (Sindragosa)!", -- "%s fires a frozen orb towards $n!" (air phase)
+    ["deep breath"]               = "Deep Breath - Clear the middle now!",        -- "... takes a deep breath"
+    ["shadows amass and swarm"]   = "Swarming Shadows - Move the trail away from the raid (Blood-Queen)!", -- "Shadows amass and swarm around $n!"
+    ["spikes pursue"]             = "Impale - Run toward the permafrost and make way (Anub'arak)!", -- "%s's spikes pursue $n!"
 }
 
 -- ============================================================================
@@ -555,7 +563,7 @@ RT.MechanicClassDuties = {
     ["Nether Power"] = {
         {class = "MAGE",    action = "Spellsteal it off Jaraxxus!"},
         {class = "SHAMAN",  action = "Purge it off Jaraxxus!"},
-        {class = "PRIEST",  action = "offensive Dispel Magic off Jaraxxus!"},
+        {class = "PRIEST",  action = "Use offensive Dispel Magic on Jaraxxus!"},
         {class = "HUNTER",  action = "Tranquilizing Shot the boss!"},
         {class = "WARLOCK", action = "Felhunter Devour Magic the boss!"},
     },
@@ -598,14 +606,14 @@ RT.MechanicClassDuties = {
 
     -- ===== Onyxia — Bellowing Roar (Physical fear: prevent/break, can't dispel) =====
     ["Bellowing Roar"] = {
-        {class = "SHAMAN",  action = "drop Tremor Totem for the fear!"},
+        {class = "SHAMAN",  action = "Drop Tremor Totem for the fear!"},
         {class = "PRIEST",  action = "Fear Ward the tank (Priest-only)!"},
         {class = "WARRIOR", action = "Berserker Rage to break/prevent the fear!"},
     },
     -- ===== Blood-Queen Lana'thel — Incite Terror (Magic fear) =====
     ["Incite Terror"] = {
         {class = "PRIEST", action = "Fear Ward the tank / Mass Dispel the fear!"},
-        {class = "SHAMAN", action = "drop Tremor Totem for the fear!"},
+        {class = "SHAMAN", action = "Drop Tremor Totem for the fear!"},
     },
 }
 
@@ -777,6 +785,7 @@ end
 -- duty: tag "YOUR DUTY", badge = your class), mechanic (the ability a duty is for).
 function RT.BuildCallout(text, opts)
     opts = opts or {}
+    text = RT.Cap(text)
     local cat = RT.ClassifyCallout(text)
     local head, body = splitCallout(text)
     local low = text:lower()
@@ -829,6 +838,7 @@ end
 -- emote/HP call-out once per addon user.
 function RT.EmitMechanic(text, spell)
     if not text or text == "" then return end
+    text = RT.Cap(text)
     local channel = (AIP.db and AIP.db.mechanicAnnounceChannel) or "SELF"
     if channel ~= "SELF" and RT.CanBroadcast() then
         RT.Send(text, channel)

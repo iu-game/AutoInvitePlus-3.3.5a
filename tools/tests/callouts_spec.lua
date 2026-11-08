@@ -30,8 +30,8 @@ eq(cat("Lord Marrowgar at 35%!"), "phase", "boss health milestone")
 eq(cat("something unexpected"), "alert", "unknown -> default alert")
 
 local s = RT.BuildCallout(RT.MechanicSpells["Call Blood Beast"], { spell = "Defile", zone = "Icecrown Citadel", key = "k" })
-eq(s.text, "Blood Beasts up", "headline is the ability")
-eq(s.body ~= nil and s.body:find("95%% AoE%-resistant") ~= nil, true, "parenthetical moves to its own body line")
+eq(s.text, "Blood Beasts", "headline is the ability")
+eq(s.body ~= nil and s.body:find("resistant to AoE") ~= nil, true, "parenthetical moves to its own body line")
 eq(s.textIcon, "Interface\\Icons\\Spell_Shadow_Defile", "real spell icon beside the headline")
 eq(s.title:find("Icecrown Citadel", 1, true) ~= nil, true, "zone shown in the title")
 eq(s.duration > 4.5, true, "longer text holds longer")
@@ -44,6 +44,23 @@ eq(d.badges[1].tex, "Interface\\WorldStateFrame\\Icons-Classes", "class badge us
 
 local t = RT.BuildCallout("Soul Reaper on the tank - healers big cooldown!")
 eq(#t.badges, 2, "tank + healer medallions")
+
+
+-- Sentences start with an uppercase letter, including the clause after " - ".
+eq(RT.Cap("move out!"), "Move out!", "Cap: first letter")
+eq(RT.Cap("Defile - move out!"), "Defile - Move out!", "Cap: clause after the dash")
+eq(RT.Cap("DPS free me!"), "DPS free me!", "Cap: leaves existing capitals")
+local bad = {}
+local function checkTable(tbl, name)
+    for k, v in pairs(tbl) do
+        if v:match("^%l") or v:match("%s%-%s%l") then bad[#bad + 1] = name .. ": " .. v end
+    end
+end
+checkTable(RT.MechanicSpells, "spell"); checkTable(RT.BossEmotes, "emote")
+for _, duties in pairs(RT.MechanicClassDuties) do
+    for _, d in ipairs(duties) do if d.action:match("^%l") then bad[#bad + 1] = "duty: " .. d.action end end
+end
+eq(#bad, 0, "every mechanic message starts with an uppercase letter" .. (bad[1] and (" - e.g. " .. bad[1]) or ""))
 
 print(string.format("%d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)
