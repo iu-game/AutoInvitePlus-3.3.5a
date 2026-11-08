@@ -710,13 +710,114 @@ RT.lastRaidHealthWarn = 0
 -- Personal call-outs use the shared top-of-screen banner (ui/CentralGUI.lua's
 -- AIP.Banner). Returns true when it was shown, so callers can skip the old
 -- raid-warning text.
-function RT.ShowBanner(title, text, icon, color, key)
+-- What kind of instruction is this? Picks the tile icon, accent colour and tag so
+-- the banner reads at a glance. First matching category wins (order matters).
+local ICON = "Interface\\Icons\\"
+RT.CalloutCats = {
+    { id = "cc",     label = "CROWD CONTROL", icon = ICON .. "Spell_Nature_Polymorph",       color = { 0.72, 0.45, 1.0 },
+      words = { "crowd-control", "mind control", "cyclone", "polymorph", "fear the", "hex ", "repentance", "freezing trap", "blind the" } },
+    { id = "fear",   label = "FEAR",          icon = ICON .. "Spell_Shadow_PsychicScream",   color = { 0.72, 0.45, 1.0 },
+      words = { "fear", "tremor" } },
+    { id = "spread", label = "SPREAD",        icon = ICON .. "Spell_Nature_WispSplode",      color = { 1.0, 0.55, 0.15 },
+      words = { "spread" } },
+    { id = "stack",  label = "GROUP UP",      icon = ICON .. "Spell_Holy_PrayerOfHealing",   color = { 0.3, 0.85, 0.8 },
+      words = { "group up", "group with", "stack up", "stack together" } },
+    { id = "move",   label = "MOVE",          icon = ICON .. "Ability_Rogue_Sprint",         color = { 1.0, 0.7, 0.15 },
+      words = { "move", "run ", "step off", "dodge", "out of", "get out", "away", "clear ", "sidestep", "stand in front", "kite", "get onto" } },
+    { id = "dispel", label = "DISPEL",        icon = ICON .. "Spell_Holy_DispelMagic",       color = { 0.35, 0.8, 1.0 },
+      words = { "dispel", "remove curse", "cleanse", "cure " } },
+    { id = "tank",   label = "TANK",          icon = ICON .. "Ability_Defend",               color = { 0.35, 0.6, 1.0 },
+      words = { "tank" } },
+    { id = "heal",   label = "HEAL",          icon = ICON .. "Spell_Holy_FlashHeal",         color = { 0.35, 0.9, 0.45 },
+      words = { "heal", "cooldown", "burst" } },
+    { id = "kill",   label = "KILL",          icon = ICON .. "Ability_Marksmanship",         color = { 1.0, 0.3, 0.3 },
+      words = { "kill", "dps", "shoot", "switch", "single-target" } },
+    { id = "phase",  label = "BOSS HEALTH",   icon = ICON .. "INV_Misc_Bone_HumanSkull_01",  color = { 0.95, 0.25, 0.25 },
+      words = { "% " , "%!" } },
+}
+RT.CalloutDefault = { id = "alert", label = "ALERT", icon = "Interface\\DialogFrame\\DialogAlertIcon", color = { 1.0, 0.45, 0.1 } }
+
+function RT.ClassifyCallout(text)
+    local low = tostring(text or ""):lower()
+    for _, cat in ipairs(RT.CalloutCats) do
+        for _, w in ipairs(cat.words) do
+            if low:find(w, 1, true) then return cat end
+        end
+    end
+    return RT.CalloutDefault
+end
+
+local ROLE_SHEET = "Interface\\LFGFrame\\UI-LFG-ICON-ROLES"
+local ROLE_BADGE = {
+    tank   = { tex = ROLE_SHEET, coords = { 0, 0.26171875, 0.26171875, 0.5234375 } },
+    healer = { tex = ROLE_SHEET, coords = { 0.26171875, 0.5234375, 0, 0.26171875 } },
+    dps    = { tex = ROLE_SHEET, coords = { 0.26171875, 0.5234375, 0.26171875, 0.5234375 } },
+}
+
+-- Medallions: the roles a call-out is aimed at (tank / healers / DPS), max two.
+local function calloutBadges(low)
+    local out = {}
+    if low:find("tank", 1, true) then out[#out + 1] = ROLE_BADGE.tank end
+    if low:find("heal", 1, true) or low:find("cooldown", 1, true) then out[#out + 1] = ROLE_BADGE.healer end
+    if #out < 2 and (low:find("dps", 1, true) or low:find("kill", 1, true) or low:find("shoot", 1, true)) then
+        out[#out + 1] = ROLE_BADGE.dps
+    end
+    return out
+end
+
+-- Split "Ability - instruction (detail)!" into headline / body lines.
+local function splitCallout(text)
+    local head, rest = text:match("^(.-)%s+%-%s+(.+)$")
+    if not head then return text, nil end
+    return head, rest
+end
+
+-- Build the banner spec for a mechanic call-out. opts: spell (combat-log spell
+-- name -> its real icon beside the headline), zone, key, duty (a personal class
+-- duty: tag "YOUR DUTY", badge = your class), mechanic (the ability a duty is for).
+function RT.BuildCallout(text, opts)
+    opts = opts or {}
+    local cat = RT.ClassifyCallout(text)
+    local head, body = splitCallout(text)
+    local low = text:lower()
+    local lines
+    if body then
+        -- A trailing "(detail)" goes on its own dimmer line.
+        local main, paren = body:match("^(.-)%s*(%b())%s*[!%.]*$")
+        if main and main ~= "" then
+            lines = main .. "\n|cFF9AA0AA" .. paren:sub(2, -2) .. "|r"
+        else
+            lines = body
+        end
+    end
+    local tag = opts.duty and "YOUR DUTY" or cat.label
+    local title = string.format("|cFF%02X%02X%02X%s|r", cat.color[1] * 255, cat.color[2] * 255, cat.color[3] * 255, tag)
+    if opts.zone and opts.zone ~= "" then title = title .. "  |cFFB0B0B8" .. opts.zone .. "|r" end
+
+    local textIcon
+    if opts.spell and GetSpellInfo then
+        local _, _, ic = GetSpellInfo(opts.spell)
+        textIcon = ic
+    end
+    local badges = calloutBadges(low)
+    if opts.duty and opts.class and CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[opts.class] then
+        badges = { { tex = "Interface\\WorldStateFrame\\Icons-Classes", coords = CLASS_ICON_TCOORDS[opts.class] } }
+    end
+    if opts.duty then head, lines = (opts.mechanic or "Your duty"), (lines or text) end
+    return {
+        key = opts.key, title = title, text = head, body = lines, icon = cat.icon, color = cat.color,
+        textIcon = textIcon, badges = badges, sound = "RaidWarning",
+        duration = math.min(11, 4.5 + #(lines or "") / 22),
+    }
+end
+
+-- Personal call-outs use the shared top-of-screen banner (ui/CentralGUI.lua's
+-- AIP.Banner). Returns true when it was shown, so callers can skip the old
+-- raid-warning text.
+function RT.ShowBanner(text, opts)
     if not (AIP.db and AIP.db.mechanicBanner ~= false) then return false end
     if not (AIP.Banner and AIP.Banner.Show) then return false end
-    AIP.Banner.Show({
-        title = title, text = text, icon = icon or "Interface\\Icons\\Spell_Shadow_ShadowWordPain",
-        color = color or { 1, 0.45, 0.1 }, duration = 5, key = key, sound = "RaidWarning",
-    })
+    AIP.Banner.Show(RT.BuildCallout(text, opts))
     return true
 end
 
@@ -726,15 +827,17 @@ end
 -- leader/assist broadcasts - everyone else gets the personal heads-up. This
 -- was the one announcer path missing the gate, and it multiplied every cast/
 -- emote/HP call-out once per addon user.
-function RT.EmitMechanic(text)
+function RT.EmitMechanic(text, spell)
     if not text or text == "" then return end
     local channel = (AIP.db and AIP.db.mechanicAnnounceChannel) or "SELF"
     if channel ~= "SELF" and RT.CanBroadcast() then
         RT.Send(text, channel)
     else
         local inInst = RT.InPveInstance and RT.InPveInstance()
-        local shown = RT.ShowBanner(inInst and (GetRealZoneText and GetRealZoneText()) or "Mechanic", text,
-            "Interface\\Icons\\Spell_Shadow_ShadowWordPain", { 1, 0.45, 0.1 }, "mech:" .. text)
+        local shown = RT.ShowBanner(text, {
+            spell = spell, key = "mech:" .. text,
+            zone = inInst and GetRealZoneText and GetRealZoneText() or nil,
+        })
         if not shown and RaidNotice_AddMessage and RaidWarningFrame and ChatTypeInfo then
             RaidNotice_AddMessage(RaidWarningFrame, text, ChatTypeInfo["RAID_WARNING"])
         end
@@ -801,8 +904,10 @@ function RT.EmitClassDuties(key)
         for _, d in ipairs(duties) do
             if d.class == myClass then
                 local text = "Your duty: " .. d.action
-                local shown = RT.ShowBanner("Your duty", d.action,
-                    "Interface\\Icons\\Ability_Warrior_BattleShout", { 0.2, 0.9, 0.55 }, "duty:" .. d.action)
+                local shown = RT.ShowBanner(d.action, {
+                    duty = true, class = myClass, mechanic = key, spell = key, key = "duty:" .. d.action,
+                    zone = GetRealZoneText and GetRealZoneText() or nil,
+                })
                 if not shown and RaidNotice_AddMessage and RaidWarningFrame and ChatTypeInfo then
                     RaidNotice_AddMessage(RaidWarningFrame, text, ChatTypeInfo["RAID_WARNING"])
                 end
@@ -867,7 +972,7 @@ function RT.OnMechanicCombatLog(...)
     if srcFlags and not hasCombatLogFlag(srcFlags, 0x00000040) then return end
 
     if msg and not mechThrottled("s:" .. spellName, 3) then
-        RT.EmitMechanic(msg)
+        RT.EmitMechanic(msg, spellName)
     end
     if duties and not mechThrottled("c:" .. spellName, 3) then
         RT.EmitClassDuties(spellName)

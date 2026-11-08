@@ -1582,8 +1582,19 @@ local function SlashHandler(msg)
             -- Show the status banner now, then a sample mechanic call-out behind it.
             if AIP.Banner and AIP.CentralGUI and AIP.CentralGUI.VoaSpec then
                 AIP.Banner.Show(AIP.CentralGUI.VoaSpec(AIP.CentralGUI.voaCountCache or 0))
-                if AIP.RaidTools and AIP.RaidTools.ShowBanner then
-                    AIP.RaidTools.ShowBanner("Mirrored Soul", "Stop damaging the tank!", nil, nil, "preview")
+                local RT = AIP.RaidTools
+                if RT and RT.ShowBanner then
+                    for i, t in ipairs({ { "Blistering Cold", RT.MechanicSpells and RT.MechanicSpells["Blistering Cold"] },
+                                         { "Call Blood Beast", RT.MechanicSpells and RT.MechanicSpells["Call Blood Beast"] },
+                                         { "Soul Reaper", RT.MechanicSpells and RT.MechanicSpells["Soul Reaper"] } }) do
+                        if t[2] then
+                            AIP.Utils.DelayedCall((i - 1) * 0.1, function()
+                                RT.ShowBanner(t[2], { spell = t[1], key = "preview" .. i, zone = "Icecrown Citadel" })
+                            end)
+                        end
+                    end
+                    RT.ShowBanner("Frost Blast - player frozen (not attackable), healers BURST-HEAL them through it!",
+                        { duty = true, class = select(2, UnitClass("player")), mechanic = "Anti-Magic Zone", key = "previewd" })
                 end
             end
         elseif sub == "sound" then

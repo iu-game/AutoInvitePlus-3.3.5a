@@ -869,6 +869,18 @@ local function bannerFrame()
     f.nameIcon:SetSize(14, 14); f.nameIcon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     f.text = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     f.text:SetJustifyH("CENTER")
+    -- Instruction body (wraps; the toast grows to fit it) and a hairline under the title.
+    f.body = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    f.body:SetJustifyH("CENTER"); f.body:SetJustifyV("TOP")
+    f.rule = f:CreateTexture(nil, "ARTWORK")
+    f.rule:SetHeight(1); f.rule:SetTexture("Interface\\Buttons\\WHITE8X8")
+    -- Accent wash behind the tile and a thin countdown line along the bottom edge.
+    f.tint = f.tile:CreateTexture(nil, "BORDER")
+    f.tint:SetPoint("TOPLEFT", 3, -3); f.tint:SetPoint("BOTTOMRIGHT", -3, 3)
+    f.tint:SetTexture("Interface\\Buttons\\WHITE8X8")
+    f.timeBar = f:CreateTexture(nil, "OVERLAY")
+    f.timeBar:SetHeight(2); f.timeBar:SetTexture("Interface\\Buttons\\WHITE8X8")
+    f.timeBar:SetPoint("BOTTOMLEFT", 5, 4)
 
     f:SetScript("OnClick", function(self)
         local spec = self.spec
@@ -892,46 +904,86 @@ local function bannerFrame()
 end
 
 -- Lay the content out and size the toast around it (elastic: width and height
--- come from the measured text, never a guess).
+-- come from the measured text, never a guess). Body text wraps at BANNER_MAX_W.
+local BANNER_MAX_W = 380
+
+local function setBadge(bdg, entry, r, g, b)
+    local tex, coords = entry, nil
+    if type(entry) == "table" then tex, coords = entry.tex, entry.coords end
+    bdg.tex:SetTexture(tex)
+    if coords then bdg.tex:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
+    else bdg.tex:SetTexCoord(0.1, 0.9, 0.1, 0.9) end
+    bdg:SetBackdropBorderColor(r, g, b, 1)
+    bdg:Show()
+end
+
 local function applySpec(f, spec)
     f.spec = spec
     local r, g, b = 0.78, 0.65, 0.32
     if spec.color then r, g, b = spec.color[1], spec.color[2], spec.color[3] end
     f:SetBackdropBorderColor(r, g, b, 1)
     f.tile:SetBackdropBorderColor(r, g, b, 1)
+    f.tint:SetVertexColor(r * 0.35, g * 0.35, b * 0.35, 1)
     f.icon:SetTexture(spec.icon or DEFAULT_ICON)
+    f.rule:SetVertexColor(r, g, b, 0.45)
+    f.timeBar:SetVertexColor(r, g, b, 0.9)
 
     f.title:SetText(spec.title or "")
     f.text:SetText(spec.text or "")
     if spec.textIcon then f.nameIcon:SetTexture(spec.textIcon); f.nameIcon:Show() else f.nameIcon:Hide() end
 
+    -- Body: measure unbounded first; wrap at the cap only if it is wider.
+    local hasBody = spec.body and spec.body ~= ""
+    local bodyW, bodyH = 0, 0
+    if hasBody then
+        f.body:SetWidth(0); f.body:SetText(spec.body)
+        bodyW = f.body:GetStringWidth() or 0
+        if bodyW > BANNER_MAX_W then f.body:SetWidth(BANNER_MAX_W); bodyW = BANNER_MAX_W end
+        bodyH = f.body:GetStringHeight() or 12
+        f.body:Show()
+    else
+        f.body:SetText(""); f.body:Hide()
+    end
+
+    local hasTitle = spec.title and spec.title ~= ""
     local titleW = f.title:GetStringWidth() or 0
     local textW = (f.text:GetStringWidth() or 0) + (spec.textIcon and 18 or 0)
-    local contentW = math.max(titleW, textW, 90)
-    local titleH = (spec.title and spec.title ~= "") and (f.title:GetStringHeight() or 10) or 0
+    local contentW = math.min(BANNER_MAX_W + 40, math.max(titleW, textW, bodyW, 110))
+    local titleH = hasTitle and (f.title:GetStringHeight() or 10) or 0
     local textH = f.text:GetStringHeight() or 12
-    local contentH = titleH + (titleH > 0 and 4 or 0) + textH
+    local contentH = titleH + (hasTitle and 6 or 0) + textH + (hasBody and (4 + bodyH) or 0)
 
     local left = BANNER_ICON + 8 + 5 + BANNER_PAD
     f:SetWidth(math.ceil(left + contentW + BANNER_PAD))
-    f:SetHeight(math.ceil(math.max(BANNER_ICON + 14, contentH + 22)))
+    f:SetHeight(math.ceil(math.max(BANNER_ICON + 18, contentH + 24)))
 
     local cx = left + contentW / 2         -- text block centre, from the frame's left edge
-    local topY = (f:GetHeight() - contentH) / 2
+    local topY = (f:GetHeight() - contentH) / 2 + 1
     f.title:ClearAllPoints(); f.text:ClearAllPoints(); f.nameIcon:ClearAllPoints()
-    if titleH > 0 then
+    f.body:ClearAllPoints(); f.rule:ClearAllPoints()
+    if hasTitle then
         f.title:SetPoint("TOP", f, "TOPLEFT", cx, -topY)
-        topY = topY + titleH + 4
+        topY = topY + titleH + 2
+        f.rule:SetPoint("TOPLEFT", f, "TOPLEFT", left, -topY)
+        f.rule:SetWidth(contentW); f.rule:Show()
+        topY = topY + 4
+    else
+        f.rule:Hide()
     end
     f.text:SetPoint("TOP", f, "TOPLEFT", cx + (spec.textIcon and 8 or 0), -topY)
     f.nameIcon:SetPoint("RIGHT", f.text, "LEFT", -4, 0)
+    topY = topY + textH + 4
+    if hasBody then f.body:SetPoint("TOP", f, "TOPLEFT", cx, -topY) end
+
+    f.timeBar:SetWidth(f:GetWidth() - 10)
+    f.barW = f:GetWidth() - 10
 
     local badges = spec.badges or {}
     local n = math.min(#badges, 2)
     for i = 1, 2 do
         local bdg = f.badges[i]
         if i <= n then
-            bdg.tex:SetTexture(badges[i]); bdg:Show()
+            setBadge(bdg, badges[i], r, g, b)
             bdg:ClearAllPoints()
             bdg:SetPoint("CENTER", f, "TOPLEFT", cx + (i - (n + 1) / 2) * 26, 1)
         else
@@ -963,7 +1015,9 @@ function B.Tick(elapsed)
         if p >= 1 then B.state, B.t = "hold", 0 end
     elseif st == "hold" then
         if B.peek or B.overBanner then B.t = 0 end
-        if B.t >= (B.duration or 6) then B.state, B.t = "out", 0 end
+        local dur = B.duration or 6
+        if f.barW then f.timeBar:SetWidth(math.max(0.01, f.barW * (1 - math.min(1, B.t / dur)))) end
+        if B.t >= dur then B.state, B.t = "out", 0 end
     elseif st == "out" then
         if B.peek or B.overBanner then B.state, B.t = "hold", 0; f:SetAlpha(1); return end
         local p = math.min(1, B.t / BANNER_FADE)
