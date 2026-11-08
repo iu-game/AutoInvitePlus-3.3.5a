@@ -707,6 +707,19 @@ RT.mechLast = {}        -- spell/emote key -> last GetTime()
 RT.bossHpSeen = {}      -- guid -> {threshold = true}
 RT.lastRaidHealthWarn = 0
 
+-- Personal call-outs use the shared top-of-screen banner (ui/CentralGUI.lua's
+-- AIP.Banner). Returns true when it was shown, so callers can skip the old
+-- raid-warning text.
+function RT.ShowBanner(title, text, icon, color, key)
+    if not (AIP.db and AIP.db.mechanicBanner ~= false) then return false end
+    if not (AIP.Banner and AIP.Banner.Show) then return false end
+    AIP.Banner.Show({
+        title = title, text = text, icon = icon or "Interface\\Icons\\Spell_Shadow_ShadowWordPain",
+        color = color or { 1, 0.45, 0.1 }, duration = 5, key = key, sound = "RaidWarning",
+    })
+    return true
+end
+
 -- Emit a mechanic call-out through the configured channel.
 -- Chat-channel delivery is leader-gated exactly like EmitClassDuties: when
 -- several raiders run the addon with a RAID/RW channel configured, only the
@@ -719,7 +732,10 @@ function RT.EmitMechanic(text)
     if channel ~= "SELF" and RT.CanBroadcast() then
         RT.Send(text, channel)
     else
-        if RaidNotice_AddMessage and RaidWarningFrame and ChatTypeInfo then
+        local inInst = RT.InPveInstance and RT.InPveInstance()
+        local shown = RT.ShowBanner(inInst and (GetRealZoneText and GetRealZoneText()) or "Mechanic", text,
+            "Interface\\Icons\\Spell_Shadow_ShadowWordPain", { 1, 0.45, 0.1 }, "mech:" .. text)
+        if not shown and RaidNotice_AddMessage and RaidWarningFrame and ChatTypeInfo then
             RaidNotice_AddMessage(RaidWarningFrame, text, ChatTypeInfo["RAID_WARNING"])
         end
         if AIP.Print then AIP.Print("|cFFFF6600[Mechanic]|r " .. text) end
@@ -785,7 +801,9 @@ function RT.EmitClassDuties(key)
         for _, d in ipairs(duties) do
             if d.class == myClass then
                 local text = "Your duty: " .. d.action
-                if RaidNotice_AddMessage and RaidWarningFrame and ChatTypeInfo then
+                local shown = RT.ShowBanner("Your duty", d.action,
+                    "Interface\\Icons\\Ability_Warrior_BattleShout", { 0.2, 0.9, 0.55 }, "duty:" .. d.action)
+                if not shown and RaidNotice_AddMessage and RaidWarningFrame and ChatTypeInfo then
                     RaidNotice_AddMessage(RaidWarningFrame, text, ChatTypeInfo["RAID_WARNING"])
                 end
                 if AIP.Print then AIP.Print("|cFF33FF99[Your duty]|r " .. d.action) end

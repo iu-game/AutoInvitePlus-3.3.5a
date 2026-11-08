@@ -1451,7 +1451,7 @@ function SP.Create(parent)
     -- [8] GUI APPEARANCE
     -- ========================================================================
     do
-    local sec = BeginSection("appearance", "8", "GUI APPEARANCE", "guiAppearance", {"guiOpacity", "guiUnfocusedEnabled", "guiUnfocusedOpacity", "lfgWatch", "lfgShare", "lfgAutoRequeue", "tankCastEnabled", "raidGroupsEnabled", "autoShowOnGroup", "restoreWindowsOnLogin", "floatingBarEnabled", "timerBarsEnabled", "minimapBubbles", "assignmentToasts", "voaBanner", "voaAlert", "voaSound", "contextProfilesEnabled", "contextProfiles"})
+    local sec = BeginSection("appearance", "8", "GUI APPEARANCE", "guiAppearance", {"guiOpacity", "guiUnfocusedEnabled", "guiUnfocusedOpacity", "lfgWatch", "lfgShare", "lfgAutoRequeue", "tankCastEnabled", "raidGroupsEnabled", "autoShowOnGroup", "restoreWindowsOnLogin", "floatingBarEnabled", "timerBarsEnabled", "minimapBubbles", "assignmentToasts", "voaBanner", "mechanicBanner", "voaAlert", "voaSound", "contextProfilesEnabled", "contextProfiles"})
 
     -- Opacity slider (WotLK 3.3.5a compatible - manual slider creation)
     local opacityLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1710,7 +1710,7 @@ function SP.Create(parent)
     winCheck("timerBarsEnabled", "Show countdown timer bars (pull / break / boss abilities)")
     winCheck("minimapBubbles", "Show minimap bubbles (\"VOA Listed\", \"Favorites Listed\")")
     winCheck("assignmentToasts", "Show Raid Groups assignment / note toasts")
-    winCheck("voaBanner", "Show the VoA portal banner under the minimap (holder, timer, LFM count)", function(on)
+    winCheck("voaBanner", "Show the VoA portal status banner (on change, or hover the top edge of the screen)", function(on)
         local vb = AIP.CentralGUI and AIP.CentralGUI.VoaBanner
         if vb and not on then vb:Hide() end
     end)
@@ -1722,6 +1722,7 @@ function SP.Create(parent)
         frame.checks[key] = chk
         y = y - 26
     end
+    plainCheck("mechanicBanner", "Show your mechanic / duty call-outs as a top-of-screen banner")
     plainCheck("voaAlert", "Pulse the minimap icon when VOA groups are listed")
     plainCheck("voaSound", "Play a sound when a VOA group is first listed")
 

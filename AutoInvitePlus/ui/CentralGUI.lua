@@ -796,133 +796,329 @@ function GUI.CreateMinimapButton()
     return button
 end
 
--- Always-on VoA banner under the minimap: who holds Wintergrasp/VoA, how long
--- until the portal closes (= next Wintergrasp battle), and the live VOA LFM count.
--- Draggable (Shift+drag); position saved in db.voaBannerPos.
-function GUI.CreateVoaBanner()
-    if GUI.VoaBanner then return GUI.VoaBanner end
-    local f = CreateFrame("Button", "AIPVoaBanner", UIParent)
-    f:SetSize(190, 44)
-    f:SetFrameStrata("MEDIUM")
+-- ----------------------------------------------------------------------------
+-- Banner: one top-of-screen announcement toast (icon tile, small title, gold
+-- headline, optional medallions) used for the VoA portal status and for personal
+-- raid/dungeon mechanic call-outs. It slides in from the top-middle edge, holds,
+-- and fades out; hovering the top-middle edge of the screen peeks the VoA status.
+-- ----------------------------------------------------------------------------
+AIP.Banner = AIP.Banner or {}
+local B = AIP.Banner
+
+local BANNER_TOP_Y = -14          -- resting offset below the screen's top edge
+local BANNER_SLIDE = 0.25
+local BANNER_FADE = 0.45
+local BANNER_QUEUE_MAX = 4
+local BANNER_ICON = 40
+local BANNER_PAD = 12
+local DEFAULT_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
+
+local function bannerFrame()
+    if B.frame then return B.frame end
+    local f = CreateFrame("Button", "AIPBanner", UIParent)
+    f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:SetClampedToScreen(true)
-    f:SetMovable(true)
     f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
+    f:RegisterForClicks("LeftButtonUp")
     f:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 2,
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 14,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    f:SetBackdropColor(0.04, 0.04, 0.06, 0.94)
+    f:SetBackdropBorderColor(0.78, 0.65, 0.32, 1)
+    f:Hide()
+
+    -- Icon tile on the left; sits slightly proud of the bar like the reference.
+    f.tile = CreateFrame("Frame", nil, f)
+    f.tile:SetSize(BANNER_ICON + 8, BANNER_ICON + 8)
+    f.tile:SetPoint("LEFT", f, "LEFT", 5, 0)
+    f.tile:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 12,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
-    f:SetBackdropColor(0.04, 0.04, 0.07, 0.9)
-    f:SetBackdropBorderColor(0.4, 0.4, 0.45, 1)
+    f.tile:SetBackdropColor(0, 0, 0, 0.9)
+    f.tile:SetBackdropBorderColor(0.78, 0.65, 0.32, 1)
+    f.icon = f.tile:CreateTexture(nil, "ARTWORK")
+    f.icon:SetPoint("TOPLEFT", 4, -4); f.icon:SetPoint("BOTTOMRIGHT", -4, 4)
+    f.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
-    local pos = AIP.db and AIP.db.voaBannerPos
-    if pos and pos.point then
-        f:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
-    else
-        f:SetPoint("TOP", Minimap, "BOTTOM", 0, -26)
+    -- Medallions perched on the top edge (0-2 small round-ish icons).
+    f.badges = {}
+    for i = 1, 2 do
+        local b = CreateFrame("Frame", nil, f)
+        b:SetSize(22, 22)
+        b:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 10,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        })
+        b:SetBackdropColor(0.1, 0.07, 0.02, 1)
+        b:SetBackdropBorderColor(0.9, 0.75, 0.3, 1)
+        b.tex = b:CreateTexture(nil, "ARTWORK")
+        b.tex:SetPoint("TOPLEFT", 3, -3); b.tex:SetPoint("BOTTOMRIGHT", -3, 3)
+        b.tex:SetTexCoord(0.1, 0.9, 0.1, 0.9)
+        b:Hide()
+        f.badges[i] = b
     end
-    f:SetScript("OnDragStart", function(self)
-        if IsShiftKeyDown() then self.moving = true; self:StartMoving() end
-    end)
-    f:SetScript("OnDragStop", function(self)
-        if not self.moving then return end
-        self.moving = nil
-        self:StopMovingOrSizing()
-        local point, _, relPoint, x, y = self:GetPoint()
-        if AIP.db then AIP.db.voaBannerPos = { point = point, relPoint = relPoint, x = x, y = y } end
-    end)
-    f:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
-    f.l1 = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    f.l1:SetPoint("TOP", 0, -5)
-    f.l2 = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    f.l2:SetPoint("TOP", f.l1, "BOTTOM", 0, -2)
-    f.l3 = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    f.l3:SetPoint("TOP", f.l2, "BOTTOM", 0, -2)
+    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.title:SetJustifyH("CENTER")
+    f.nameIcon = f:CreateTexture(nil, "ARTWORK")
+    f.nameIcon:SetSize(14, 14); f.nameIcon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    f.text = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.text:SetJustifyH("CENTER")
 
-    f:SetScript("OnClick", function(self, btn)
-        if btn ~= "RightButton" then GUI.Toggle() end
+    f:SetScript("OnClick", function(self)
+        local spec = self.spec
+        if spec and spec.onClick then spec.onClick() end
     end)
     f:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:AddLine("Vault of Archavon portal")
-        local CS = AIP.ChatScanner
-        local st = CS and CS.GetWGStatus and CS.GetWGStatus() or {}
-        if st.active then
-            GameTooltip:AddLine("Wintergrasp battle in progress.", 1, 0.5, 0.2)
-        elseif st.wait then
-            GameTooltip:AddLine("Portal closes / next battle in " .. CS.FormatWGTime(st.wait), 0.8, 0.8, 0.8)
+        B.overBanner = true
+        local spec = self.spec
+        if spec and spec.tooltip then
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            spec.tooltip(GameTooltip)
+            GameTooltip:Show()
         end
-        if st.owner then
-            GameTooltip:AddLine("Holder: " .. st.owner .. " (" .. tostring(st.source or "?") .. (st.ownerAge and (", " .. CS.FormatWGTime(st.ownerAge) .. " ago") or "") .. ")", 0.8, 0.8, 0.8)
-        else
-            GameTooltip:AddLine("Holder not shown: it is only displayed when it can be proven", 0.6, 0.6, 0.6)
-            GameTooltip:AddLine("(Wintergrasp world-state bar, your own Essence of Wintergrasp", 0.6, 0.6, 0.6)
-            GameTooltip:AddLine("aura, or a battle-end announcement).", 0.6, 0.6, 0.6)
-        end
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("|cFFFFFFFFClick:|r Open main window   |cFFFFFFFFShift-drag:|r Move", 0.7, 0.7, 0.7)
-        GameTooltip:Show()
     end)
-    f:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    GUI.VoaBanner = f
+    f:SetScript("OnLeave", function() B.overBanner = false; GameTooltip:Hide() end)
+
+    f:SetScript("OnUpdate", function(self, elapsed) B.Tick(elapsed) end)
+    B.frame = f
+    GUI.VoaBanner = f   -- legacy handle used by the settings panel / window profiles to hide it
     return f
 end
 
+-- Lay the content out and size the toast around it (elastic: width and height
+-- come from the measured text, never a guess).
+local function applySpec(f, spec)
+    f.spec = spec
+    local r, g, b = 0.78, 0.65, 0.32
+    if spec.color then r, g, b = spec.color[1], spec.color[2], spec.color[3] end
+    f:SetBackdropBorderColor(r, g, b, 1)
+    f.tile:SetBackdropBorderColor(r, g, b, 1)
+    f.icon:SetTexture(spec.icon or DEFAULT_ICON)
+
+    f.title:SetText(spec.title or "")
+    f.text:SetText(spec.text or "")
+    if spec.textIcon then f.nameIcon:SetTexture(spec.textIcon); f.nameIcon:Show() else f.nameIcon:Hide() end
+
+    local titleW = f.title:GetStringWidth() or 0
+    local textW = (f.text:GetStringWidth() or 0) + (spec.textIcon and 18 or 0)
+    local contentW = math.max(titleW, textW, 90)
+    local titleH = (spec.title and spec.title ~= "") and (f.title:GetStringHeight() or 10) or 0
+    local textH = f.text:GetStringHeight() or 12
+    local contentH = titleH + (titleH > 0 and 4 or 0) + textH
+
+    local left = BANNER_ICON + 8 + 5 + BANNER_PAD
+    f:SetWidth(math.ceil(left + contentW + BANNER_PAD))
+    f:SetHeight(math.ceil(math.max(BANNER_ICON + 14, contentH + 22)))
+
+    local cx = left + contentW / 2         -- text block centre, from the frame's left edge
+    local topY = (f:GetHeight() - contentH) / 2
+    f.title:ClearAllPoints(); f.text:ClearAllPoints(); f.nameIcon:ClearAllPoints()
+    if titleH > 0 then
+        f.title:SetPoint("TOP", f, "TOPLEFT", cx, -topY)
+        topY = topY + titleH + 4
+    end
+    f.text:SetPoint("TOP", f, "TOPLEFT", cx + (spec.textIcon and 8 or 0), -topY)
+    f.nameIcon:SetPoint("RIGHT", f.text, "LEFT", -4, 0)
+
+    local badges = spec.badges or {}
+    local n = math.min(#badges, 2)
+    for i = 1, 2 do
+        local bdg = f.badges[i]
+        if i <= n then
+            bdg.tex:SetTexture(badges[i]); bdg:Show()
+            bdg:ClearAllPoints()
+            bdg:SetPoint("CENTER", f, "TOPLEFT", cx + (i - (n + 1) / 2) * 26, 1)
+        else
+            bdg:Hide()
+        end
+    end
+end
+
+-- State machine: "in" (slide+fade down), "hold", "out" (fade up). `sticky` holds
+-- while hovered/peeked.
+function B.Tick(elapsed)
+    local f = B.frame
+    if not f or not f:IsShown() then return end
+    local st = B.state
+    B.t = (B.t or 0) + elapsed
+    if B.peek then
+        -- Peek: keep the status fresh while the mouse rests on the top edge.
+        B.peekAcc = (B.peekAcc or 0) + elapsed
+        if B.peekAcc >= 0.5 then
+            B.peekAcc = 0
+            local spec = B.peekProvider and B.peekProvider()
+            if spec then applySpec(f, spec) end
+        end
+    end
+    if st == "in" then
+        local p = math.min(1, B.t / BANNER_SLIDE)
+        f:SetAlpha(p)
+        f:ClearAllPoints(); f:SetPoint("TOP", UIParent, "TOP", 0, BANNER_TOP_Y + (1 - p) * 40)
+        if p >= 1 then B.state, B.t = "hold", 0 end
+    elseif st == "hold" then
+        if B.peek or B.overBanner then B.t = 0 end
+        if B.t >= (B.duration or 6) then B.state, B.t = "out", 0 end
+    elseif st == "out" then
+        if B.peek or B.overBanner then B.state, B.t = "hold", 0; f:SetAlpha(1); return end
+        local p = math.min(1, B.t / BANNER_FADE)
+        f:SetAlpha(1 - p)
+        if p >= 1 then
+            f:Hide(); B.state = nil
+            B.Next()
+        end
+    end
+end
+
+local function present(spec)
+    local f = bannerFrame()
+    applySpec(f, spec)
+    B.duration = spec.duration or 6
+    B.state, B.t = "in", 0
+    f:SetAlpha(0)
+    f:ClearAllPoints(); f:SetPoint("TOP", UIParent, "TOP", 0, BANNER_TOP_Y + 40)
+    f:Show()
+    if spec.sound and PlaySound then PlaySound(spec.sound) end
+end
+
+function B.Next()
+    local nxt = table.remove(B.queue or {}, 1)
+    if nxt then present(nxt) end
+end
+
+-- Announce something. spec = { title, text, icon, textIcon, badges = {tex, tex},
+-- color = {r,g,b}, duration, sound, key, onClick, tooltip(tt) }. A spec with the
+-- same `key` as the one on screen/queued replaces it instead of stacking.
+function B.Show(spec)
+    if type(spec) ~= "table" then return end
+    B.queue = B.queue or {}
+    local f = B.frame
+    local showing = f and f:IsShown() and not B.peek
+    if spec.key then
+        if showing and f.spec and f.spec.key == spec.key then
+            applySpec(f, spec); B.duration = spec.duration or 6
+            if B.state ~= "in" then B.state, B.t = "hold", 0; f:SetAlpha(1) end
+            return
+        end
+        for i, q in ipairs(B.queue) do
+            if q.key == spec.key then B.queue[i] = spec; return end
+        end
+    end
+    if showing or B.peek then
+        if #B.queue < BANNER_QUEUE_MAX then B.queue[#B.queue + 1] = spec end
+        -- Let a long hold end sooner when something else is waiting.
+        if showing and B.state == "hold" then B.duration = math.min(B.duration or 6, 3) end
+        return
+    end
+    present(spec)
+end
+
+-- Top-middle hover strip: resting the mouse there peeks the status banner.
+function B.EnsureHover(provider)
+    B.peekProvider = provider
+    if B.hover then return end
+    local h = CreateFrame("Frame", "AIPBannerHover", UIParent)
+    h:SetSize(360, 6)
+    h:SetPoint("TOP", UIParent, "TOP", 0, 0)
+    h:SetFrameStrata("FULLSCREEN_DIALOG")
+    h:EnableMouse(true)
+    h:SetScript("OnEnter", function()
+        local spec = B.peekProvider and B.peekProvider()
+        if not spec then return end
+        B.peek = true; B.peekAcc = 0
+        local f = bannerFrame()
+        applySpec(f, spec)
+        f:ClearAllPoints(); f:SetPoint("TOP", UIParent, "TOP", 0, BANNER_TOP_Y)
+        f:SetAlpha(1); f:Show()
+        B.state, B.t = "hold", 0
+        B.duration = 1.2     -- lingers briefly after the mouse leaves the strip
+    end)
+    h:SetScript("OnLeave", function()
+        B.peek = false
+    end)
+    B.hover = h
+end
+
+function B.DisableHover()
+    if B.hover then B.hover:Hide() end
+    B.peek = false
+end
+
+function B.EnableHover()
+    if B.hover then B.hover:Show() end
+end
+
+-- ----------------------------------------------------------------------------
+-- VoA portal status, shown through the banner: when its state changes (holder,
+-- battle start/end, VOA listings appearing/clearing) or when the top edge is hovered.
+-- ----------------------------------------------------------------------------
+local function voaSpec(voaCount)
+    local CS = AIP.ChatScanner
+    local st = (CS and CS.GetWGStatus) and CS.GetWGStatus() or {}
+    local title, color, icon
+    if st.owner == "Alliance" then
+        title, color, icon = "|cFF4A9BFFAlliance|r holds Vault of Archavon", { 0.29, 0.6, 1 }, "Interface\\Icons\\INV_BannerPVP_02"
+    elseif st.owner == "Horde" then
+        title, color, icon = "|cFFFF4040Horde|r holds Vault of Archavon", { 1, 0.25, 0.25 }, "Interface\\Icons\\INV_BannerPVP_01"
+    else
+        title, icon = "Vault of Archavon", "Interface\\Icons\\Spell_Nature_Earthquake"
+    end
+    local text
+    if st.active then
+        text = "|cFFFF8000Battle in progress|r - portal closed"
+    elseif st.wait and CS and CS.FormatWGTime then
+        text = "Portal closes in |cFFFFD100" .. CS.FormatWGTime(st.wait) .. "|r"
+    else
+        text = "|cFF999999Wintergrasp timer n/a|r"
+    end
+    local badges
+    if (voaCount or 0) > 0 then
+        title = title .. "  |cFFFFD100- VOA LFM x" .. voaCount .. "|r"
+        badges = { "Interface\\Icons\\INV_Misc_Note_01" }
+    end
+    return {
+        key = "voa", title = title, text = text, icon = icon, color = color, badges = badges,
+        textIcon = "Interface\\Icons\\Spell_Nature_TimeStop",
+        onClick = function() GUI.Toggle() end,
+        tooltip = function(tt)
+            tt:AddLine("Vault of Archavon portal")
+            if st.owner then
+                tt:AddLine("Holder: " .. st.owner .. " (" .. tostring(st.source or "?") .. (st.ownerAge and CS and (", " .. CS.FormatWGTime(st.ownerAge) .. " ago") or "") .. ")", 0.8, 0.8, 0.8)
+            else
+                tt:AddLine("Holder not shown: it is only displayed when it can be proven", 0.6, 0.6, 0.6)
+            end
+            tt:AddLine("|cFFFFFFFFClick:|r Open main window", 0.7, 0.7, 0.7)
+        end,
+    }
+end
+GUI.VoaSpec = voaSpec
+
 function GUI.UpdateVoaBanner(elapsed, voaCount, clock)
     local db = AIP.db
-    local f = GUI.VoaBanner
     local WP = AIP.WindowProfiles
     local bannerOn = db and ((WP and WP.Get) and WP.Get("voaBanner") or (not (WP and WP.Get) and db.voaBanner ~= false))
     if not bannerOn then
-        if f and f:IsShown() then f:Hide() end
+        B.DisableHover()
         return
     end
-    f = f or GUI.CreateVoaBanner()
-    f.acc = (f.acc or 0) + (elapsed or 0)
-    if f.acc >= 0.5 or not f.shownOnce then
-        f.acc = 0
-        f.shownOnce = true
-        if not f:IsShown() then f:Show() end
-        local CS = AIP.ChatScanner
-        local st = (CS and CS.GetWGStatus) and CS.GetWGStatus() or {}
-        -- No proof of the holder -> say nothing about it (a wrong guess is worse)
-        local ownerTxt, r, g, b = nil, 0.4, 0.4, 0.45
-        if st.owner == "Alliance" then
-            ownerTxt, r, g, b = "|cFF4A9BFFAlliance|r holds VoA", 0.29, 0.6, 1
-        elseif st.owner == "Horde" then
-            ownerTxt, r, g, b = "|cFFFF4040Horde|r holds VoA", 1, 0.25, 0.25
-        end
-        local timerTxt
-        if st.active then
-            timerTxt = "|cFFFF8000Battle in progress|r - portal closed"
-        elseif st.wait then
-            timerTxt = "Portal closes in |cFFFFD100" .. CS.FormatWGTime(st.wait) .. "|r"
-        else
-            timerTxt = "|cFF999999Wintergrasp timer n/a|r"
-        end
-        local lines = {}
-        if ownerTxt then lines[#lines + 1] = ownerTxt end
-        lines[#lines + 1] = timerTxt
-        if (voaCount or 0) > 0 then lines[#lines + 1] = "|cFFFFD100VOA LFM x" .. voaCount .. "|r - click" end
-        f.l1:SetText(lines[1] or "")
-        f.l2:SetText(lines[2] or "")
-        f.l3:SetText(lines[3] or "")
-        f.baseColor = { r, g, b }
-        f:SetHeight(#lines >= 3 and 58 or 44)
-        -- Width follows the widest line (the "Battle in progress - portal closed"
-        -- line is wider than any fixed guess and used to spill out of the box).
-        local w = 150
-        for _, fs in ipairs({ f.l1, f.l2, f.l3 }) do w = math.max(w, (fs:GetStringWidth() or 0) + 20) end
-        f:SetWidth(math.ceil(w))
-    end
-    -- Border flashes gold while VOA listings exist, otherwise the holder's colour
-    local c = f.baseColor or { 0.4, 0.4, 0.45 }
-    if (voaCount or 0) > 0 then
-        local s = 0.5 + 0.5 * math.sin((clock or 0) * 5)
-        f:SetBackdropBorderColor(1, 0.55 + 0.3 * s, 0, 0.6 + 0.4 * s)
-    else
-        f:SetBackdropBorderColor(c[1], c[2], c[3], 1)
+    B.voaCount = voaCount or 0
+    B.EnsureHover(function() return voaSpec(B.voaCount) end)
+    B.EnableHover()
+    GUI.voaAcc = (GUI.voaAcc or 0) + (elapsed or 0)
+    if GUI.voaAcc < 0.5 then return end
+    GUI.voaAcc = 0
+    local CS = AIP.ChatScanner
+    local st = (CS and CS.GetWGStatus) and CS.GetWGStatus() or {}
+    local sig = tostring(st.owner) .. "|" .. tostring(st.active and true or false) .. "|" .. ((voaCount or 0) > 0 and "L" or "-")
+    if GUI.voaSig == nil then GUI.voaSig = sig; return end     -- first read is a baseline, not a change
+    if sig ~= GUI.voaSig then
+        GUI.voaSig = sig
+        B.Show(voaSpec(voaCount))
     end
 end
 

@@ -47,7 +47,8 @@ local defaults = {
     chatScanEnabled = true,         -- Persisted enable for the LFM/LFG browser scanner
     cacheDuration = 15,             -- Minutes to keep scanned LFM/LFG entries (drives scanner prune)
     voaAlert = true,                -- Pulse the minimap icon when VOA listings are available
-    voaBanner = true,               -- Always-on banner under the minimap: VoA portal timer + owner + listing count
+    mechanicBanner = true,          -- Personal mechanic / duty call-outs as a top-of-screen banner
+    voaBanner = true,               -- VoA portal status banner (on state change, or hover the top screen edge)
     voaSound = true,                -- Raid-warning sound when a VOA listing first appears
     wgOwner = "",                   -- Last known Wintergrasp holder ("Alliance"/"Horde"), learned from battle-end messages
     wgOwnerTime = 0,                -- time() when wgOwner was recorded
@@ -1577,6 +1578,14 @@ local function SlashHandler(msg)
             if WP and WP.Set then WP.Set("voaBanner", on) else AIP.db.voaBanner = on end
             if WP and WP.Refresh then WP.Refresh() end
             Print("VoA banner: " .. (on and "ON" or "OFF"))
+        elseif sub == "preview" then
+            -- Show the status banner now, then a sample mechanic call-out behind it.
+            if AIP.Banner and AIP.CentralGUI and AIP.CentralGUI.VoaSpec then
+                AIP.Banner.Show(AIP.CentralGUI.VoaSpec(AIP.CentralGUI.voaCountCache or 0))
+                if AIP.RaidTools and AIP.RaidTools.ShowBanner then
+                    AIP.RaidTools.ShowBanner("Mirrored Soul", "Stop damaging the tank!", nil, nil, "preview")
+                end
+            end
         elseif sub == "sound" then
             AIP.db.voaSound = not (AIP.db.voaSound ~= false)
             Print("VoA alert sound: " .. (AIP.db.voaSound and "ON" or "OFF"))
