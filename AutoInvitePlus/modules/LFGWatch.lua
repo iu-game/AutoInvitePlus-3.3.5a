@@ -853,20 +853,34 @@ function LW.UpdateWidget()
         f.line3:SetText(dl and ("|cffff5555Deserter: " .. mmss(dl) .. "|r") or "")
 
         -- Party composition: one portrait per member by assigned role, empty slots dimmed.
-        local counts = { TANK = 0, HEALER = 0, DAMAGER = 0 }
+        -- A member's role is only drawn when the game actually reports it; otherwise
+        -- the portrait falls back to the member's class icon, never a guessed role.
+        local members = {}
         local units = { "player", "party1", "party2", "party3", "party4" }
         for _, u in ipairs(units) do
             if UnitExists and UnitExists(u) then
                 local r = UnitGroupRolesAssigned and UnitGroupRolesAssigned(u)
-                if r ~= "TANK" and r ~= "HEALER" then r = "DAMAGER" end
-                counts[r] = counts[r] + 1
+                if r ~= "TANK" and r ~= "HEALER" and r ~= "DAMAGER" then r = nil end
+                local _, class = UnitClass(u)
+                members[#members + 1] = { role = r, class = class }
             end
         end
-        local order = {}
-        for _, role in ipairs(ROLE_ORDER) do for _ = 1, counts[role] do order[#order + 1] = role end end
+        local rank = { TANK = 1, HEALER = 2, DAMAGER = 3 }
+        table.sort(members, function(a, b)
+            local ra, rb = a.role and rank[a.role] or 4, b.role and rank[b.role] or 4
+            return ra < rb
+        end)
         for i, t in ipairs(f.slots) do
-            if order[i] then setRole(t, order[i]); fillSlot(t, true)
-            else setRole(t, "DAMAGER"); fillSlot(t, false) end
+            local m = members[i]
+            if m and m.role then
+                setRole(t, m.role); fillSlot(t, true)
+            elseif m and m.class and CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[m.class] then
+                local c = CLASS_ICON_TCOORDS[m.class]
+                t:SetTexture("Interface\\WorldStateFrame\\Icons-Classes")
+                t:SetTexCoord(c[1], c[2], c[3], c[4]); fillSlot(t, true)
+            else
+                setRole(t, "DAMAGER"); fillSlot(t, false)
+            end
         end
 
         f.requeueBtn:Enable(); f.leaveBtn:Enable()
