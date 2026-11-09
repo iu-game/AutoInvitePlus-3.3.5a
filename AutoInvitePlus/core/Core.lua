@@ -1449,6 +1449,8 @@ local function SlashHandler(msg)
             local sub = rest and rest:lower()
             if sub == "status" or sub == "info" then
                 AIP.LFGWatch.Print()
+            elseif sub == "roles" then
+                AIP.LFGWatch.PrintRoles()
             elseif sub == "share" then
                 AIP.db.lfgShare = not AIP.db.lfgShare
                 if AIP.db.lfgShare and AIP.LFGWatch.BroadcastMine then AIP.LFGWatch.BroadcastMine() end

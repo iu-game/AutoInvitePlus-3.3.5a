@@ -289,6 +289,20 @@ function LW.InferRole(unit, class)
     return nil
 end
 
+-- /aip rdf roles: show where each party member's role comes from.
+function LW.PrintRoles()
+    local Comp = AIP.Composition
+    for _, u in ipairs({ "player", "party1", "party2", "party3", "party4" }) do
+        if UnitExists(u) then
+            local _, class = UnitClass(u)
+            local spec = Comp and Comp.GetSpecName and Comp.GetSpecName(u)
+            AIP.Print(string.format("%s %s: game=%s spec=%s inferred=%s", u, tostring(UnitName(u)),
+                tostring(UnitGroupRolesAssigned and UnitGroupRolesAssigned(u)), tostring(spec),
+                tostring(LW.InferRole(u, class))))
+        end
+    end
+end
+
 local function fmtLong(s)
     s = math.floor(tonumber(s) or 0)
     if s < 60 then return s .. " Sec" end
