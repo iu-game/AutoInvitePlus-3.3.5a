@@ -289,6 +289,16 @@ function LW.InferRole(unit, class)
     return nil
 end
 
+-- Role the game assigned a unit in the Dungeon Finder. 3.3.5a returns three
+-- booleans (isTank, isHealer, isDamage); later clients return a role string.
+function LW.AssignedRole(unit)
+    if not UnitGroupRolesAssigned then return nil end
+    local tk, hl, dp = UnitGroupRolesAssigned(unit)
+    if tk == "TANK" or tk == "HEALER" or tk == "DAMAGER" then return tk end
+    if tk then return "TANK" elseif hl then return "HEALER" elseif dp then return "DAMAGER" end
+    return nil
+end
+
 -- /aip rdf roles: show where each party member's role comes from.
 function LW.PrintRoles()
     local Comp = AIP.Composition
@@ -297,7 +307,7 @@ function LW.PrintRoles()
             local _, class = UnitClass(u)
             local spec = Comp and Comp.GetSpecName and Comp.GetSpecName(u)
             AIP.Print(string.format("%s %s: game=%s spec=%s inferred=%s", u, tostring(UnitName(u)),
-                tostring(UnitGroupRolesAssigned and UnitGroupRolesAssigned(u)), tostring(spec),
+                tostring(LW.AssignedRole(u)), tostring(spec),
                 tostring(LW.InferRole(u, class))))
         end
     end
@@ -915,8 +925,7 @@ function LW.UpdateWidget()
         local units = { "player", "party1", "party2", "party3", "party4" }
         for _, u in ipairs(units) do
             if UnitExists and UnitExists(u) then
-                local r = UnitGroupRolesAssigned and UnitGroupRolesAssigned(u)
-                if r ~= "TANK" and r ~= "HEALER" and r ~= "DAMAGER" then r = nil end
+                local r = LW.AssignedRole(u)
                 if not r and u == "player" and GetLFGRoles then
                     -- Own role: the single role chosen in the Dungeon Finder.
                     local _, tk, hl, dp = GetLFGRoles()
