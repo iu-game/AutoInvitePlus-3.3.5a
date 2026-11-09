@@ -251,6 +251,7 @@ local ROLE_COORDS = {
 }
 local SLOT_ROLES = { "TANK", "HEALER", "DAMAGER", "DAMAGER", "DAMAGER" }
 local SLOT_SIZE, SLOT_GAP = 34, 6
+local BADGE_SIZE = 16
 
 local function setRole(tex, role)
     local c = ROLE_COORDS[role]
@@ -518,6 +519,13 @@ function LW.CreateWidget()
         t:SetPoint("TOPLEFT", f, "TOP", -total / 2 + (i - 1) * (SLOT_SIZE + SLOT_GAP), -40)
         setRole(t, role); fillSlot(t, false)
         f.slots[i] = t
+        -- Small Dungeon Finder role badge on the portrait's top-left corner.
+        local b = f:CreateTexture(nil, "OVERLAY")
+        b:SetSize(BADGE_SIZE, BADGE_SIZE)
+        b:SetPoint("CENTER", t, "TOPLEFT", 3, -3)
+        b:Hide()
+        f.slotBadges = f.slotBadges or {}
+        f.slotBadges[i] = b
     end
 
     f.line1 = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")   -- Average Wait Time
@@ -797,7 +805,10 @@ function LW.UpdateWidget()
         local names = {}
         for _, d in ipairs(s.dungeons) do names[#names + 1] = d.name end
         layoutWidget(f, true)
-        for i, t in ipairs(f.slots) do setRole(t, SLOT_ROLES[i]) end
+        for i, t in ipairs(f.slots) do
+            setRole(t, SLOT_ROLES[i])
+            if f.slotBadges and f.slotBadges[i] then f.slotBadges[i]:Hide() end
+        end
         f.title:SetText(s.submode == "empowered" and "|cff55ff55Next up!|r Assembling Group..." or "Assembling Group...")
         local what = (#names > 0 and (names[1] .. (#names > 1 and (" +" .. (#names - 1)) or ""))) or (st and st.instanceName) or ""
         f.sub:SetText(s.mode == "suspended" and "(paused - you hold a group invite)" or what)
@@ -861,6 +872,12 @@ function LW.UpdateWidget()
             if UnitExists and UnitExists(u) then
                 local r = UnitGroupRolesAssigned and UnitGroupRolesAssigned(u)
                 if r ~= "TANK" and r ~= "HEALER" and r ~= "DAMAGER" then r = nil end
+                if not r and u == "player" and GetLFGRoles then
+                    -- Own role: the single role chosen in the Dungeon Finder.
+                    local _, tk, hl, dp = GetLFGRoles()
+                    local n = (tk and 1 or 0) + (hl and 1 or 0) + (dp and 1 or 0)
+                    if n == 1 then r = tk and "TANK" or (hl and "HEALER" or "DAMAGER") end
+                end
                 local _, class = UnitClass(u)
                 members[#members + 1] = { role = r, class = class }
             end
@@ -872,14 +889,18 @@ function LW.UpdateWidget()
         end)
         for i, t in ipairs(f.slots) do
             local m = members[i]
-            if m and m.role then
-                setRole(t, m.role); fillSlot(t, true)
-            elseif m and m.class and CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[m.class] then
+            local badge = f.slotBadges and f.slotBadges[i]
+            if m and m.class and CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[m.class] then
                 local c = CLASS_ICON_TCOORDS[m.class]
                 t:SetTexture("Interface\\WorldStateFrame\\Icons-Classes")
                 t:SetTexCoord(c[1], c[2], c[3], c[4]); fillSlot(t, true)
+            elseif m and m.role then
+                setRole(t, m.role); fillSlot(t, true)
             else
                 setRole(t, "DAMAGER"); fillSlot(t, false)
+            end
+            if badge then
+                if m and m.role then setRole(badge, m.role); badge:Show() else badge:Hide() end
             end
         end
 
