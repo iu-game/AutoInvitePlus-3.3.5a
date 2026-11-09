@@ -258,6 +258,37 @@ local function setRole(tex, role)
     tex:SetTexture(ROLE_TEX); tex:SetTexCoord(c[1], c[2], c[3], c[4])
 end
 
+-- Classes that can only ever fill the damage role on 3.3.5a.
+local DPS_ONLY = { MAGE = true, ROGUE = true, HUNTER = true, WARLOCK = true }
+-- Spec name -> role for the specs that are unambiguous (Blood / Feral can tank or DPS).
+local SPEC_ROLE = {
+    Protection = "TANK",
+    Holy = "HEALER", Discipline = "HEALER", Restoration = "HEALER",
+    Arms = "DAMAGER", Fury = "DAMAGER", Retribution = "DAMAGER", Shadow = "DAMAGER",
+    Elemental = "DAMAGER", Enhancement = "DAMAGER", Balance = "DAMAGER", Frost = "DAMAGER",
+    Unholy = "DAMAGER", ["Beast Mastery"] = "DAMAGER",
+}
+
+-- Best-effort role for a party member when the game doesn't report one: the
+-- single-role class, then the (cached) inspected spec; unresolved members get an
+-- inspect request so a later refresh can fill them in. Returns nil when unsure.
+function LW.InferRole(unit, class)
+    if class and DPS_ONLY[class] then return "DAMAGER" end
+    local Comp = AIP.Composition
+    if not (Comp and Comp.GetSpecName) then return nil end
+    local spec = Comp.GetSpecName(unit)
+    if spec then
+        if class == "DEATHKNIGHT" or class == "DRUID" then
+            -- Blood/Feral can be either role; Frost/Unholy and Balance/Resto cannot.
+            if spec == "Blood" or spec == "Feral Combat" then return nil end
+            if class == "DRUID" then return spec == "Restoration" and "HEALER" or "DAMAGER" end
+        end
+        return SPEC_ROLE[spec]
+    end
+    if Comp.RequestInspect and not UnitIsUnit(unit, "player") then Comp.RequestInspect(unit) end
+    return nil
+end
+
 local function fmtLong(s)
     s = math.floor(tonumber(s) or 0)
     if s < 60 then return s .. " Sec" end
@@ -879,6 +910,7 @@ function LW.UpdateWidget()
                     if n == 1 then r = tk and "TANK" or (hl and "HEALER" or "DAMAGER") end
                 end
                 local _, class = UnitClass(u)
+                if not r then r = LW.InferRole(u, class) end
                 members[#members + 1] = { role = r, class = class }
             end
         end
